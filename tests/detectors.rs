@@ -112,6 +112,52 @@ fn email_apostrophe_stays_inside_the_address() {
 }
 
 #[test]
+fn email_with_a_non_ascii_letter_stays_one_address() {
+    for email in [
+        "josé@example.com",
+        "marie.josé@example.com",
+        "user@société.fr",
+        "Élise.O'Brien@Société.FR",
+        "jose\u{0301}@example.com",
+        "user@socie\u{0301}te.fr",
+        "user@example.com\u{0301}",
+    ] {
+        let (vault, out, audit) = shield(email);
+        assert_eq!(audit.email, 1, "{email} -> {out}");
+        assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+        assert!(!out.contains('@'), "{email} -> {out}");
+        assert!(
+            !out.contains('é') && !out.contains('É') && !out.contains('\u{0301}'),
+            "{email} -> {out}"
+        );
+        assert_eq!(vault.restore_write(&out).unwrap(), email);
+    }
+
+    let sentence = "écrire à josé@example.com aujourd'hui";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.starts_with("écrire à h1_email_"), "{out}");
+    assert!(out.ends_with(" aujourd'hui"), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert!(!out.contains("josé"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let raw = r#"{"to":"josé@example.com"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert!(!out.contains("josé"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in ["josé habite ici", "josé@home", "marie.josé wrote"] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn prose_name_is_not_a_hit() {
     let (_vault, out, audit) = shield("Marie lives in Montreal");
     assert_eq!(out, "Marie lives in Montreal");
