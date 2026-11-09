@@ -1050,6 +1050,53 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
 }
 
 #[test]
+fn slash_between_card_groups_still_shields_the_number() {
+    for slashed in [
+        "4111/1111/1111/1111",
+        "3782/8224/6310/005",
+        "3056/930902/5904",
+        "4111 / 1111 / 1111 / 1111",
+    ] {
+        let (vault, out, audit) = shield(slashed);
+        assert_eq!(audit.card, 1, "{slashed} -> {out}");
+        assert_eq!(audit.phone, 0, "{slashed} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{slashed} -> {out}");
+        assert!(!out.contains('/'), "{slashed} -> {out}");
+        for group in slashed.split(|ch: char| !ch.is_ascii_digit()) {
+            if group.len() >= 4 {
+                assert!(hidden(&out, group), "{slashed} -> {out}");
+            }
+        }
+        assert_eq!(vault.restore_write(&out).unwrap(), slashed);
+    }
+    let sentence = "pay visa 4111/1111/1111/1111 today.";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.card, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("pay visa h1_card_"), "{out}");
+    assert!(out.ends_with(" today."), "{out}");
+    assert!(hidden(&out, "4111"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let raw = r#"{"visa":"4111/1111/1111/1111"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.card, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "4111"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        "4111/1111/1111/1112",
+        "4111/1111/1111/11111",
+        "SIN 130/692/544",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn nineteen_digit_card_grouped_in_fours_round_trips() {
     // Both pass Luhn. `pan`'s first 16 digits also pass, so a shorter
     // match would leave the last group in the clear. `other`'s first 16
