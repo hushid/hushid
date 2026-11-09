@@ -372,7 +372,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
     push_assignment_secrets(text, out);
 }
 
-const SECRET_RUN: &str = r"[A-Za-z0-9+/=_\-]{16,}";
+// At least 16 token characters. A dot may sit between pieces
+// (`abcdefghijklmnop.QRSTUVWXYZ123456`). Leaving that dot out masks
+// the head and sends the tail. A dot with nothing after it stays
+// outside the value, so a sentence period stays.
+const SECRET_RUN: &str =
+    r"(?:[A-Za-z0-9+/=_\-]+\.)*[A-Za-z0-9+/=_\-]{16,}(?:\.[A-Za-z0-9+/=_\-]+)*";
 
 /// `api_key`, `secret_key`, `access_token`, and `auth_token`.
 ///
