@@ -320,7 +320,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // does not see it either. Leaving the shape out sends the payload.
             r"\bghs_[0-9]+_[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
             r"\bghr_[A-Za-z0-9]{36}\b",
-            r"\bglpat-[A-Za-z0-9_\-]{20,}\b",
+            // A routable token is `glpat-`, a payload of at least 27
+            // characters, and a dot tail. The tail is 9 characters, or a
+            // 2-character version, a second dot, and that same tail. The
+            // payload class stops at the dot, so the tail stays in the
+            // clear. A 20-character token has no tail. A following word
+            // stays outside it.
+            r"\bglpat-(?:[A-Za-z0-9_\-]{27,}(?:\.[0-9a-z]{2}\.[0-9a-z]{9}|\.[0-9a-z]{9})|[A-Za-z0-9_\-]{20,})\b",
             r"\bxox[baprs]-[0-9A-Za-z-]{10,}",
             r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{10,}\b",
             r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}\b",

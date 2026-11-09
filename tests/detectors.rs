@@ -2509,6 +2509,120 @@ fn github_app_installation_token_is_masked() {
 }
 
 #[test]
+fn gitlab_routable_access_token_is_masked() {
+    // `glpat-` plus 20 letters is already a secret. A routable token is
+    // that same prefix, a payload of at least 27 characters, a dot, and
+    // a 9-character tail. A versioned token puts a 2-character version
+    // and a second dot in front of that tail. The payload rule stops at
+    // the first dot, so the tail stays in the clear.
+    let routable = format!("glpat-{}.aaaaaaaaa", "a".repeat(27));
+    let versioned = format!("glpat-{}.01.bbbbbbbbb", "b".repeat(27));
+    let mixed = format!(
+        "glpat-{}-{}_{}-{}_{}-{}.{}",
+        "aaaa", "bbbb", "cccc", "dddd", "eeee", "fff", "ccccccccc"
+    );
+    let classic = format!("glpat-{}", "d".repeat(20));
+    for token in [&routable, &versioned, &mixed, &classic] {
+        let (vault, out, audit) = shield(token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, "aaaaaaaaa"), "{token} -> {out}");
+        assert!(hidden(&out, "bbbbbbbbb"), "{token} -> {out}");
+        assert!(hidden(&out, "ccccccccc"), "{token} -> {out}");
+        assert!(hidden(&out, &"a".repeat(27)), "{token} -> {out}");
+        assert!(hidden(&out, "bbbb_cccc"), "{token} -> {out}");
+        assert!(hidden(&out, &"d".repeat(20)), "{token} -> {out}");
+        assert!(!out.contains('.'), "{token} -> {out}");
+        assert!(!out.contains('-'), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token} -> {out}");
+    }
+
+    for text in [
+        format!("export GITLAB_TOKEN={routable} please"),
+        format!("see {versioned}."),
+        format!("see {routable}, next"),
+        format!("use {mixed} now"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(hidden(&out, "aaaaaaaaa"), "{text} -> {out}");
+        assert!(hidden(&out, "bbbbbbbbb"), "{text} -> {out}");
+        assert!(hidden(&out, "ccccccccc"), "{text} -> {out}");
+        assert!(hidden(&out, "bbbb_cccc"), "{text} -> {out}");
+        assert!(!vault.holds_surface(routable.as_bytes()), "{text}");
+        assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+    }
+
+    let exported = format!("export GITLAB_TOKEN={routable} please");
+    let (_vault, out, _) = shield(&exported);
+    assert_eq!(
+        out, "export GITLAB_TOKEN=h1_secret please",
+        "{exported} -> {out}"
+    );
+
+    let dotted = format!("see {versioned}.");
+    let (_vault, out, _) = shield(&dotted);
+    assert_eq!(out, "see h1_secret.", "{dotted} -> {out}");
+
+    let comma = format!("see {routable}, next");
+    let (_vault, out, _) = shield(&comma);
+    assert_eq!(out, "see h1_secret, next", "{comma} -> {out}");
+
+    let paired = format!("{routable} {classic}");
+    let (vault, out, audit) = shield(&paired);
+    assert_eq!(audit.secret, 2, "{paired} -> {out}");
+    assert_eq!(out, "h1_secret h1_secret");
+    assert!(!vault.holds_surface(routable.as_bytes()));
+    assert!(!vault.holds_surface(classic.as_bytes()));
+
+    let minimum = format!("glpat-{}.0r03gxo7s", "a".repeat(27));
+    let (vault, out, audit) = shield(&minimum);
+    assert_eq!(audit.secret, 1, "{minimum} -> {out}");
+    assert_eq!(out, "h1_secret");
+    assert!(hidden(&out, "0r03gxo7s"), "{out}");
+    assert!(!vault.holds_surface(minimum.as_bytes()));
+
+    let word_after_classic = format!("{classic}.something");
+    let (vault, out, audit) = shield(&word_after_classic);
+    assert_eq!(audit.secret, 1, "{word_after_classic} -> {out}");
+    assert_eq!(out, "h1_secret.something", "{word_after_classic} -> {out}");
+    assert!(hidden(&out, &"d".repeat(20)), "{out}");
+    assert!(out.ends_with(".something"), "{out}");
+    assert!(!vault.holds_surface(classic.as_bytes()));
+
+    for bare in [
+        format!("glpat-{}", "a".repeat(19)),
+        format!("xglpat-{}", "a".repeat(20)),
+        format!("x{routable}"),
+        "glpat-short".to_string(),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+
+    let raw = format!(r#"{{"token":"{routable}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "aaaaaaaaa"), "{out}");
+    assert!(!vault.holds_surface(routable.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let nested = format!(r#"{{"note":"use {versioned} today"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &nested).unwrap();
+    assert_eq!(audit.secret, 1, "{nested} -> {out}");
+    assert_eq!(out, r#"{"note":"use h1_secret today"}"#);
+    assert!(hidden(&out, "bbbbbbbbb"), "{out}");
+    assert!(!out.contains("01"), "{out}");
+    assert!(!vault.holds_surface(versioned.as_bytes()));
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
