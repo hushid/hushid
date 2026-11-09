@@ -2958,6 +2958,72 @@ fn slack_workflow_token_is_masked() {
 }
 
 #[test]
+fn stripe_ephemeral_key_is_masked() {
+    // `sk_test_` plus 10 letters is already a secret. An ephemeral key
+    // is `ek_test_` or `ek_live_`. The published secret is a body of 71,
+    // 76, 86, or 92 letters, an underscore, and 10 more letters. The
+    // `sk_` rule stops at that underscore, so the secret stays in the
+    // clear. A shorter key is letters only, at least 10, like `sk_live_`.
+    let tail = "b".repeat(10);
+    for mode in ["test", "live"] {
+        for n in [71, 76, 86, 92] {
+            let body = "A".repeat(n);
+            let token = format!("ek_{mode}_{body}_{tail}");
+            let (vault, out, audit) = shield(&token);
+            assert_eq!(audit.secret, 1, "{token} -> {out}");
+            assert_eq!(out, "h1_secret", "{token} -> {out}");
+            assert!(hidden(&out, "ek_"), "{token} -> {out}");
+            assert!(hidden(&out, &body), "{token} -> {out}");
+            assert!(hidden(&out, &tail), "{token} -> {out}");
+            assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+            assert!(vault.restore_write(&out).is_err(), "{token}");
+        }
+    }
+
+    let short = format!("ek_test_{}", "d".repeat(10));
+    let (vault, out, audit) = shield(&format!("see {short} please"));
+    assert_eq!(audit.secret, 1, "{short} -> {out}");
+    assert_eq!(out, "see h1_secret please");
+    assert!(hidden(&out, "ek_test"), "{out}");
+    assert!(hidden(&out, &"d".repeat(10)), "{out}");
+    assert!(!vault.holds_surface(short.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let shaped = format!("ek_live_{}_{}", "C".repeat(71), tail);
+    let (vault, out, audit) = shield(&format!("see {shaped}.next"));
+    assert_eq!(audit.secret, 1, "{shaped} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{shaped} -> {out}");
+    assert!(hidden(&out, "ek_live"), "{out}");
+    assert!(hidden(&out, &"C".repeat(71)), "{out}");
+    assert!(hidden(&out, &tail), "{out}");
+    assert!(!vault.holds_surface(shaped.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"secret":"{shaped}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"secret":"h1_secret"}"#);
+    assert!(hidden(&out, &tail), "{out}");
+    assert!(!vault.holds_surface(shaped.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("ek_test_{}", "d".repeat(9)),
+        format!("wordek_test_{}", "d".repeat(10)),
+        format!("ek_prod_{}", "d".repeat(10)),
+        format!("ek_test_{}_{}", "F".repeat(70), "g".repeat(10)),
+        format!("ek_test_{}_{}", "H".repeat(71), "i".repeat(9)),
+        format!("ek_test_{}_{}", "p".repeat(10), "q".repeat(10)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn secret_access_key_assignment_is_masked() {
     let secret = "a".repeat(16);
     for text in [
