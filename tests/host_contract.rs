@@ -45,13 +45,61 @@ fn json_strings_are_shielded_and_numbers_stay() {
 }
 
 #[test]
-fn json_key_token_fails_a_write() {
+fn json_key_token_restores_and_a_mangled_key_fails() {
     let mut vault = Vault::new();
     let token = vault
         .issue_payload(Kind::Email, "AAAAAAAA", b"a@b.co")
         .unwrap();
     let input = format!(r#"{{"{token}":"ok"}}"#);
-    assert!(restore_json_write(&vault, &input).is_err());
+    let restored = restore_json_write(&vault, &input).unwrap();
+    assert!(restored.contains("a@b.co"), "{restored}");
+    assert!(restore_json_write(&vault, r#"{"h1_nope":"ok"}"#).is_err());
+}
+
+#[test]
+fn json_number_sin_and_nested_document_round_trip() {
+    let sin = luhn_sin("13069254");
+    let input = format!(r#"{{"sin":{sin}}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+    assert_eq!(audit.sin, 1, "{out}");
+    assert!(out.contains("h1_sin_"), "{out}");
+    assert!(!out.contains(&sin), "{out}");
+    let restored = restore_json_write(&vault, &out).unwrap();
+    assert_eq!(restored, input);
+
+    let bare = format!(r#"{{"n":{sin}}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &bare).unwrap();
+    assert_eq!(audit.sin, 0, "{out}");
+    assert_eq!(out, bare);
+
+    let nested = r#"{"note":"{\"email\":\"a@b.co\"}"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), nested).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains("a@b.co"), "{out}");
+    let restored = restore_json_write(&vault, &out).unwrap();
+    assert!(restored.contains("a@b.co"), "{restored}");
+    assert!(!restored.contains("h1_"), "{restored}");
+}
+
+fn luhn_sin(body: &str) -> String {
+    let mut sum = 0;
+    let mut double = true;
+    for ch in body.chars().rev() {
+        let mut value = ch.to_digit(10).unwrap();
+        if double {
+            value *= 2;
+            if value > 9 {
+                value -= 9;
+            }
+        }
+        sum += value;
+        double = !double;
+    }
+    let digit = (10 - (sum % 10)) % 10;
+    format!("{body}{}", char::from_digit(digit, 10).unwrap())
 }
 
 #[test]

@@ -6,6 +6,7 @@
 //! The check character is the sum of the kind's UTF-8 bytes and the eight
 //! payload values, modulo 32. A one-symbol change always changes that sum.
 //! Restore accepts a token only when the check matches and this vault issued it.
+//! grok-4.7 copied this shape unchanged through Bline on 2026-11-09.
 
 use std::fmt;
 

@@ -94,7 +94,7 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
 fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     static NANP: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            r"(?:\+1[\s.\-]|1[\s.\-])?(?:\(\d{3}\)[\s.\-]\d{3}[\s.\-]\d{4}|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})",
+            r"(?:\+1[\s.\-]|1[\s.\-])?(?:\(\d{3}\)[\s.\-]?\d{3}[\s.\-]\d{4}|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})",
         )
         .expect("nanp pattern")
     });
