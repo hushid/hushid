@@ -191,8 +191,10 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         // 16-digit card plus a three-digit tail, fail Luhn, and skip
         // the card. The separator is a run of whitespace, dots, or hyphen
         // marks (`4111 - 1111 - 1111 - 1111`, a figure dash, an en dash,
-        // a minus sign, or a soft hyphen). Four, four, five is the
-        // 13-digit grouping.
+        // a minus sign, or a soft hyphen). A slash is that separator
+        // too. A phone already treats it as one. Leaving it out sends
+        // `4111/1111/1111/1111`. Four, four, five is the 13-digit
+        // grouping.
         [
             r"\d{4}(?:{sep}+\d{4}){3}{sep}+\d{3}",
             r"\d{6}{sep}+\d{13}",
@@ -204,7 +206,7 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         ]
         .into_iter()
         .map(|pattern| {
-            Regex::new(&pattern.replace("{sep}", &hyphen_class(r"\s.")))
+            Regex::new(&pattern.replace("{sep}", &hyphen_class(r"\s./")))
                 .expect("grouped card pattern")
         })
         .collect()
