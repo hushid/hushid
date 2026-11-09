@@ -1373,6 +1373,149 @@ fn sin_needs_a_cue_within_forty_characters() {
 }
 
 #[test]
+fn dots_between_sin_groups_still_shield_the_number() {
+    // `SIN 130 692 544` is already a SIN, and so is `130 - 692 - 544`.
+    // Dots between those groups are that same number. A card and a phone
+    // already treat a dot as a separator. Leaving the dot out sends the
+    // digits. A slash is not this separator, and a trailing period stays.
+    let sin = valid_sin();
+    let dotted = format!("{}.{}.{}", &sin[..3], &sin[3..6], &sin[6..]);
+    let spaced_dots = format!("{} . {} . {}", &sin[..3], &sin[3..6], &sin[6..]);
+    let mixed = format!("{}.{}-{}", &sin[..3], &sin[3..6], &sin[6..]);
+    for text in [
+        format!("SIN {dotted}"),
+        format!("NAS {dotted}"),
+        format!("social insurance {dotted}"),
+        format!("numéro d'assurance sociale {dotted}"),
+        format!("numero d'assurance sociale {spaced_dots}"),
+        format!("SIN {mixed}"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.sin, 1, "{text} -> {out}");
+        assert_eq!(audit.phone, 0, "{text} -> {out}");
+        assert_eq!(audit.card, 0, "{text} -> {out}");
+        assert!(out.contains("h1_sin_"), "{text} -> {out}");
+        assert!(hidden(&out, &sin), "{text} -> {out}");
+        assert!(hidden(&out, &sin[..3]), "{text} -> {out}");
+        assert!(hidden(&out, &sin[3..6]), "{text} -> {out}");
+        assert!(hidden(&out, &sin[6..]), "{text} -> {out}");
+        assert!(!out.contains(&dotted), "{text} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), text);
+    }
+
+    let sentence = format!("the SIN is {dotted} today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.sin, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("the SIN is h1_sin_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert!(!out.contains('.'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let ended = format!("see SIN {dotted}.");
+    let (vault, out, audit) = shield(&ended);
+    assert_eq!(audit.sin, 1, "{ended} -> {out}");
+    assert!(out.starts_with("see SIN h1_sin_"), "{ended} -> {out}");
+    assert!(out.ends_with('.'), "{ended} -> {out}");
+    assert_eq!(
+        out.len(),
+        "see SIN h1_sin_".len() + 9 + 1,
+        "{ended} -> {out}"
+    );
+    assert_eq!(out.matches('.').count(), 1, "{ended} -> {out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), ended);
+
+    let pair = format!(
+        "SIN {dotted} and NAS {} {} {}",
+        &sin[..3],
+        &sin[3..6],
+        &sin[6..]
+    );
+    let (vault, out, audit) = shield(&pair);
+    assert_eq!(audit.sin, 2, "{pair} -> {out}");
+    assert!(out.starts_with("SIN h1_sin_"), "{out}");
+    assert!(out.contains(" and NAS h1_sin_"), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert!(!out.contains('.'), "{out}");
+    assert_eq!(out.matches("h1_sin_").count(), 2, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    let mut bad_digits = sin.clone();
+    let last = bad_digits.pop().unwrap();
+    bad_digits.push(if last == '9' {
+        '0'
+    } else {
+        (last as u8 + 1) as char
+    });
+    let bad = format!(
+        "SIN {}.{}.{}",
+        &bad_digits[..3],
+        &bad_digits[3..6],
+        &bad_digits[6..]
+    );
+    // Two extra digits are not a 3-3-4 phone and not a 9-digit SIN.
+    let glued = format!("SIN {dotted}91");
+    let leading = format!("SIN 9{dotted}");
+    let one_dot = format!("SIN {}.{}", &sin[..3], &sin[3..]);
+    let slashed = format!("SIN {}/{}/{}", &sin[..3], &sin[3..6], &sin[6..]);
+    for bare in [
+        dotted.clone(),
+        format!("call {dotted} today"),
+        bad,
+        glued,
+        leading,
+        one_dot,
+        slashed,
+        format!("SIN {}.{}.{}", &sin[..3], &sin[3..5], &sin[5..]),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+
+    // One extra digit is ten digits in a 3-3-4 shape, so it is a phone.
+    // The digits still do not stay.
+    let ten = format!("SIN {dotted}1");
+    let (vault, out, audit) = shield(&ten);
+    assert_eq!(audit.phone, 1, "{ten} -> {out}");
+    assert_eq!(audit.sin, 0, "{ten} -> {out}");
+    assert!(out.starts_with("SIN h1_phone_"), "{ten} -> {out}");
+    assert!(hidden(&out, &sin), "{ten} -> {out}");
+    assert!(hidden(&out, &format!("{}1", &sin[6..])), "{ten} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), ten);
+
+    let phone = "415.555.0134";
+    let (vault, out, audit) = shield(phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert_eq!(audit.sin, 0, "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let card = "4111.1111.1111.1111";
+    let (vault, out, audit) = shield(card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert_eq!(audit.sin, 0, "{card} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let raw = format!(r#"{{"nas":"{dotted}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.sin, 1, "{raw} -> {out}");
+    assert!(hidden(&out, &sin), "{raw} -> {out}");
+    assert!(!out.contains(&dotted), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let nested = format!(r#"{{"note":"SIN {dotted} today"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &nested).unwrap();
+    assert_eq!(audit.sin, 1, "{nested} -> {out}");
+    assert!(hidden(&out, &sin), "{nested} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), nested);
+}
+
+#[test]
 fn whitespace_inside_a_cue_still_shields_the_number() {
     // `SIN 130692544` and `social insurance 130692544` are already SINs.
     // A non-breaking space, a thin space, or a tab between the cue words
