@@ -2911,6 +2911,53 @@ fn slack_session_tokens_are_masked() {
 }
 
 #[test]
+fn slack_workflow_token_is_masked() {
+    let tail = "2468135790";
+    let token = format!("xwfp-{tail}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "xwfp"), "{token} -> {out}");
+    assert!(hidden(&out, tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let head = "24681357901";
+    let mid = "13579246801";
+    let last = "abcdef2468135790";
+    let shaped = format!("xwfp-{head}-{mid}-{last}");
+    let (vault, out, audit) = shield(&format!("see {shaped}.next"));
+    assert_eq!(audit.secret, 1, "{shaped} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{shaped} -> {out}");
+    assert!(hidden(&out, head), "{out}");
+    assert!(hidden(&out, mid), "{out}");
+    assert!(hidden(&out, "2468135790"), "{out}");
+    assert!(!vault.holds_surface(shaped.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{shaped}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, head), "{out}");
+    assert!(hidden(&out, "2468135790"), "{out}");
+    assert!(!vault.holds_surface(shaped.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("xwfp-{}", "246813579"),
+        format!("xwfp-{}", "a".repeat(9)),
+        format!("wordxwfp-{tail}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn secret_access_key_assignment_is_masked() {
     let secret = "a".repeat(16);
     for text in [
