@@ -3390,20 +3390,25 @@ fn stripe_organization_key_is_masked() {
 
 #[test]
 fn digitalocean_personal_access_token_is_masked() {
-    // `sk_live_` plus 10 letters is already a secret. A personal access
-    // token from the DigitalOcean control panel is `dop_v1_`. The rules
-    // above do not see that prefix, so the token stays in the clear. The
-    // published bodies from that issuer are 64 letters. A short payload
-    // stays as written.
+    // `sk_live_` plus 10 letters is already a secret. DigitalOcean
+    // documents `dop_v1_` for a control-panel token, `doo_v1_` for an
+    // OAuth token, and `dor_v1_` for a refresh token. The published
+    // body is 64 letters. A short payload stays as written.
     let body = "a".repeat(64);
+    for prefix in ["dop_v1_", "doo_v1_", "dor_v1_"] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(
+            hidden(&out, prefix.trim_end_matches('_')),
+            "{token} -> {out}"
+        );
+        assert!(hidden(&out, &body), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
     let token = format!("dop_v1_{body}");
-    let (vault, out, audit) = shield(&token);
-    assert_eq!(audit.secret, 1, "{token} -> {out}");
-    assert_eq!(out, "h1_secret", "{token} -> {out}");
-    assert!(hidden(&out, "dop_v1"), "{token} -> {out}");
-    assert!(hidden(&out, &body), "{token} -> {out}");
-    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
-    assert!(vault.restore_write(&out).is_err(), "{token}");
 
     let mixed = format!("dop_v1_{}", "A".repeat(56) + "y319b02b");
     let (vault, out, audit) = shield(&format!("see {mixed}.next"));
