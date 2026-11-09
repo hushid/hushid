@@ -135,21 +135,25 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // (`+ 1416-555-0123`). Leaving it out sends the digit when the
         // tail is already a phone. A run of `{sep}` still separates groups
         // (`416 - 555 - 0123`). Whitespace may sit inside the area-code
-        // parentheses (`( 416 )`), including a non-breaking space. That is
-        // still the 3-3-4 number. Leaving the space out sends the digits
-        // when there is no leading plus.
+        // parentheses (`( 416 )`), including a non-breaking space. A wide
+        // keyboard writes those parentheses as fullwidth marks. That is
+        // still the 3-3-4 number. Leaving the space, or the fullwidth
+        // mark, out sends the digits when there is no leading plus.
         phone_pattern(
-            r"(?:{plus}\s*1{sep}*|1{sep}+)?(?:\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:{plus}\s*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`, including spaces inside the parentheses. A bare
-    // `1` before more digits is not this form.
+    // `1` before more digits is not this form. A fullwidth parenthesis
+    // is that same mark.
     static NANP_TRUNK: LazyLock<Regex> =
-        LazyLock::new(|| phone_pattern(r"1\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}"));
-    // Parentheses wrap one group (`+44 (20) 7946 0958`). A trunk zero
-    // may sit against the next digits (`+33 (0)1`). A later group may
+        LazyLock::new(|| phone_pattern(r"1{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}"));
+    // Parentheses wrap one group (`+44 (20) 7946 0958`). A fullwidth
+    // parenthesis is that same mark. A trunk zero may sit against the
+    // next digits (`+33 (0)1`). A later group may
     // hold more than four digits (`+44 7700 900123`). Five or more
-    // digits glued to `)` are still a bare tail (`+44 (20)79460958`).
+    // digits glued to `)` or `）` are still a bare tail
+    // (`+44 (20)79460958`).
     // The NANP separator stays without parentheses, so a bare
     // `(416)5550123` is still not a phone. Whitespace may sit between
     // `+` and the country code (`+ 44 20 7946 0958`). Leaving it out
@@ -485,7 +489,9 @@ fn phone_pattern(body: &str) -> Regex {
     Regex::new(
         &body
             .replace("{sep}", &hyphen_class(r"\s./"))
-            .replace("{plus}", PLUS),
+            .replace("{plus}", PLUS)
+            .replace("{open}", OPEN_PAREN)
+            .replace("{close}", CLOSE_PAREN),
     )
     .expect("phone pattern")
 }
@@ -494,8 +500,13 @@ fn phone_pattern(body: &str) -> Regex {
 /// the fullwidth sign. Leaving it out sends the number.
 const PLUS: &str = r"(?:\+|\u{FF0B})";
 
+/// ASCII parentheses and the fullwidth pair. A wide-character keyboard
+/// writes those marks around a group. Leaving them out sends the number.
+const OPEN_PAREN: &str = r"(?:\(|\u{FF08})";
+const CLOSE_PAREN: &str = r"(?:\)|\u{FF09})";
+
 fn international_sep_class() -> String {
-    hyphen_class(r"\s./()")
+    hyphen_class(r"\s./()\u{FF08}\u{FF09}")
 }
 
 /// Longest prefix of `text[start..end]` that is one international number.
@@ -598,19 +609,18 @@ fn digit_count(text: &str) -> usize {
     text.chars().filter(|ch| ch.is_ascii_digit()).count()
 }
 
-/// Five or more digits glued to `)` are a bare tail, not another group.
+/// Five or more digits glued to `)` or `）` are a bare tail, not another group.
 ///
-/// `+44 (20)79460958` is that tail. `+33 (0)1` still has a one-digit
-/// group against the parenthesis, and `+44 (0)7700 900123` keeps the
-/// space before the long group.
+/// `+44 (20)79460958` is that tail. A fullwidth closing mark is the same
+/// tail. `+33 (0)1` still has a one-digit group against the parenthesis,
+/// and `+44 (0)7700 900123` keeps the space before the long group.
 fn glued_paren_tail(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    for (index, byte) in bytes.iter().enumerate() {
-        if *byte != b')' {
+    for (index, ch) in text.char_indices() {
+        if ch != ')' && ch != '\u{FF09}' {
             continue;
         }
         let mut digits = 0usize;
-        for next in &bytes[index + 1..] {
+        for next in text[index + ch.len_utf8()..].chars() {
             if !next.is_ascii_digit() {
                 break;
             }
