@@ -1467,6 +1467,145 @@ fn whitespace_inside_a_cue_still_shields_the_number() {
 }
 
 #[test]
+fn hyphen_between_cue_words_still_shields_the_number() {
+    // `american express 4111111111111111` is already a card, and
+    // `social insurance 130692544` is already a SIN. A hyphen between
+    // those words is still that cue. An ASCII hyphen is not the only
+    // mark. An en dash, a non-breaking hyphen, a minus sign, or a soft
+    // hyphen leaves the digits in the clear. Neither phrase contains a
+    // shorter cue.
+    let sin = valid_sin();
+    let pan = "4111111111111111";
+    let marks = [
+        '-', '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2212}', '\u{00ad}',
+    ];
+    for mark in marks {
+        let card = format!("american{mark}express {pan}");
+        let (vault, out, audit) = shield(&card);
+        assert_eq!(audit.card, 1, "{card} -> {out}");
+        assert_eq!(audit.sin, 0, "{card} -> {out}");
+        assert_eq!(audit.phone, 0, "{card} -> {out}");
+        assert!(
+            out.starts_with(&format!("american{mark}express h1_card_")),
+            "{out}"
+        );
+        assert!(out.contains(mark), "{card} -> {out}");
+        assert!(hidden(&out, pan), "{card} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+        let spaced = format!("american {mark} express {pan}");
+        let (vault, out, audit) = shield(&spaced);
+        assert_eq!(audit.card, 1, "{spaced} -> {out}");
+        assert!(hidden(&out, pan), "{spaced} -> {out}");
+        assert!(out.contains(mark), "{spaced} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), spaced);
+
+        let social = format!("social{mark}insurance {sin}");
+        let (vault, out, audit) = shield(&social);
+        assert_eq!(audit.sin, 1, "{social} -> {out}");
+        assert_eq!(audit.card, 0, "{social} -> {out}");
+        assert!(
+            out.starts_with(&format!("social{mark}insurance h1_sin_")),
+            "{out}"
+        );
+        assert!(out.contains(mark), "{social} -> {out}");
+        assert!(hidden(&out, &sin), "{social} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), social);
+
+        let french = format!("numéro{mark}d'assurance{mark}sociale {sin}");
+        let (vault, out, audit) = shield(&french);
+        assert_eq!(audit.sin, 1, "{french} -> {out}");
+        assert!(hidden(&out, &sin), "{french} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), french);
+
+        let plain = format!("numero{mark}d'assurance{mark}sociale {sin}");
+        let (vault, out, audit) = shield(&plain);
+        assert_eq!(audit.sin, 1, "{plain} -> {out}");
+        assert!(hidden(&out, &sin), "{plain} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), plain);
+    }
+
+    let sentence = format!("pay with american-express {pan} today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.card, 1, "{sentence} -> {out}");
+    assert!(
+        out.starts_with("pay with american-express h1_card_"),
+        "{out}"
+    );
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, pan), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let pair = format!("american-express {pan} and social-insurance {sin}");
+    let (vault, out, audit) = shield(&pair);
+    assert_eq!(audit.card, 1, "{pair} -> {out}");
+    assert_eq!(audit.sin, 1, "{pair} -> {out}");
+    assert!(out.starts_with("american-express h1_card_"), "{out}");
+    assert!(out.contains(" and social-insurance h1_sin_"), "{out}");
+    assert!(hidden(&out, pan), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    let near = format!("american-express{}{pan}", ".".repeat(40));
+    let (vault, out, audit) = shield(&near);
+    assert_eq!(audit.card, 1, "{near} -> {out}");
+    assert!(hidden(&out, pan), "{near} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), near);
+
+    for bare in [
+        format!("americanexpress {pan}"),
+        format!("american/express {pan}"),
+        format!("american_express {pan}"),
+        format!("american, express {pan}"),
+        format!("american-express{pan}"),
+        format!("american-express {}", "4111111111111112"),
+        format!("socialinsurance {sin}"),
+        format!("social/insurance {sin}"),
+        format!("social_insurance {sin}"),
+        format!("social-insurance{sin}"),
+        format!("american-express{}{pan}", ".".repeat(41)),
+        format!("social-insurance{}{sin}", ".".repeat(41)),
+        pan.to_string(),
+        sin.clone(),
+        "american-express".to_string(),
+        "social-insurance".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+
+    let raw = format!(r#"{{"american-express":"{pan}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.card, 1, "{raw} -> {out}");
+    assert!(hidden(&out, pan), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let as_number = format!(r#"{{"american-express":{pan}}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &as_number).unwrap();
+    assert_eq!(audit.card, 1, "{as_number} -> {out}");
+    assert!(hidden(&out, pan), "{as_number} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), as_number);
+
+    let sin_raw = format!(r#"{{"social-insurance":"{sin}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &sin_raw).unwrap();
+    assert_eq!(audit.sin, 1, "{sin_raw} -> {out}");
+    assert!(hidden(&out, &sin), "{sin_raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), sin_raw);
+
+    let nested = format!(r#"{{"note":"{{\"numéro-d'assurance-sociale\":\"{sin}\"}}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &nested).unwrap();
+    assert_eq!(audit.sin, 1, "{nested} -> {out}");
+    assert!(hidden(&out, &sin), "{nested} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), nested);
+}
+
+#[test]
 fn spaces_around_a_group_separator_still_shield_the_value() {
     for phone in [
         "416 - 555 - 0123",

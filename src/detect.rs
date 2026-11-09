@@ -28,6 +28,14 @@ fn hyphen_class(rest: &str) -> String {
     class
 }
 
+/// One or more whitespace characters or hyphen marks between cue words.
+///
+/// `american-express` is still `american express`. An en dash, a minus
+/// sign, or a soft hyphen is that same mark. The phrase has no shorter cue.
+fn cue_word_gap() -> String {
+    format!("{}+", hyphen_class(r"\s"))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Hit {
     Secret {
@@ -201,26 +209,32 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
     static RUN: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\d{13,19}").expect("card run pattern"));
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-        [
-            // The space between cue words may be any whitespace, including
-            // a non-breaking space. A plain space is not the only mark
-            // between `american` and `express`, and that phrase has no
-            // shorter cue. Leaving the mark out sends the card.
-            r"(?i)\bcredit\s+card\b",
-            r"(?i)\bamerican\s+express\b",
-            r"(?i)\bmaster\s+card\b",
-            r"(?i)\bmastercard\b",
-            r"(?i)\bvisa\b",
-            r"(?i)\bamex\b",
-            r"(?i)\bdebit\b",
-            r"(?i)\bcarte\b",
-            r"(?i)\bcvv\b",
-            r"(?i)\bcvc\b",
-            r"(?i)\bcard\b",
-        ]
-        .into_iter()
-        .map(|pattern| Regex::new(pattern).expect("card cue"))
-        .collect()
+        // The mark between cue words may be any whitespace or a hyphen
+        // mark. A plain space is not the only mark between `american`
+        // and `express`, and that phrase has no shorter cue. Leaving
+        // the mark out sends the card.
+        let gap = cue_word_gap();
+        let mut patterns = vec![
+            format!(r"(?i)\bcredit{gap}card\b"),
+            format!(r"(?i)\bamerican{gap}express\b"),
+            format!(r"(?i)\bmaster{gap}card\b"),
+        ];
+        for word in [
+            "mastercard",
+            "visa",
+            "amex",
+            "debit",
+            "carte",
+            "cvv",
+            "cvc",
+            "card",
+        ] {
+            patterns.push(format!(r"(?i)\b{word}\b"));
+        }
+        patterns
+            .into_iter()
+            .map(|pattern| Regex::new(&pattern).expect("card cue"))
+            .collect()
     });
     for pattern in GROUPED.iter() {
         for hit in pattern.find_iter(text) {
@@ -257,19 +271,22 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
         Regex::new(&format!(r"\d{{3}}{sep}+\d{{3}}{sep}+\d{{3}}|\d{{9}}")).expect("sin pattern")
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-        [
-            // Same whitespace as a card cue. `social insurance 130692544`
-            // stays a SIN when a non-breaking space, a thin space, or a
-            // tab sits between the words. A plain space is not required.
-            r"(?i)\bsocial\s+insurance\b",
-            r"(?i)\bnuméro\s+d['’]assurance\s+sociale\b",
-            r"(?i)\bnumero\s+d['’]assurance\s+sociale\b",
-            r"(?i)\bSIN\b",
-            r"(?i)\bNAS\b",
-        ]
-        .into_iter()
-        .map(|pattern| Regex::new(pattern).expect("sin cue"))
-        .collect()
+        // Same mark as a card cue. `social insurance 130692544` stays a
+        // SIN when a hyphen, an en dash, or a soft hyphen sits between
+        // the words. That phrase has no shorter cue.
+        let gap = cue_word_gap();
+        let mut patterns = vec![
+            format!(r"(?i)\bsocial{gap}insurance\b"),
+            format!(r"(?i)\bnuméro{gap}d['’]assurance{gap}sociale\b"),
+            format!(r"(?i)\bnumero{gap}d['’]assurance{gap}sociale\b"),
+        ];
+        for word in ["SIN", "NAS"] {
+            patterns.push(format!(r"(?i)\b{word}\b"));
+        }
+        patterns
+            .into_iter()
+            .map(|pattern| Regex::new(&pattern).expect("sin cue"))
+            .collect()
     });
     let cues = cue_spans(text, &CUES);
     for hit in RE.find_iter(text) {
