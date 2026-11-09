@@ -4934,3 +4934,53 @@ fn onepassword_service_account_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn ideographic_full_stop_still_shields_the_address() {
+    // `user@example.com` is already an email. An ideographic full stop,
+    // U+3002, is that same dot in the local part or the domain. Leaving
+    // it out sends the address. A stop with no final label, and a domain
+    // with no local part, stay as written.
+    let domain = "user@example\u{3002}com";
+    let (vault, out, audit) = shield(domain);
+    assert_eq!(audit.email, 1, "{domain} -> {out}");
+    assert_eq!(audit.phone, 0, "{domain} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{domain} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{domain} -> {out}");
+    assert!(!out.contains('\u{3002}'), "{domain} -> {out}");
+    assert!(hidden(&out, "user"), "{domain} -> {out}");
+    assert!(hidden(&out, "example"), "{domain} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), domain);
+
+    let local = "user\u{3002}name@example.com";
+    let (vault, out, audit) = shield(local);
+    assert_eq!(audit.email, 1, "{local} -> {out}");
+    assert_eq!(audit.phone, 0, "{local} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{local} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{local} -> {out}");
+    assert!(!out.contains('\u{3002}'), "{local} -> {out}");
+    assert!(hidden(&out, "user"), "{local} -> {out}");
+    assert!(hidden(&out, "name"), "{local} -> {out}");
+    assert!(hidden(&out, "example"), "{local} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), local);
+
+    let sentence = "see user@example\u{3002}co\u{3002}uk next";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("see h1_email_"), "{out}");
+    assert!(out.ends_with(" next"), "{out}");
+    assert!(!out.contains('\u{3002}'), "{out}");
+    assert!(hidden(&out, "user"), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    for bare in [
+        "user@example\u{3002}",
+        "example\u{3002}com",
+        "not an address",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
