@@ -282,7 +282,9 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
 fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
     static RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         [
-            r"\bAKIA[0-9A-Z]{16}\b",
+            // AKIA is a long-term access key id. ASIA is the temporary
+            // one. Both are 20 characters. Leaving ASIA out sends the id.
+            r"\bA(?:K|S)IA[0-9A-Z]{16}\b",
             r"\bghp_[A-Za-z0-9]{36}\b",
             r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
             r"\bgho_[A-Za-z0-9]{36}\b",

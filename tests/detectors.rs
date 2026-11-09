@@ -43,6 +43,65 @@ fn valid_sin() -> String {
     sin
 }
 
+/// The issued token's payload is Crockford base32, so a short digit run
+/// such as `416` can sit inside the token. That run is not the original
+/// number. Leak checks have to look at the text outside the token.
+fn visible(out: &str) -> String {
+    let mut rest = out;
+    let mut cleaned = String::new();
+    while let Some(at) = rest.find("h1_") {
+        cleaned.push_str(&rest[..at]);
+        let tail = &rest[at + 3..];
+        if let Some(skip) = mark_body_len(tail) {
+            rest = &tail[skip..];
+        } else {
+            cleaned.push_str("h1_");
+            rest = tail;
+        }
+    }
+    cleaned.push_str(rest);
+    cleaned
+}
+
+fn hidden(out: &str, needle: &str) -> bool {
+    !visible(out).contains(needle)
+}
+
+fn mark_body_len(tail: &str) -> Option<usize> {
+    if let Some(rest) = tail.strip_prefix("secret") {
+        if at_boundary(rest) {
+            return Some("secret".len());
+        }
+    }
+    for head in ["email_", "phone_", "card_", "sin_", "glossary_"] {
+        let Some(rest) = tail.strip_prefix(head) else {
+            continue;
+        };
+        if rest.len() < 9 || !rest.as_bytes()[..9].iter().copied().all(is_crockford) {
+            continue;
+        }
+        if at_boundary(&rest[9..]) {
+            return Some(head.len() + 9);
+        }
+    }
+    None
+}
+
+fn at_boundary(rest: &str) -> bool {
+    match rest.chars().next() {
+        None => true,
+        Some(ch) if ch.is_ascii_alphanumeric() || ch == '_' => false,
+        Some(_) => true,
+    }
+}
+
+fn is_crockford(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'0'..=b'9' | b'A'..=b'H' | b'J' | b'K' | b'M' | b'N' | b'P'..=b'T' | b'V'..=b'Z'
+    )
+}
+
 #[test]
 fn email_round_trip_keeps_exact_bytes() {
     round_trip("marie+tag@example.com", |audit| audit.email);
@@ -203,7 +262,7 @@ fn email_with_dash_punctuation_stays_one_address() {
     assert!(out.starts_with("écrire à h1_email_"), "{out}");
     assert!(out.ends_with(" aujourd'hui"), "{out}");
     assert!(!out.contains('@'), "{out}");
-    assert!(!out.contains("jean"), "{out}");
+    assert!(hidden(&out, "jean"), "{out}");
     assert!(!out.contains(en), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -212,7 +271,7 @@ fn email_with_dash_punctuation_stays_one_address() {
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
     assert_eq!(audit.email, 1, "{out}");
     assert!(!out.contains('@'), "{out}");
-    assert!(!out.contains("jean"), "{out}");
+    assert!(hidden(&out, "jean"), "{out}");
     assert!(!out.contains(en), "{out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 
@@ -293,7 +352,7 @@ fn email_with_a_minus_sign_or_soft_hyphen_stays_one_address() {
             assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
             assert!(!out.contains('@'), "{email} -> {out}");
             assert!(!out.contains(mark), "{email} -> {out}");
-            assert!(!out.contains("jean"), "{email} -> {out}");
+            assert!(hidden(&out, "jean"), "{email} -> {out}");
             assert!(!out.contains("ample"), "{email} -> {out}");
             assert!(!out.contains("note"), "{email} -> {out}");
             assert_eq!(vault.restore_write(&out).unwrap(), email);
@@ -305,7 +364,7 @@ fn email_with_a_minus_sign_or_soft_hyphen_stays_one_address() {
         assert!(out.starts_with("écrire à h1_email_"), "{out}");
         assert!(out.ends_with(" aujourd'hui"), "{out}");
         assert!(!out.contains('@'), "{out}");
-        assert!(!out.contains("jean"), "{out}");
+        assert!(hidden(&out, "jean"), "{out}");
         assert!(!out.contains(mark), "{out}");
         assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -355,7 +414,7 @@ fn email_with_a_minus_sign_or_soft_hyphen_stays_one_address() {
         let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
         assert_eq!(audit.email, 1, "{raw} -> {out}");
         assert!(!out.contains('@'), "{out}");
-        assert!(!out.contains("jean"), "{out}");
+        assert!(hidden(&out, "jean"), "{out}");
         assert!(!out.contains(mark), "{out}");
         assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 
@@ -412,7 +471,7 @@ fn parentheses_around_an_international_group_still_shield_the_number() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("7946"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
     assert!(!out.contains('('), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -423,7 +482,7 @@ fn parentheses_around_an_international_group_still_shield_the_number() {
     assert!(out.ends_with(" today"), "{out}");
     assert!(out.contains(" or "), "{out}");
     assert!(!out.contains('('), "{out}");
-    assert!(!out.contains("7946"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
     assert!(!out.contains("23 45"), "{out}");
     assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), pair);
@@ -444,7 +503,7 @@ fn parentheses_around_an_international_group_still_shield_the_number() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.phone, 1, "{raw} -> {out}");
-    assert!(!out.contains("7946"), "{raw} -> {out}");
+    assert!(hidden(&out, "7946"), "{raw} -> {out}");
     assert!(!out.contains('('), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
@@ -480,8 +539,8 @@ fn longer_international_group_still_shields_the_number() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("7700"), "{out}");
-    assert!(!out.contains("900123"), "{out}");
+    assert!(hidden(&out, "7700"), "{out}");
+    assert!(hidden(&out, "900123"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
     let pair = "call +44 7700 900123 or +49 30 12345678 today";
@@ -490,8 +549,8 @@ fn longer_international_group_still_shields_the_number() {
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
     assert!(out.contains(" or "), "{out}");
-    assert!(!out.contains("7700"), "{out}");
-    assert!(!out.contains("12345678"), "{out}");
+    assert!(hidden(&out, "7700"), "{out}");
+    assert!(hidden(&out, "12345678"), "{out}");
     assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), pair);
 
@@ -513,8 +572,8 @@ fn longer_international_group_still_shields_the_number() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.phone, 1, "{raw} -> {out}");
-    assert!(!out.contains("7700"), "{raw} -> {out}");
-    assert!(!out.contains("900123"), "{raw} -> {out}");
+    assert!(hidden(&out, "7700"), "{raw} -> {out}");
+    assert!(hidden(&out, "900123"), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
 
@@ -552,11 +611,11 @@ fn whitespace_after_a_plus_still_shields_the_number() {
         assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
         assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
         assert!(!out.contains('+'), "{phone} -> {out}");
-        assert!(!out.contains("7946"), "{phone} -> {out}");
-        assert!(!out.contains("416"), "{phone} -> {out}");
-        assert!(!out.contains("1416"), "{phone} -> {out}");
-        assert!(!out.contains("495"), "{phone} -> {out}");
-        assert!(!out.contains("12345678"), "{phone} -> {out}");
+        assert!(hidden(&out, "7946"), "{phone} -> {out}");
+        assert!(hidden(&out, "416"), "{phone} -> {out}");
+        assert!(hidden(&out, "1416"), "{phone} -> {out}");
+        assert!(hidden(&out, "495"), "{phone} -> {out}");
+        assert!(hidden(&out, "12345678"), "{phone} -> {out}");
         assert!(!out.contains(nbsp), "{phone} -> {out}");
         assert!(!out.contains(narrow), "{phone} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), phone);
@@ -568,7 +627,7 @@ fn whitespace_after_a_plus_still_shields_the_number() {
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
     assert!(!out.contains('+'), "{out}");
-    assert!(!out.contains("7946"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
     let pair = "call + 44 20 7946 0958 or + 1416-555-0123 today";
@@ -578,8 +637,8 @@ fn whitespace_after_a_plus_still_shields_the_number() {
     assert!(out.ends_with(" today"), "{out}");
     assert!(out.contains(" or "), "{out}");
     assert!(!out.contains('+'), "{out}");
-    assert!(!out.contains("7946"), "{out}");
-    assert!(!out.contains("1416"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "1416"), "{out}");
     assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), pair);
 
@@ -604,7 +663,7 @@ fn whitespace_after_a_plus_still_shields_the_number() {
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.phone, 1, "{raw} -> {out}");
     assert!(!out.contains('+'), "{raw} -> {out}");
-    assert!(!out.contains("7946"), "{raw} -> {out}");
+    assert!(hidden(&out, "7946"), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
 
@@ -637,8 +696,8 @@ fn international_number_before_a_later_group_still_shields_the_number() {
             "h1_phone_".len() + 9 + tail.len(),
             "{text} -> {out}"
         );
-        assert!(!out.contains("7946"), "{text} -> {out}");
-        assert!(!out.contains("12345678"), "{text} -> {out}");
+        assert!(hidden(&out, "7946"), "{text} -> {out}");
+        assert!(hidden(&out, "12345678"), "{text} -> {out}");
         assert!(!out.contains("23 45"), "{text} -> {out}");
         assert!(!out.contains('+'), "{text} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), text);
@@ -658,7 +717,7 @@ fn international_number_before_a_later_group_still_shields_the_number() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" 9999 today"), "{out}");
-    assert!(!out.contains("7946"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
     assert!(!out.contains('+'), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -669,8 +728,8 @@ fn international_number_before_a_later_group_still_shields_the_number() {
     assert!(out.ends_with(" today"), "{out}");
     assert!(out.contains(" 9999 or "), "{out}");
     assert!(out.contains(" 8888 "), "{out}");
-    assert!(!out.contains("7946"), "{out}");
-    assert!(!out.contains("12345678"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "12345678"), "{out}");
     assert!(!out.contains('+'), "{out}");
     assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), pair);
@@ -693,8 +752,8 @@ fn international_number_before_a_later_group_still_shields_the_number() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.phone, 1, "{raw} -> {out}");
-    assert!(out.contains("9999"), "{raw} -> {out}");
-    assert!(!out.contains("7946"), "{raw} -> {out}");
+    assert!(visible(&out).contains("9999"), "{raw} -> {out}");
+    assert!(hidden(&out, "7946"), "{raw} -> {out}");
     assert!(!out.contains("+44"), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
@@ -735,21 +794,21 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("416"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
     let slashed = "call 416/555-0123 today";
     let (vault, out, audit) = shield(slashed);
     assert_eq!(audit.phone, 1, "{slashed} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("416"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), slashed);
     let unbroken = "call 416\u{2011}555\u{2011}0123 today";
     let (vault, out, audit) = shield(unbroken);
     assert_eq!(audit.phone, 1, "{unbroken} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("416"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), unbroken);
     for bare in [
         "4155550134",
@@ -800,8 +859,8 @@ fn spaces_inside_a_canadian_area_code_still_shield_the_number() {
         assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
         assert!(!out.contains('('), "{phone} -> {out}");
         assert!(!out.contains(')'), "{phone} -> {out}");
-        assert!(!out.contains("416"), "{phone} -> {out}");
-        assert!(!out.contains("0123"), "{phone} -> {out}");
+        assert!(hidden(&out, "416"), "{phone} -> {out}");
+        assert!(hidden(&out, "0123"), "{phone} -> {out}");
         assert!(!out.contains(nbsp), "{phone} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), phone);
     }
@@ -811,7 +870,7 @@ fn spaces_inside_a_canadian_area_code_still_shield_the_number() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("416"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
     assert!(!out.contains('('), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -819,7 +878,7 @@ fn spaces_inside_a_canadian_area_code_still_shield_the_number() {
     let (vault, out, audit) = shield(glued_letter);
     assert_eq!(audit.phone, 1, "{glued_letter} -> {out}");
     assert!(out.starts_with("xh1_phone_"), "{out}");
-    assert!(!out.contains("416"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), glued_letter);
 
     let pair = "call ( 416 ) 555-0123 or 1( 604 ) 555-0199 today";
@@ -828,8 +887,8 @@ fn spaces_inside_a_canadian_area_code_still_shield_the_number() {
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
     assert!(out.contains(" or "), "{out}");
-    assert!(!out.contains("416"), "{out}");
-    assert!(!out.contains("604"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "604"), "{out}");
     assert!(!out.contains('('), "{out}");
     assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), pair);
@@ -857,7 +916,7 @@ fn spaces_inside_a_canadian_area_code_still_shield_the_number() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.phone, 1, "{raw} -> {out}");
-    assert!(!out.contains("416"), "{raw} -> {out}");
+    assert!(hidden(&out, "416"), "{raw} -> {out}");
     assert!(!out.contains('('), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
@@ -890,7 +949,7 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     let (vault, out, audit) = shield(cued_fours);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("visa h1_card_"), "{out}");
-    assert!(!out.contains("3782"), "{out}");
+    assert!(hidden(&out, "3782"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued_fours);
     let bad_fours = "3782 8224 6310 006";
     let (_vault, out, audit) = shield(bad_fours);
@@ -913,7 +972,7 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     let (vault, out, audit) = shield(cued_fourteen);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("card h1_card_"), "{out}");
-    assert!(!out.contains("3056"), "{out}");
+    assert!(hidden(&out, "3056"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued_fourteen);
     let bad_fourteen = "3056 930902 5905";
     let (_vault, out, audit) = shield(bad_fourteen);
@@ -958,14 +1017,14 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     let (vault, out, audit) = shield(cued_dotted);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("visa h1_card_"), "{out}");
-    assert!(!out.contains("4111"), "{out}");
+    assert!(hidden(&out, "4111"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued_dotted);
     let dotted_sentence = "pay visa 4111.1111.1111.1111 today.";
     let (vault, out, audit) = shield(dotted_sentence);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("pay visa h1_card_"), "{out}");
     assert!(out.ends_with(" today."), "{out}");
-    assert!(!out.contains("4111"), "{out}");
+    assert!(hidden(&out, "4111"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), dotted_sentence);
     let bad_dotted = "4111.1111.1111.1112";
     let (_vault, out, audit) = shield(bad_dotted);
@@ -980,13 +1039,13 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.card, 1, "{raw} -> {out}");
-    assert!(!out.contains("4111"), "{raw} -> {out}");
+    assert!(hidden(&out, "4111"), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
     let bare_dotted = r#"{"n":"4111.1111.1111.1111"}"#;
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), bare_dotted).unwrap();
     assert_eq!(audit.card, 1, "{bare_dotted} -> {out}");
-    assert!(!out.contains("4111"), "{bare_dotted} -> {out}");
+    assert!(hidden(&out, "4111"), "{bare_dotted} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), bare_dotted);
 }
 
@@ -1069,7 +1128,7 @@ fn nineteen_digit_card_grouped_in_fours_round_trips() {
     let (vault, out, audit) = shield(&cued);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("visa h1_card_"), "{out}");
-    assert!(!out.contains("1100006"), "{out}");
+    assert!(hidden(&out, "1100006"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued);
 
     let sentence = format!("pay {cued} today.");
@@ -1077,7 +1136,7 @@ fn nineteen_digit_card_grouped_in_fours_round_trips() {
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("pay visa h1_card_"), "{out}");
     assert!(out.ends_with(" today."), "{out}");
-    assert!(!out.contains("1100006"), "{out}");
+    assert!(hidden(&out, "1100006"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
     // A 16-digit card and a three-digit code are not one 19-digit card.
@@ -1140,7 +1199,7 @@ fn nineteen_digit_card_grouped_as_six_and_thirteen_round_trips() {
             !out.contains(' ') && !out.contains('-') && !out.contains('.') && !out.contains(en),
             "{grouped} -> {out}"
         );
-        assert!(!out.contains(&pan[..6]), "{grouped} -> {out}");
+        assert!(hidden(&out, &pan[..6]), "{grouped} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), grouped);
     }
 
@@ -1148,8 +1207,8 @@ fn nineteen_digit_card_grouped_as_six_and_thirteen_round_trips() {
     let (vault, out, audit) = shield(&cued);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("card h1_card_"), "{out}");
-    assert!(!out.contains(&pan[..6]), "{out}");
-    assert!(!out.contains(&pan[6..]), "{out}");
+    assert!(hidden(&out, &pan[..6]), "{out}");
+    assert!(hidden(&out, &pan[6..]), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued);
 
     let sentence = format!("pay {cued} today.");
@@ -1157,7 +1216,7 @@ fn nineteen_digit_card_grouped_as_six_and_thirteen_round_trips() {
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("pay card h1_card_"), "{out}");
     assert!(out.ends_with(" today."), "{out}");
-    assert!(!out.contains(&pan[..6]), "{out}");
+    assert!(hidden(&out, &pan[..6]), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
     // A code after the number is not part of the card.
@@ -1165,7 +1224,7 @@ fn nineteen_digit_card_grouped_as_six_and_thirteen_round_trips() {
     let (vault, out, audit) = shield(&with_code);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.ends_with(" 123"), "{out}");
-    assert!(!out.contains(&pan[..6]), "{out}");
+    assert!(hidden(&out, &pan[..6]), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), with_code);
 
     let bad = format!("{} {}", &pan[..6], "1111111111111");
@@ -1187,8 +1246,8 @@ fn nineteen_digit_card_grouped_as_six_and_thirteen_round_trips() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
     assert_eq!(audit.card, 1, "{raw} -> {out}");
-    assert!(!out.contains(&pan[..6]), "{raw} -> {out}");
-    assert!(!out.contains(&pan[6..]), "{raw} -> {out}");
+    assert!(hidden(&out, &pan[..6]), "{raw} -> {out}");
+    assert!(hidden(&out, &pan[6..]), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
 
@@ -1226,7 +1285,7 @@ fn thirteen_digit_card_grouped_as_four_four_five_round_trips() {
             !out.contains(' ') && !out.contains('-') && !out.contains('.') && !out.contains(en),
             "{grouped} -> {out}"
         );
-        assert!(!out.contains(&pan[..4]), "{grouped} -> {out}");
+        assert!(hidden(&out, &pan[..4]), "{grouped} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), grouped);
     }
 
@@ -1234,8 +1293,8 @@ fn thirteen_digit_card_grouped_as_four_four_five_round_trips() {
     let (vault, out, audit) = shield(&cued);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("card h1_card_"), "{out}");
-    assert!(!out.contains(&pan[..4]), "{out}");
-    assert!(!out.contains(&pan[8..]), "{out}");
+    assert!(hidden(&out, &pan[..4]), "{out}");
+    assert!(hidden(&out, &pan[8..]), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued);
 
     let sentence = format!("pay {cued} today.");
@@ -1243,14 +1302,14 @@ fn thirteen_digit_card_grouped_as_four_four_five_round_trips() {
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("pay card h1_card_"), "{out}");
     assert!(out.ends_with(" today."), "{out}");
-    assert!(!out.contains(&pan[..4]), "{out}");
+    assert!(hidden(&out, &pan[..4]), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
     let with_code = format!("{} {} {} 123", &pan[..4], &pan[4..8], &pan[8..]);
     let (vault, out, audit) = shield(&with_code);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.ends_with(" 123"), "{out}");
-    assert!(!out.contains(&pan[..4]), "{out}");
+    assert!(hidden(&out, &pan[..4]), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), with_code);
 
     let bad = format!("{} {} {}", &pan[..4], &pan[4..8], "00003");
@@ -1277,8 +1336,8 @@ fn thirteen_digit_card_grouped_as_four_four_five_round_trips() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
     assert_eq!(audit.card, 1, "{raw} -> {out}");
-    assert!(!out.contains(&pan[..4]), "{raw} -> {out}");
-    assert!(!out.contains(&pan[8..]), "{raw} -> {out}");
+    assert!(hidden(&out, &pan[..4]), "{raw} -> {out}");
+    assert!(hidden(&out, &pan[8..]), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 }
 
@@ -1339,8 +1398,8 @@ fn spaces_around_a_group_separator_still_shield_the_value() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("416"), "{out}");
-    assert!(!out.contains("0123"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "0123"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
     for grouped in [
@@ -1390,7 +1449,7 @@ fn spaces_around_a_group_separator_still_shield_the_value() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.card, 1, "{raw} -> {out}");
-    assert!(!out.contains("4111"), "{raw} -> {out}");
+    assert!(hidden(&out, "4111"), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 
     let sin_raw = format!(r#"{{"nas":"{spaced}"}}"#);
@@ -1433,8 +1492,8 @@ fn dash_punctuation_still_separates_a_grouped_number() {
     assert_eq!(audit.phone, 1, "{sentence} -> {out}");
     assert!(out.starts_with("call h1_phone_"), "{out}");
     assert!(out.ends_with(" today"), "{out}");
-    assert!(!out.contains("416"), "{out}");
-    assert!(!out.contains("0123"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "0123"), "{out}");
     assert!(!out.contains(en), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -1457,7 +1516,7 @@ fn dash_punctuation_still_separates_a_grouped_number() {
     let (vault, out, audit) = shield(&cued);
     assert_eq!(audit.card, 1, "{out}");
     assert!(out.starts_with("visa h1_card_"), "{out}");
-    assert!(!out.contains("4111"), "{out}");
+    assert!(hidden(&out, "4111"), "{out}");
     assert!(!out.contains(en), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued);
 
@@ -1468,7 +1527,7 @@ fn dash_punctuation_still_separates_a_grouped_number() {
     assert_eq!(audit.sin, 1, "{cued_sin} -> {out}");
     assert_eq!(audit.phone, 0, "{cued_sin} -> {out}");
     assert!(out.starts_with("SIN h1_sin_"), "{out}");
-    assert!(!out.contains(&sin), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
     assert!(!out.contains(figure), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), cued_sin);
 
@@ -1491,7 +1550,7 @@ fn dash_punctuation_still_separates_a_grouped_number() {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
     assert_eq!(audit.phone, 1, "{raw} -> {out}");
-    assert!(!out.contains("416"), "{raw} -> {out}");
+    assert!(hidden(&out, "416"), "{raw} -> {out}");
     assert!(!out.contains(en), "{raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 
@@ -1537,8 +1596,8 @@ fn minus_sign_or_soft_hyphen_still_separates_a_grouped_number() {
         assert_eq!(audit.phone, 1, "{sentence} -> {out}");
         assert!(out.starts_with("call h1_phone_"), "{out}");
         assert!(out.ends_with(" today"), "{out}");
-        assert!(!out.contains("416"), "{out}");
-        assert!(!out.contains("0123"), "{out}");
+        assert!(hidden(&out, "416"), "{out}");
+        assert!(hidden(&out, "0123"), "{out}");
         assert!(!out.contains(mark), "{out}");
         assert_eq!(vault.restore_write(&out).unwrap(), sentence);
 
@@ -1560,7 +1619,7 @@ fn minus_sign_or_soft_hyphen_still_separates_a_grouped_number() {
         let (vault, out, audit) = shield(&cued);
         assert_eq!(audit.card, 1, "{cued} -> {out}");
         assert!(out.starts_with("visa h1_card_"), "{out}");
-        assert!(!out.contains("4111"), "{out}");
+        assert!(hidden(&out, "4111"), "{out}");
         assert!(!out.contains(mark), "{out}");
         assert_eq!(vault.restore_write(&out).unwrap(), cued);
 
@@ -1571,7 +1630,7 @@ fn minus_sign_or_soft_hyphen_still_separates_a_grouped_number() {
         assert_eq!(audit.sin, 1, "{cued_sin} -> {out}");
         assert_eq!(audit.phone, 0, "{cued_sin} -> {out}");
         assert!(out.starts_with("SIN h1_sin_"), "{out}");
-        assert!(!out.contains(&sin), "{out}");
+        assert!(hidden(&out, &sin), "{out}");
         assert!(!out.contains(mark), "{out}");
         assert_eq!(vault.restore_write(&out).unwrap(), cued_sin);
 
@@ -1594,7 +1653,7 @@ fn minus_sign_or_soft_hyphen_still_separates_a_grouped_number() {
         let mut vault = Vault::new();
         let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
         assert_eq!(audit.phone, 1, "{raw} -> {out}");
-        assert!(!out.contains("416"), "{raw} -> {out}");
+        assert!(hidden(&out, "416"), "{raw} -> {out}");
         assert!(!out.contains(mark), "{raw} -> {out}");
         assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
 
@@ -1806,6 +1865,51 @@ fn secrets_become_one_shared_mark_and_are_not_stored() {
     assert!(!vault.holds_surface(aws.as_bytes()));
     assert_eq!(vault.restore_display(&out), out);
     assert!(vault.restore_write(&out).is_err());
+}
+
+#[test]
+fn temporary_aws_access_key_id_is_masked() {
+    // `AKIAIOSFODNN7EXAMPLE` is already a secret. The same id with the
+    // temporary prefix stays in the clear.
+    let key = "ASIAIOSFODNN7EXAMPLE";
+    let (vault, out, audit) = shield(key);
+    assert_eq!(audit.secret, 1, "{key} -> {out}");
+    assert_eq!(out, "h1_secret");
+    assert!(!vault.holds_surface(key.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let sentence = format!("export AWS_ACCESS_KEY_ID={key} please");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "export AWS_ACCESS_KEY_ID=h1_secret please");
+    assert!(!vault.holds_surface(key.as_bytes()));
+
+    let paired = format!("AKIAIOSFODNN7EXAMPLE {key}");
+    let (vault, out, audit) = shield(&paired);
+    assert_eq!(audit.secret, 2, "{paired} -> {out}");
+    assert_eq!(out, "h1_secret h1_secret");
+    assert!(!vault.holds_surface(b"AKIAIOSFODNN7EXAMPLE"));
+    assert!(!vault.holds_surface(key.as_bytes()));
+
+    for bare in [
+        "ASIAIOSFODNN7EXAMPL",
+        "asiaIOSFODNN7EXAMPLE",
+        "ASIAIOSFODNN7EXAMPLEX",
+        "XASIAIOSFODNN7EXAMPLE",
+        "ASIA",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare);
+    }
+
+    let raw = format!(r#"{{"id":"{key}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"id":"h1_secret"}"#);
+    assert!(!vault.holds_surface(key.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
 }
 
 #[test]
