@@ -596,14 +596,14 @@ fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
     if text[..start]
         .chars()
         .next_back()
-        .is_some_and(|ch| ch.is_ascii_digit())
+        .is_some_and(|ch| narrow_digit(ch).is_some())
     {
         return false;
     }
     if text[end..]
         .chars()
         .next()
-        .is_some_and(|ch| ch.is_ascii_digit())
+        .is_some_and(|ch| narrow_digit(ch).is_some())
     {
         return false;
     }
@@ -635,12 +635,30 @@ fn edge_gap(a0: usize, a1: usize, b0: usize, b1: usize, text: &str) -> usize {
         .unwrap_or(usize::MAX)
 }
 
+/// ASCII digit, or a fullwidth digit U+FF10 through U+FF19.
+///
+/// A wide keyboard writes those digits. The phone and card patterns
+/// already match them. Leaving them out of this count drops the match,
+/// so the number is sent. The returned byte is `0` through `9`.
+fn narrow_digit(ch: char) -> Option<u8> {
+    if ch.is_ascii_digit() {
+        return Some(ch as u8);
+    }
+    let value = ch as u32;
+    if (0xFF10..=0xFF19).contains(&value) {
+        return Some(b'0' + (value - 0xFF10) as u8);
+    }
+    None
+}
+
 fn digits_of(text: &str) -> Vec<u8> {
-    text.bytes().filter(|byte| byte.is_ascii_digit()).collect()
+    text.chars().filter_map(narrow_digit).collect()
 }
 
 fn digit_count(text: &str) -> usize {
-    text.chars().filter(|ch| ch.is_ascii_digit()).count()
+    text.chars()
+        .filter(|ch| narrow_digit(*ch).is_some())
+        .count()
 }
 
 /// Digits of one international number, ignoring a leading `00` prefix.
@@ -673,7 +691,7 @@ fn glued_paren_tail(text: &str) -> bool {
         }
         let mut digits = 0usize;
         for next in text[index + ch.len_utf8()..].chars() {
-            if !next.is_ascii_digit() {
+            if narrow_digit(next).is_none() {
                 break;
             }
             digits += 1;

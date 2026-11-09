@@ -3716,6 +3716,59 @@ fn nanp_exit_prefix_still_shields_the_number() {
     }
 }
 
+fn widen_digits(text: &str) -> String {
+    text.chars()
+        .map(|ch| match ch {
+            '0'..='9' => char::from_u32(0xFF10 + (ch as u32 - '0' as u32)).unwrap(),
+            _ => ch,
+        })
+        .collect()
+}
+
+#[test]
+fn fullwidth_digits_still_shield_the_number() {
+    let phone = format!("+{}", widen_digits("44 20 7946 0958"));
+    let (vault, out, audit) = shield(&phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(hidden(&out, &widen_digits("7946")), "{out}");
+    assert!(hidden(&out, &widen_digits("0958")), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let card = format!("visa {}", widen_digits("4111 1111 1111 1111"));
+    let (vault, out, audit) = shield(&card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(out.starts_with("visa h1_card_"), "{out}");
+    assert!(hidden(&out, &widen_digits("4111")), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let sin = widen_digits("130692544");
+    let cued = format!("SIN {sin}");
+    let (vault, out, audit) = shield(&cued);
+    assert_eq!(audit.sin, 1, "{cued} -> {out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued);
+
+    let raw = format!(r#"{{"tel":"{phone}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, &widen_digits("7946")), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        widen_digits("(416) 555-01234"),
+        format!("visa {}", widen_digits("4111 1111 1111 1112")),
+        widen_digits("130692544"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
 #[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
