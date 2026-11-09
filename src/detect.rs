@@ -114,8 +114,14 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // `1(416)555-0123`. A bare `1` before more digits is not this form.
     static NANP_TRUNK: LazyLock<Regex> =
         LazyLock::new(|| phone_pattern(r"1\(\d{3}\){sep}*\d{3}{sep}+\d{4}"));
-    static INTERNATIONAL: LazyLock<Regex> =
-        LazyLock::new(|| phone_pattern(r"\+\d{1,3}(?:{sep}+\d{1,4}){2,6}"));
+    // Parentheses wrap one group (`+44 (20) 7946 0958`). A trunk zero
+    // may sit against the next digits (`+33 (0)1`). The NANP separator
+    // stays without parentheses, so a bare `(416)5550123` is still not
+    // a phone.
+    static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(&r"\+\d{1,3}(?:{sep}+\d{1,4}){2,6}".replace("{sep}", r"[\s./()\p{Pd}]"))
+            .expect("international phone pattern")
+    });
     static PLUS_DIGITS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\+\d{8,15}").expect("plus digits pattern"));
     for hit in NANP.find_iter(text).chain(NANP_TRUNK.find_iter(text)) {
