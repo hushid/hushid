@@ -106,8 +106,9 @@ fn resolve(mut raw: Vec<RawHit>) -> Vec<Hit> {
 
 fn push_emails(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        // `'` and U+2019 belong in the local part (`o'brien@`). Leaving
-        // them out starts the match after the mark, so that head is sent.
+        // `'` , U+2019, and U+2018 belong in the local part (`o'brien@`).
+        // U+2018 is the left single quote. Leaving it out starts the
+        // match after the mark, so that head is sent.
         // A letter outside ASCII belongs too (`josé@`, `société.fr`),
         // including a decomposed accent. Leaving it out sends the address.
         // A hyphen mark in the local part or a domain label is part of
@@ -117,7 +118,7 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // not start on that mark, so a mark between two addresses is not
         // swallowed by the second one.
         Regex::new(
-            &r"\b[\p{L}\p{M}0-9._%+'\u{2019}][\p{L}\p{M}0-9._%+{hyphen}'\u{2019}]*@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.{hyphen}]*\.(?:\p{L}\p{M}*){2,}\b"
+            &r"\b[\p{L}\p{M}0-9._%+'\u{2018}\u{2019}][\p{L}\p{M}0-9._%+{hyphen}'\u{2018}\u{2019}]*@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.{hyphen}]*\.(?:\p{L}\p{M}*){2,}\b"
                 .replace("{hyphen}", HYPHEN),
         )
         .expect("email pattern")
@@ -291,12 +292,14 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         // Same mark as a card cue. `social insurance 130692544` stays a
         // SIN when a hyphen, an en dash, or a soft hyphen sits between
-        // the words. That phrase has no shorter cue.
+        // the words. That phrase has no shorter cue. U+2018 in
+        // `d'assurance` is the left single quote. Leaving it out sends
+        // the number.
         let gap = cue_word_gap();
         let mut patterns = vec![
             format!(r"(?i)\bsocial{gap}insurance\b"),
-            format!(r"(?i)\bnuméro{gap}d['’]assurance{gap}sociale\b"),
-            format!(r"(?i)\bnumero{gap}d['’]assurance{gap}sociale\b"),
+            format!(r"(?i)\bnuméro{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
+            format!(r"(?i)\bnumero{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
         ];
         for word in ["SIN", "NAS"] {
             patterns.push(format!(r"(?i)\b{word}\b"));
