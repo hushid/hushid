@@ -5081,3 +5081,65 @@ fn middle_dot_between_groups_still_shields_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+fn arabic_indic_digits(text: &str) -> String {
+    text.chars()
+        .map(|ch| match ch {
+            '0'..='9' => char::from_u32(0x0660 + (ch as u32 - '0' as u32)).unwrap(),
+            _ => ch,
+        })
+        .collect()
+}
+
+#[test]
+fn arabic_indic_digits_still_shield_the_number() {
+    // +44 20 7946 0958 in Arabic-Indic digits. Shield and restore.
+    // One more digit still fits in that phone. A failed Luhn card, a
+    // bare SIN, and a 3-3-4 line with a fifth digit glued on stay.
+    let phone = "+\u{0664}\u{0664} \u{0662}\u{0660} \u{0667}\u{0669}\u{0664}\u{0666} \u{0660}\u{0669}\u{0665}\u{0668}";
+    let (vault, out, audit) = shield(phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(hidden(&out, &arabic_indic_digits("7946")), "{out}");
+    assert!(hidden(&out, &arabic_indic_digits("0958")), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let longer = format!("{phone}{}", arabic_indic_digits("1"));
+    let (vault, out, audit) = shield(&longer);
+    assert_eq!(audit.phone, 1, "{longer} -> {out}");
+    assert_eq!(audit.card, 0, "{longer} -> {out}");
+    assert_eq!(audit.sin, 0, "{longer} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(hidden(&out, &arabic_indic_digits("09581")), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), longer);
+
+    let card = format!("visa {}", arabic_indic_digits("4111111111111111"));
+    let (vault, out, audit) = shield(&card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(out.starts_with("visa h1_card_"), "{out}");
+    assert!(
+        hidden(&out, &arabic_indic_digits("4111111111111111")),
+        "{out}"
+    );
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let sin = arabic_indic_digits("130692544");
+    let cued = format!("SIN {sin}");
+    let (vault, out, audit) = shield(&cued);
+    assert_eq!(audit.sin, 1, "{cued} -> {out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued);
+
+    for bare in [
+        arabic_indic_digits("(416) 555-01234"),
+        format!("visa {}", arabic_indic_digits("4111111111111112")),
+        arabic_indic_digits("130692544"),
+        "not a number".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

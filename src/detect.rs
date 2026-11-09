@@ -739,20 +739,33 @@ fn edge_gap(a0: usize, a1: usize, b0: usize, b1: usize, text: &str) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-/// ASCII digit, or a fullwidth digit U+FF10 through U+FF19.
+/// Start of each run of ten Unicode decimal digits.
 ///
-/// A wide keyboard writes those digits. The phone and card patterns
-/// already match them. Leaving them out of this count drops the match,
-/// so the number is sent. The returned byte is `0` through `9`.
+/// `\d` matches every run. ASCII and fullwidth are in this list, and so
+/// are Arabic-Indic digits. `char::to_digit` only accepts ASCII, so
+/// leaving a run out drops a number the pattern already matched, and the
+/// number is sent. The value is the offset from the start of the run.
+/// Luhn subtracts `b'0'`. A hex letter is not in a run.
+const DECIMAL_DIGIT_ZERO: [u32; 76] = [
+    0x30, 0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66, 0xCE6, 0xD66,
+    0xDE6, 0xE50, 0xED0, 0xF20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90,
+    0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10,
+    0x104A0, 0x10D30, 0x10D40, 0x11066, 0x110F0, 0x11136, 0x111D0, 0x112F0, 0x11450, 0x114D0,
+    0x11650, 0x116C0, 0x116D0, 0x116DA, 0x11730, 0x118E0, 0x11950, 0x11BF0, 0x11C50, 0x11D50,
+    0x11DA0, 0x11F50, 0x16130, 0x16A60, 0x16AC0, 0x16B50, 0x16D70, 0x1CCF0, 0x1D7CE, 0x1D7D8,
+    0x1D7E2, 0x1D7EC, 0x1D7F6, 0x1E140, 0x1E2F0, 0x1E4F0, 0x1E5F1, 0x1E950, 0x1FBF0,
+];
+
 fn narrow_digit(ch: char) -> Option<u8> {
-    if ch.is_ascii_digit() {
-        return Some(ch as u8);
+    let code = ch as u32;
+    let found = DECIMAL_DIGIT_ZERO.partition_point(|&zero| zero <= code);
+    let index = found.checked_sub(1)?;
+    let value = code - DECIMAL_DIGIT_ZERO[index];
+    if value < 10 {
+        Some(b'0' + value as u8)
+    } else {
+        None
     }
-    let value = ch as u32;
-    if (0xFF10..=0xFF19).contains(&value) {
-        return Some(b'0' + (value - 0xFF10) as u8);
-    }
-    None
 }
 
 fn digits_of(text: &str) -> Vec<u8> {
