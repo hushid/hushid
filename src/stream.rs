@@ -1,5 +1,7 @@
 use crate::sink::{judge, Judgment};
-use crate::token::{is_hold_symbol, Kind, PAYLOAD_LEN, SECRET_MARK};
+use crate::token::{
+    is_hold_symbol, parse_token_at, secret_mark_at, Kind, PAYLOAD_LEN, SECRET_MARK,
+};
 use crate::vault::Vault;
 
 /// Holds a suffix that can still grow into an `h1_` token.
@@ -68,10 +70,26 @@ impl ArgumentBuffer {
 }
 
 fn hold_len(text: &str) -> usize {
-    for (index, _) in text.char_indices() {
+    // A finished token can end in `H` or `H1`. Those bytes also start `h1_`.
+    // Consume the finished span first. Holding that tail emits the token
+    // without its check character, so restore cannot put the bytes back.
+    let mut index = 0;
+    while index < text.len() {
+        if let Some(end) = secret_mark_at(text, index) {
+            index = end;
+            continue;
+        }
+        if let Some(parsed) = parse_token_at(text, index) {
+            index = parsed.end;
+            continue;
+        }
         if is_incomplete_prefix(&text[index..]) {
             return text.len() - index;
         }
+        let Some(ch) = text[index..].chars().next() else {
+            break;
+        };
+        index += ch.len_utf8();
     }
     0
 }

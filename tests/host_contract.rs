@@ -1,7 +1,7 @@
 use hushid::{
-    accept_non_text, parse_identifiers_config, restore_json_write, shield_json_strings,
-    shield_text, shielding_active, ArgumentBuffer, Glossary, HeldStream, Judgment, Kind, Mode,
-    Session, Sink, Vault,
+    accept_non_text, format_token, parse_identifiers_config, restore_json_write,
+    shield_json_strings, shield_text, shielding_active, ArgumentBuffer, Glossary, HeldStream,
+    Judgment, Kind, Mode, Session, Sink, Vault,
 };
 use std::fs;
 use std::path::Path;
@@ -260,6 +260,52 @@ fn stream_holds_a_split_token_until_it_is_complete() {
     let second = stream.push_restore(&token[split..], &vault);
     let done = stream.finish_restore(&vault);
     assert_eq!(format!("{first}{second}{done}"), "a@b.co");
+}
+
+#[test]
+fn stream_restores_a_token_whose_tail_looks_like_h1() {
+    for suffix in ["H", "H1"] {
+        let mut vault = Vault::new();
+        let token = email_token_ending_with(&mut vault, suffix);
+        let mut stream = HeldStream::new();
+        let whole = stream.push_restore(&token, &vault);
+        let done = stream.finish_restore(&vault);
+        assert_eq!(
+            format!("{whole}{done}"),
+            "a@b.co",
+            "{token} -> {whole}{done}"
+        );
+
+        let mut stream = HeldStream::new();
+        let cut = token.len() - suffix.len();
+        let first = stream.push_restore(&token[..cut], &vault);
+        assert!(!first.contains('@'), "{token} -> {first}");
+        let second = stream.push_restore(&token[cut..], &vault);
+        let done = stream.finish_restore(&vault);
+        assert_eq!(
+            format!("{first}{second}{done}"),
+            "a@b.co",
+            "{token} -> {first}{second}{done}"
+        );
+    }
+}
+
+fn email_token_ending_with(vault: &mut Vault, suffix: &str) -> String {
+    let alphabet = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    for &left in alphabet {
+        for &right in alphabet {
+            let payload = format!("AAAAAA{}{}", left as char, right as char);
+            let token = format_token(Kind::Email, &payload).unwrap();
+            if token.ends_with(suffix) {
+                let issued = vault
+                    .issue_payload(Kind::Email, &payload, b"a@b.co")
+                    .unwrap();
+                assert_eq!(issued, token);
+                return issued;
+            }
+        }
+    }
+    panic!("no email token ends with {suffix}");
 }
 
 #[test]
