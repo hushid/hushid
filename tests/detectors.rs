@@ -2623,6 +2623,141 @@ fn gitlab_routable_access_token_is_masked() {
 }
 
 #[test]
+fn gitlab_slack_and_stripe_prefixes_are_masked() {
+    let payload = "a".repeat(20);
+    let prefixes = [
+        "glagent", "glffct", "glsoat", "glrtr", "glcbt", "glptt", "glimt", "gloas", "gldt", "glft",
+        "glrt", "glwt",
+    ];
+    for prefix in prefixes {
+        let token = format!("{prefix}-{payload}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, prefix), "{token} -> {out}");
+        assert!(hidden(&out, &payload), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token} -> {out}");
+    }
+
+    let runner = format!("glrtr-{payload}");
+    let (_vault, out, _) = shield(&format!("export GITLAB_TOKEN={runner} please"));
+    assert_eq!(out, "export GITLAB_TOKEN=h1_secret please");
+
+    let followed = format!("gldt-{payload}.something");
+    let (_vault, out, audit) = shield(&followed);
+    assert_eq!(audit.secret, 1, "{followed} -> {out}");
+    assert_eq!(out, "h1_secret.something", "{followed} -> {out}");
+
+    let slack_tail = "a".repeat(10);
+    for token in [
+        format!("xapp-1-A052FGTS2DL-{slack_tail}"),
+        format!("xoxe.xapp-1-{slack_tail}"),
+        format!("xoxe.xoxb-{slack_tail}"),
+        format!("xoxe.xoxp-{slack_tail}"),
+        format!("xoxe-{slack_tail}"),
+        format!("xoxb-{slack_tail}"),
+    ] {
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        if token.contains("A052FGTS2DL") {
+            assert!(hidden(&out, "A052FGTS2DL"), "{token} -> {out}");
+        }
+        assert!(hidden(&out, &slack_tail), "{token} -> {out}");
+        assert!(!out.contains("xox"), "{token} -> {out}");
+        assert!(!out.contains("xapp"), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let app = format!("xapp-{slack_tail}");
+    let (_vault, out, _) = shield(&format!("see {app}.next"));
+    assert_eq!(out, "see h1_secret.next");
+
+    let hook = format!("whsec_{}", "b".repeat(32));
+    let (vault, out, audit) = shield(&format!("endpoint {hook} please"));
+    assert_eq!(audit.secret, 1, "{hook} -> {out}");
+    assert_eq!(out, "endpoint h1_secret please");
+    assert!(hidden(&out, "whsec"), "{out}");
+    assert!(hidden(&out, &"b".repeat(32)), "{out}");
+    assert!(!vault.holds_surface(hook.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let minimum = format!("whsec_{}", "c".repeat(20));
+    let (vault, out, audit) = shield(&minimum);
+    assert_eq!(out, "h1_secret", "{minimum} -> {out}");
+    assert_eq!(audit.secret, 1);
+    assert!(!vault.holds_surface(minimum.as_bytes()));
+
+    for bare in [
+        format!("gldt-{}", "a".repeat(19)),
+        format!("xgldt-{payload}"),
+        format!("x{runner}"),
+        format!("xapp-{}", "a".repeat(9)),
+        format!("xxapp-{slack_tail}"),
+        format!("whsec_{}", "b".repeat(19)),
+        format!("xwhsec_{}", "b".repeat(20)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+
+    let raw = format!(r#"{{"token":"gldt-{payload}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &payload), "{out}");
+    assert!(!vault.holds_surface(format!("gldt-{payload}").as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+}
+
+#[test]
+fn secret_access_key_assignment_is_masked() {
+    let secret = "a".repeat(16);
+    for text in [
+        format!("AWS_SECRET_ACCESS_KEY={secret}"),
+        format!("secret access key={secret}"),
+        format!("secret-access-key={secret}"),
+        format!("export AWS_SECRET_ACCESS_KEY={secret} please"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(hidden(&out, &secret), "{text} -> {out}");
+        assert!(out.contains("h1_secret"), "{text} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{text}");
+        assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+    }
+    let exported = format!("export AWS_SECRET_ACCESS_KEY={secret} please");
+    let (_vault, out, _) = shield(&exported);
+    assert_eq!(out, "export h1_secret please");
+
+    let raw = format!(r#"{{"AWS_SECRET_ACCESS_KEY":"{secret}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"AWS_SECRET_ACCESS_KEY":"h1_secret"}"#);
+    assert!(hidden(&out, &secret), "{out}");
+    assert!(!vault.holds_surface(secret.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for text in [
+        format!("AWS_SECRET_ACCESS_KEY={}", "a".repeat(15)),
+        format!("secret/access/key={secret}"),
+        format!("secret.access.key={secret}"),
+        format!("notSECRET_ACCESS_KEY={secret}"),
+        format!("secret access={secret}"),
+    ] {
+        let (_vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 0, "{text} -> {out}");
+        assert_eq!(out, text, "{text} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();

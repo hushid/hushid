@@ -327,7 +327,19 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // clear. A 20-character token has no tail. A following word
             // stays outside it.
             r"\bglpat-(?:[A-Za-z0-9_\-]{27,}(?:\.[0-9a-z]{2}\.[0-9a-z]{9}|\.[0-9a-z]{9})|[A-Za-z0-9_\-]{20,})\b",
+            // The other GitLab token prefixes from the token overview.
+            // `glpat-` is handled above. `glwt-` is the workspace token.
+            // Leaving one of these out sends the token. Longer prefixes
+            // come first so `glrtr-` is not cut down to `glrt-`.
+            r"\b(?:glagent|glffct|glsoat|glrtr|glcbt|glptt|glimt|gloas|gldt|glft|glrt|glwt)-[A-Za-z0-9_\-]{20,}\b",
             r"\bxox[baprs]-[0-9A-Za-z-]{10,}",
+            // App-level tokens are `xapp-`, not `xoxb-`. Rotating tokens are
+            // `xoxe.xapp-` or `xoxe.xoxb-`, and the refresh token is `xoxe-`.
+            // Leaving the prefix out sends the token.
+            r"\bxapp-[A-Za-z0-9-]{10,}\b",
+            r"\bxoxe(?:\.xapp|\.xox[baprs])?-[A-Za-z0-9-]{10,}\b",
+            // Stripe webhook signing secret. Leaving the prefix out sends it.
+            r"\bwhsec_[A-Za-z0-9]{20,}\b",
             r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{10,}\b",
             r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}\b",
             r"\bAIza[0-9A-Za-z_\-]{35}\b",
@@ -366,10 +378,12 @@ const SECRET_RUN: &str = r"[A-Za-z0-9+/=_\-]{16,}";
 /// `auth-token` is an underscore or a hyphen mark. An ASCII hyphen is
 /// not the only one. An en dash, a minus sign, or a soft hyphen is
 /// still that name. Whitespace between the words is that name too, so
-/// `api key` counts. Leaving the space or the hyphen mark out sends the value.
+/// `api key` counts. `secret_access_key` is the AWS env name, including
+/// spaces or hyphens between the words. Leaving that name out sends the
+/// value. A slash or a dot between the words is not this name.
 fn assignment_name() -> String {
     let gap = format!("(?:{})*", hyphen_class(r"_\s"));
-    r"(?:[A-Za-z0-9_]*_)?(?:api{gap}key|secret{gap}key|access{gap}token|auth{gap}token)"
+    r"(?:[A-Za-z0-9_]*_)?(?:api{gap}key|secret{gap}access{gap}key|secret{gap}key|access{gap}token|auth{gap}token)"
         .replace("{gap}", &gap)
 }
 
