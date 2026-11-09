@@ -4476,3 +4476,186 @@ fn decomposed_accent_in_the_sin_cue_still_shields_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn fullwidth_digits_still_shield_the_address() {
+    // `user1@example.com` is already an email, in the local part or the
+    // domain. A wide keyboard writes those digits as U+FF10 through
+    // U+FF19. Leaving them out sends the address. A short tail, a
+    // missing domain, and a digit glued to the final label stay as
+    // written, same as an ASCII digit in that spot.
+    let digit = '\u{FF11}';
+    let cases = [
+        (
+            format!("user{digit}@example.com"),
+            "user".to_string(),
+            "example".to_string(),
+        ),
+        (
+            widen_digits("123@example.com"),
+            widen_digits("123"),
+            "example".to_string(),
+        ),
+        (
+            format!("{digit}@b.co"),
+            digit.to_string(),
+            "b.co".to_string(),
+        ),
+        (
+            format!("user@ex{digit}ample.com"),
+            "user".to_string(),
+            "ample".to_string(),
+        ),
+        (
+            format!("user@{digit}example.com"),
+            "user".to_string(),
+            "example".to_string(),
+        ),
+        (
+            format!("user@example{digit}.com"),
+            "user".to_string(),
+            "example".to_string(),
+        ),
+        (
+            widen_digits("user@123.com"),
+            "user".to_string(),
+            "com".to_string(),
+        ),
+        (
+            format!("user@ex{digit}ample.co.uk"),
+            "user".to_string(),
+            "uk".to_string(),
+        ),
+        (
+            format!("user.{digit}.name@example.com"),
+            "user".to_string(),
+            "name".to_string(),
+        ),
+        (
+            format!("o'brien{digit}@example.com"),
+            "brien".to_string(),
+            "example".to_string(),
+        ),
+        (
+            format!("josé{digit}@société.fr"),
+            "josé".to_string(),
+            "société".to_string(),
+        ),
+        (
+            format!("Jean-Luc{digit}@Example.COM"),
+            "Jean".to_string(),
+            "Example".to_string(),
+        ),
+        (
+            format!("user{digit}\u{FF20}example.com"),
+            "user".to_string(),
+            "example".to_string(),
+        ),
+        (
+            format!("user{digit}@example\u{FF0E}com"),
+            "user".to_string(),
+            "example".to_string(),
+        ),
+    ];
+    for (email, local, domain) in cases {
+        let (vault, out, audit) = shield(&email);
+        assert_eq!(audit.email, 1, "{email} -> {out}");
+        assert_eq!(audit.phone, 0, "{email} -> {out}");
+        assert_eq!(audit.card, 0, "{email} -> {out}");
+        assert_eq!(audit.sin, 0, "{email} -> {out}");
+        assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+        assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+        assert!(!out.contains('@'), "{email} -> {out}");
+        assert!(!out.contains('\u{FF20}'), "{email} -> {out}");
+        assert!(
+            !out.chars()
+                .any(|ch| ('\u{FF10}'..='\u{FF19}').contains(&ch)),
+            "{email} -> {out}"
+        );
+        assert!(hidden(&out, &local), "{email} -> {out}");
+        assert!(hidden(&out, &domain), "{email} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), email);
+    }
+
+    let sentence = format!("mail user{digit}@example.com today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "user"), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let dotted = format!("mail user{digit}@example.com.");
+    let (vault, out, audit) = shield(&dotted);
+    assert_eq!(audit.email, 1, "{dotted} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with('.'), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), dotted);
+
+    let wrapped = format!("(user{digit}@example.com)");
+    let (vault, out, audit) = shield(&wrapped);
+    assert_eq!(audit.email, 1, "{wrapped} -> {out}");
+    assert!(out.starts_with("(h1_email_"), "{out}");
+    assert!(out.ends_with(')'), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), wrapped);
+
+    let pair = format!("a@b.co and user{digit}@example.com");
+    let (vault, out, audit) = shield(&pair);
+    assert_eq!(audit.email, 2, "{pair} -> {out}");
+    assert_eq!(out.matches("h1_email_").count(), 2, "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert!(hidden(&out, "b.co"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    let raw = format!(r#"{{"to":"user{digit}@example.com"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.email, 1, "{raw} -> {out}");
+    assert!(!out.contains('@'), "{raw} -> {out}");
+    assert!(hidden(&out, "example"), "{raw} -> {out}");
+    assert!(
+        !out.chars()
+            .any(|ch| ('\u{FF10}'..='\u{FF19}').contains(&ch)),
+        "{raw} -> {out}"
+    );
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let prose = format!("user{digit} wrote a@b.co");
+    let (vault, out, audit) = shield(&prose);
+    assert_eq!(audit.email, 1, "{prose} -> {out}");
+    assert!(
+        out.starts_with(&format!("user{digit} wrote h1_email_")),
+        "{out}"
+    );
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), prose);
+
+    let spaced = format!("note{digit} a@b.co");
+    let (vault, out, audit) = shield(&spaced);
+    assert_eq!(audit.email, 1, "{spaced} -> {out}");
+    assert!(out.starts_with(&format!("note{digit} h1_email_")), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), spaced);
+
+    for bare in [
+        format!("user{digit}@example"),
+        format!("user{digit}@example.c"),
+        format!("user{digit}@.com"),
+        format!("user{digit}@home"),
+        format!("{digit}@example.c"),
+        format!("user@example.co{digit}"),
+        format!("user@example.com{digit}"),
+        widen_digits("12345"),
+        format!("see {digit} please"),
+        format!("user {digit} example.com"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

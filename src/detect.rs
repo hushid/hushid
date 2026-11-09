@@ -119,6 +119,13 @@ const AT: &str = r"[@\u{FF20}]";
 /// character is `\u{FF0E}` beside `.`.
 const DOT: &str = r"(?:\.|\u{FF0E})";
 
+/// ASCII digits and fullwidth digits U+FF10 through U+FF19, inside a class.
+///
+/// A wide keyboard writes `１` where an address already allows `1`.
+/// Leaving that digit out sends the address. The final label stays
+/// letters only, so a digit glued to it is still outside the address.
+const DIGIT: &str = r"0-9\u{FF10}-\u{FF19}";
+
 fn push_emails(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         // `'` , U+2019, and U+2018 belong in the local part (`o'brien@`).
@@ -137,8 +144,13 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // The dot may be ASCII `.` or the fullwidth stop U+FF0E. That
         // keyboard writes the stop in the local part and the domain.
         // Leaving it out sends the address.
+        // A digit in the local part or the domain may be fullwidth,
+        // U+FF10 through U+FF19. That keyboard writes `user１@`.
+        // Leaving it out sends the address. A digit glued to the final
+        // label stays outside it, same as `user@example.co1`.
         Regex::new(
-            &r"\b[\p{L}\p{M}0-9.\u{FF0E}_%+'\u{2018}\u{2019}][\p{L}\p{M}0-9.\u{FF0E}_%+{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}0-9][\p{L}\p{M}0-9.\u{FF0E}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
+            &r"\b[\p{L}\p{M}{digit}.\u{FF0E}_%+'\u{2018}\u{2019}][\p{L}\p{M}{digit}.\u{FF0E}_%+{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}{digit}][\p{L}\p{M}{digit}.\u{FF0E}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
+                .replace("{digit}", DIGIT)
                 .replace("{hyphen}", HYPHEN)
                 .replace("{at}", AT)
                 .replace("{dot}", DOT),
