@@ -3324,6 +3324,70 @@ fn fullwidth_plus_still_shields_the_number() {
 }
 
 #[test]
+fn fullwidth_parentheses_still_shield_the_number() {
+    // `(416) 555-0123` is already a phone, and so is `+44 (20) 7946 0958`.
+    // A wide keyboard writes the parentheses as U+FF08 and U+FF09. Leaving
+    // those marks out sends the number. Five digits glued to the closing
+    // mark stay as written, the same as an ASCII parenthesis.
+    let open = "\u{FF08}";
+    let close = "\u{FF09}";
+    for phone in [
+        format!("{open}416{close} 555-0123"),
+        format!("{open}416{close}555-0123"),
+        format!("{open} 416 {close} 555-0123"),
+        format!("1{open}416{close}555-0123"),
+        format!("+1{open}416{close}555-0123"),
+        format!("+44 {open}20{close} 7946 0958"),
+        format!("+44{open}20{close}7946 0958"),
+    ] {
+        let (vault, out, audit) = shield(&phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert!(!out.contains(open), "{phone} -> {out}");
+        assert!(!out.contains(close), "{phone} -> {out}");
+        for group in ["416", "0123", "7946", "0958"] {
+            if phone.contains(group) {
+                assert!(hidden(&out, group), "{phone} -> {out}");
+            }
+        }
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = format!("call {open}416{close}555-0123 today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "0123"), "{out}");
+    assert!(!out.contains(open), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let raw = format!(r#"{{"tel":"{open}416{close}555-0123"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "416"), "{raw} -> {out}");
+    assert!(!out.contains(open), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        format!("{open}416{close}5550123"),
+        format!("+44{open}20{close}79460958"),
+        format!("cost {open}shipping{close}"),
+        format!("{open}see 416{close} 555-0123"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
