@@ -253,16 +253,21 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
     push_assignment_secrets(text, out);
 }
 
+const ASSIGNMENT_NAME: &str =
+    r"(?:[A-Za-z0-9_]*_)?(?:api[_\-]?key|apikey|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)";
+
+const SECRET_RUN: &str = r"[A-Za-z0-9+/=_\-]{16,}";
+
 /// `api_key`, `secret_key`, `access_token`, and `auth_token` assignments.
 ///
 /// `_` is a word character, so a word boundary misses `MY_API_KEY`. The
-/// name may have a prefix before that `_`. The character before the name
-/// stays outside the span.
+/// name may have a prefix before that `_`. A JSON key puts a quote between
+/// the name and the colon. The character before the name stays outside the span.
 fn push_assignment_secrets(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
-            r#"(?i)(?:^|[^A-Za-z0-9_])((?:[A-Za-z0-9_]*_)?(?:api[_\-]?key|apikey|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)\s*[=:]\s*["']?[A-Za-z0-9+/=_\-]{16,})"#,
-        )
+        Regex::new(&format!(
+            r#"(?i)(?:^|[^A-Za-z0-9_])({ASSIGNMENT_NAME}"?\s*[=:]\s*["']?{SECRET_RUN})"#
+        ))
         .expect("secret assignment pattern")
     });
     for caps in RE.captures_iter(text) {
@@ -279,6 +284,25 @@ fn push_assignment_secrets(text: &str, out: &mut Vec<RawHit>) {
             },
         });
     }
+}
+
+/// Length of a secret run at the start of a JSON string value.
+///
+/// `json_prefix` is the document up to and including that value's opening
+/// quote. The key has to be an assignment name, immediately before the colon.
+pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option<usize> {
+    static KEY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(&format!(
+            r#"(?i)(?:^|[^A-Za-z0-9_]){ASSIGNMENT_NAME}"\s*:\s*"$"#
+        ))
+        .expect("json assignment key")
+    });
+    static RUN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(&format!(r"^{SECRET_RUN}")).expect("secret run"));
+    if !KEY.is_match(json_prefix) {
+        return None;
+    }
+    RUN.find(value).map(|hit| hit.end())
 }
 
 fn span(tier: u8, kind: Kind, start: usize, end: usize) -> RawHit {

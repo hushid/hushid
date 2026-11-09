@@ -1,5 +1,5 @@
 use crate::audit::AuditRecord;
-use crate::detect::{find_hits, Hit};
+use crate::detect::{assignment_secret_prefix, find_hits, Hit};
 use crate::glossary::Glossary;
 use crate::shield::shield_in_context;
 use crate::token::{find_h1, TokenError, SECRET_MARK};
@@ -36,8 +36,9 @@ impl std::error::Error for JsonError {}
 /// A number is replaced with a quoted token and restored as a number. A string
 /// whose text is itself a JSON object or array is shielded again. A cue beside
 /// a string or a key counts the same way it does in plain text, including a
-/// value inside that nested document. Keys and numbers that no detector
-/// recognizes stay as they are.
+/// value inside that nested document. A key that names an API-key assignment
+/// masks that value with the shared secret mark, and the value is not stored.
+/// Keys and numbers that no detector recognizes stay as they are.
 pub fn shield_json_strings(
     vault: &mut Vault,
     glossary: &Glossary,
@@ -77,15 +78,24 @@ fn shield_document(
             let is_key = bytes.get(after) == Some(&b':');
             let before_ctx = join_suffix(outer_before, &input[..index + 1], CUE_CONTEXT_CHARS);
             let after_ctx = join_prefix(&input[end - 1..], outer_after, CUE_CONTEXT_CHARS);
-            let mapped = shield_decoded(
-                vault,
-                glossary,
-                &decoded,
-                audit,
-                depth,
-                is_key,
-                (&before_ctx, &after_ctx),
-            )?;
+            let secret_end = if is_key {
+                None
+            } else {
+                assignment_secret_prefix(&input[..index + 1], &decoded)
+            };
+            let mapped = if let Some(secret_end) = secret_end {
+                mask_assignment_value(vault, glossary, &decoded, secret_end, audit)?
+            } else {
+                shield_decoded(
+                    vault,
+                    glossary,
+                    &decoded,
+                    audit,
+                    depth,
+                    is_key,
+                    (&before_ctx, &after_ctx),
+                )?
+            };
             out.push('"');
             out.push_str(&encode_json(&mapped));
             out.push('"');
@@ -113,6 +123,24 @@ fn shield_document(
         index += ch.len_utf8();
     }
     Ok(out)
+}
+
+fn mask_assignment_value(
+    vault: &mut Vault,
+    glossary: &Glossary,
+    decoded: &str,
+    secret_end: usize,
+    audit: &mut AuditRecord,
+) -> Result<String, JsonError> {
+    let mut mapped = SECRET_MARK.to_string();
+    if secret_end < decoded.len() {
+        let (rest, part) = shield_in_context(vault, glossary, "", &decoded[secret_end..], "")
+            .map_err(JsonError::Token)?;
+        mapped.push_str(&rest);
+        audit.merge(&part);
+    }
+    audit.secret += 1;
+    Ok(mapped)
 }
 
 fn shield_decoded(

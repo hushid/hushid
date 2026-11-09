@@ -1,4 +1,6 @@
-use hushid::{shield_text, Glossary, Vault, DETECTOR_VERSION};
+use hushid::{
+    restore_json_write, shield_json_strings, shield_text, Glossary, Vault, DETECTOR_VERSION,
+};
 
 fn shield(text: &str) -> (Vault, String, hushid::AuditRecord) {
     let mut vault = Vault::new();
@@ -249,6 +251,153 @@ fn underscore_before_an_api_key_name_still_masks_the_value() {
         let (_vault, out, audit) = shield(&text);
         assert_eq!(audit.secret, 0, "{text} -> {out}");
         assert_eq!(out, text);
+    }
+}
+
+#[test]
+fn json_quote_between_an_api_key_name_and_the_value_still_masks_it() {
+    let secret = "a".repeat(16);
+    let raw = format!(r#"{{"api_key":"{secret}"}}"#);
+    let (vault, out, audit) = shield(&raw);
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"h1_secret"}"#);
+    assert!(!out.contains(&secret), "{out}");
+    assert!(!vault.holds_surface(secret.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for raw in [
+        format!(r#"{{"api_key": "{secret}"}}"#),
+        format!(r#"{{"MY_API_KEY":"{secret}"}}"#),
+        format!(r#"{{"api-key":"{secret}"}}"#),
+        format!(r#"{{"APP_SECRET_KEY":"{secret}"}}"#),
+        format!(r#"{{"X_ACCESS_TOKEN":"{secret}"}}"#),
+        format!(r#"{{"auth_token":"{secret}"}}"#),
+        format!("{{\n  \"api_key\": \"{secret}\"\n}}"),
+    ] {
+        let (vault, out, audit) = shield(&raw);
+        assert_eq!(audit.secret, 1, "{raw} -> {out}");
+        assert!(!out.contains(&secret), "{raw} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{raw}");
+    }
+
+    let quoted = format!("api_key=\"{secret}\"");
+    let (_vault, out, audit) = shield(&quoted);
+    assert_eq!(audit.secret, 1, "{quoted} -> {out}");
+    assert_eq!(out, "h1_secret\"");
+    let single = format!("api_key='{secret}'");
+    let (_vault, out, audit) = shield(&single);
+    assert_eq!(audit.secret, 1, "{single} -> {out}");
+    assert_eq!(out, "h1_secret'");
+
+    let documents = [
+        (
+            format!(r#"{{"api_key":"{secret}"}}"#),
+            r#"{"api_key":"h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"api_key": "{secret}"}}"#),
+            r#"{"api_key": "h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"MY_API_KEY":"{secret}"}}"#),
+            r#"{"MY_API_KEY":"h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"api-key":"{secret}"}}"#),
+            r#"{"api-key":"h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"APP_SECRET_KEY":"{secret}","X_ACCESS_TOKEN":"{secret}"}}"#),
+            r#"{"APP_SECRET_KEY":"h1_secret","X_ACCESS_TOKEN":"h1_secret"}"#.to_string(),
+            2,
+            0,
+        ),
+        (
+            format!("{{\n  \"auth_token\": \"{secret}\"\n}}"),
+            "{\n  \"auth_token\": \"h1_secret\"\n}".to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"cfg":"{{\"api_key\":\"{secret}\"}}"}}"#),
+            r#"{"cfg":"{\"api_key\":\"h1_secret\"}"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"wrap":{{"secret_key":"{secret}"}}}}"#),
+            r#"{"wrap":{"secret_key":"h1_secret"}}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"api_key":"{secret} a@b.co"}}"#),
+            String::new(),
+            1,
+            1,
+        ),
+        (
+            r#"{"api_key":"4111-1111-1111-1111"}"#.to_string(),
+            r#"{"api_key":"h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            format!(r#"{{"api_key":"sk-{}"}}"#, "b".repeat(20)),
+            r#"{"api_key":"h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+        (
+            r#"{"api_key":1234567890123456}"#.to_string(),
+            r#"{"api_key":"h1_secret"}"#.to_string(),
+            1,
+            0,
+        ),
+    ];
+    for (input, expect, secrets, emails) in documents {
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+        assert_eq!(audit.secret, secrets, "{input} -> {out}");
+        assert_eq!(audit.email, emails, "{input} -> {out}");
+        assert_eq!(audit.card, 0, "{input} -> {out}");
+        assert!(!out.contains(&secret), "{input} -> {out}");
+        assert!(!out.contains("4111-1111-1111-1111"), "{input} -> {out}");
+        assert!(!out.contains("1234567890123456"), "{input} -> {out}");
+        assert!(!out.contains("a@b.co"), "{input} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{input}");
+        assert!(!vault.holds_surface(b"4111-1111-1111-1111"), "{input}");
+        assert!(!vault.holds_surface(b"1234567890123456"), "{input}");
+        if !expect.is_empty() {
+            assert_eq!(out, expect, "{input}");
+        } else {
+            assert!(out.starts_with(r#"{"api_key":"h1_secret "#), "{out}");
+            assert!(out.contains("h1_email_"), "{out}");
+        }
+        assert!(restore_json_write(&vault, &out).is_err(), "{out}");
+    }
+
+    for input in [
+        format!(r#"{{"api_key":"{}"}}"#, "a".repeat(15)),
+        format!(r#"{{"note":"{secret}"}}"#),
+        format!(r#"{{"somethingapi_key":"{secret}"}}"#),
+        format!(r#"{{"secret":"{secret}"}}"#),
+        format!(r#"{{"api_key":"short","n":"{secret}"}}"#),
+        r#"{"api_key":12345}"#.to_string(),
+    ] {
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+        assert_eq!(audit.secret, 0, "{input} -> {out}");
+        assert_eq!(audit.email, 0, "{input} -> {out}");
+        assert_eq!(out, input);
     }
 }
 
