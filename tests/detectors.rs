@@ -5325,3 +5325,68 @@ fn fullwidth_plus_in_the_local_part_still_shields_the_address() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn telegram_bot_token_is_masked() {
+    // The Bot API describes a bot token as digits, a colon, and a
+    // secret. Its sample (`123456:` plus 34 characters) is not a fixed
+    // length. This rule uses 8 to 10 digits and a 35-character secret.
+    // A shorter tail stays as written. A bare number stays as written.
+    let token = format!("12345678:{}", "a".repeat(35));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "12345678"), "{token} -> {out}");
+    assert!(hidden(&out, &"a".repeat(35)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let ten = format!("1234567890:{}", "b".repeat(35));
+    let (vault, out, audit) = shield(&ten);
+    assert_eq!(audit.secret, 1, "{ten} -> {out}");
+    assert_eq!(out, "h1_secret", "{ten} -> {out}");
+    assert!(hidden(&out, "1234567890"), "{ten} -> {out}");
+    assert!(hidden(&out, &"b".repeat(35)), "{ten} -> {out}");
+    assert!(!vault.holds_surface(ten.as_bytes()), "{ten}");
+    assert!(vault.restore_write(&out).is_err(), "{ten}");
+
+    let tail = "c".repeat(35);
+    let embedded_token = format!("123456789:{tail}");
+    let embedded = format!("see {embedded_token}.next");
+    let (vault, out, audit) = shield(&embedded);
+    assert_eq!(audit.secret, 1, "{embedded} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{embedded} -> {out}");
+    assert!(hidden(&out, "123456789"), "{embedded} -> {out}");
+    assert!(hidden(&out, &tail), "{embedded} -> {out}");
+    assert!(
+        !vault.holds_surface(embedded_token.as_bytes()),
+        "{embedded}"
+    );
+    assert!(vault.restore_write(&out).is_err(), "{embedded}");
+
+    // `AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw` is 34 characters. The Bot
+    // API sample secret is 34 too. This keeps that alphabet and is
+    // exactly 35.
+    let mixed_body = "ABC-DEF1234ghIkl-zyx57W2v1u123ew11A";
+    assert_eq!(mixed_body.len(), 35);
+    let mixed = format!("123456789:{mixed_body}");
+    let (vault, out, audit) = shield(&mixed);
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "h1_secret", "{mixed} -> {out}");
+    assert!(hidden(&out, "123456789"), "{mixed} -> {out}");
+    assert!(hidden(&out, mixed_body), "{mixed} -> {out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()), "{mixed}");
+    assert!(vault.restore_write(&out).is_err(), "{mixed}");
+
+    for bare in [
+        format!("1234567:{}", "a".repeat(35)),
+        format!("123456789:{}", "a".repeat(34)),
+        format!("123456789:{}", "a".repeat(36)),
+        "123456789".to_string(),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
