@@ -149,12 +149,13 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
 
 fn push_cards(text: &str, out: &mut Vec<RawHit>) {
     static GROUPED: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-        // 4-4-4-4-3, 6-13, 4-6-5, 4-6-4, 4-4-4-4, and 4-4-4-3. Each
-        // shape is its own search. One alternation would take a
+        // 4-4-4-4-3, 6-13, 4-6-5, 4-6-4, 4-4-4-4, 4-4-4-3, and 4-4-5.
+        // Each shape is its own search. One alternation would take a
         // 16-digit card plus a three-digit tail, fail Luhn, and skip
         // the card. The separator is a run of whitespace, dots, or
         // dash punctuation (`4111 - 1111 - 1111 - 1111`, including a
-        // figure dash or an en dash).
+        // figure dash or an en dash). Four, four, five is the 13-digit
+        // grouping.
         [
             r"\d{4}(?:{sep}+\d{4}){3}{sep}+\d{3}",
             r"\d{6}{sep}+\d{13}",
@@ -162,6 +163,7 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
             r"\d{4}{sep}+\d{6}{sep}+\d{4}",
             r"\d{4}(?:{sep}+\d{4}){3}",
             r"\d{4}(?:{sep}+\d{4}){2}{sep}+\d{3}",
+            r"\d{4}{sep}+\d{4}{sep}+\d{5}",
         ]
         .into_iter()
         .map(|pattern| {
