@@ -53,6 +53,65 @@ fn email_round_trip_keeps_exact_bytes() {
 }
 
 #[test]
+fn email_apostrophe_stays_inside_the_address() {
+    for email in [
+        "o'brien@example.com",
+        "marie.o'brien@example.com",
+        "o'brien+tag@example.com",
+        "O'Brien@Example.COM",
+        "o\u{2019}brien@example.com",
+    ] {
+        let (vault, out, audit) = shield(email);
+        assert_eq!(audit.email, 1, "{email} -> {out}");
+        assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+        assert!(!out.contains('\''), "{email} -> {out}");
+        assert!(!out.contains('\u{2019}'), "{email} -> {out}");
+        assert!(!out.contains('@'), "{email} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), email);
+    }
+
+    let sentence = "mail o'brien@example.com today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("o'"), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let dotted = "mail o'brien@example.com.";
+    let (vault, out, audit) = shield(dotted);
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with('.'), "{out}");
+    assert!(!out.contains("o'"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), dotted);
+
+    let quoted = "see 'o'brien@example.com' now";
+    let (vault, out, audit) = shield(quoted);
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.starts_with("see 'h1_email_"), "{out}");
+    assert!(out.ends_with("' now"), "{out}");
+    assert!(!out.contains("o'brien"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), quoted);
+
+    let prose = "o'brien wrote a@b.co";
+    let (vault, out, audit) = shield(prose);
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.starts_with("o'brien wrote h1_email_"), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), prose);
+
+    let raw = r#"{"to":"o'brien@example.com"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains("o'"), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+}
+
+#[test]
 fn prose_name_is_not_a_hit() {
     let (_vault, out, audit) = shield("Marie lives in Montreal");
     assert_eq!(out, "Marie lives in Montreal");
