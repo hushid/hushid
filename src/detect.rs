@@ -130,16 +130,22 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
 }
 
 fn push_cards(text: &str, out: &mut Vec<RawHit>) {
-    static GROUPED: LazyLock<Regex> = LazyLock::new(|| {
-        // 4-6-5, then 4-6-4, then 4-4-4-4, then 4-4-4-3. A shorter
-        // alternative first eats a longer group, and the extra digit
-        // makes that match fail the boundary check. The separator is a
-        // run of spaces, dots, or ASCII hyphens
+    static GROUPED: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        // 4-4-4-4-3, 4-6-5, 4-6-4, 4-4-4-4, and 4-4-4-3. Each shape is
+        // its own search. One alternation would take a 16-digit card
+        // plus a three-digit tail, fail Luhn, and skip the card. The
+        // separator is a run of spaces, dots, or ASCII hyphens
         // (`4111 - 1111 - 1111 - 1111`).
-        Regex::new(
-            r"\d{4}[\s.\-]+\d{6}[\s.\-]+\d{5}|\d{4}[\s.\-]+\d{6}[\s.\-]+\d{4}|\d{4}(?:[\s.\-]+\d{4}){3}|\d{4}(?:[\s.\-]+\d{4}){2}[\s.\-]+\d{3}",
-        )
-        .expect("grouped card pattern")
+        [
+            r"\d{4}(?:[\s.\-]+\d{4}){3}[\s.\-]+\d{3}",
+            r"\d{4}[\s.\-]+\d{6}[\s.\-]+\d{5}",
+            r"\d{4}[\s.\-]+\d{6}[\s.\-]+\d{4}",
+            r"\d{4}(?:[\s.\-]+\d{4}){3}",
+            r"\d{4}(?:[\s.\-]+\d{4}){2}[\s.\-]+\d{3}",
+        ]
+        .into_iter()
+        .map(|pattern| Regex::new(pattern).expect("grouped card pattern"))
+        .collect()
     });
     static RUN: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\d{13,19}").expect("card run pattern"));
@@ -161,13 +167,15 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         .map(|pattern| Regex::new(pattern).expect("card cue"))
         .collect()
     });
-    for hit in GROUPED.find_iter(text) {
-        if !digit_bounded(text, hit.start(), hit.end()) {
-            continue;
-        }
-        let digits = digits_of(hit.as_str());
-        if (13..=19).contains(&digits.len()) && luhn_ok(&digits) {
-            out.push(span(TIER_CARD, Kind::Card, hit.start(), hit.end()));
+    for pattern in GROUPED.iter() {
+        for hit in pattern.find_iter(text) {
+            if !digit_bounded(text, hit.start(), hit.end()) {
+                continue;
+            }
+            let digits = digits_of(hit.as_str());
+            if (13..=19).contains(&digits.len()) && luhn_ok(&digits) {
+                out.push(span(TIER_CARD, Kind::Card, hit.start(), hit.end()));
+            }
         }
     }
     let cues = cue_spans(text, &CUES);
