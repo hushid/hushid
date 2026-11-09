@@ -83,7 +83,9 @@ fn resolve(mut raw: Vec<RawHit>) -> Vec<Hit> {
 
 fn push_emails(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9][a-z0-9.\-]*\.[a-z]{2,}\b")
+        // `'` and U+2019 belong in the local part (`o'brien@`). Leaving
+        // them out starts the match after the mark, so that head is sent.
+        Regex::new(r"(?i)\b[a-z0-9._%+\-'\u{2019}]+@[a-z0-9][a-z0-9.\-]*\.[a-z]{2,}\b")
             .expect("email pattern")
     });
     for hit in RE.find_iter(text) {
