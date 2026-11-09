@@ -357,6 +357,8 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
             format!(r"(?i)\bsocial{gap}insurance\b"),
             format!(r"(?i)\bnum(?:é|e\u{{0301}})ro{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
             format!(r"(?i)\bnumero{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
+            // `n°` and `nº` are that same cue. Leaving the sign out sends the number.
+            format!(r"(?i)\bn[\u{{00B0}}\u{{00BA}}]{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
         ];
         // `S.I.N.` and `N.A.S.` are the same cues as `SIN` and `NAS`.
         // A dot, a space, or a space and a dot may sit between the letters.
