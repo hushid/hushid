@@ -351,6 +351,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b",
             r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}",
             r"(?s)-----BEGIN (?:RSA |OPENSSH |EC |DSA |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |OPENSSH |EC |DSA |ENCRYPTED )?PRIVATE KEY-----",
+            // A PGP private key says BLOCK, so the PEM rule above does
+            // not see it. Leaving the header out sends the key. A public
+            // key block and a PGP message stay as written.
+            r"(?s)-----BEGIN PGP PRIVATE KEY BLOCK-----.*?-----END PGP PRIVATE KEY BLOCK-----",
         ]
         .into_iter()
         .map(|pattern| Regex::new(pattern).expect("secret pattern"))
