@@ -4073,3 +4073,173 @@ fn pgp_private_key_block_is_masked() {
     assert!(!vault.holds_surface(block.as_bytes()));
     assert!(restore_json_write(&vault, &out).is_err());
 }
+
+fn wide_dot(text: &str) -> String {
+    text.replace('.', "\u{FF0E}")
+}
+
+#[test]
+fn fullwidth_full_stop_still_shields_the_value() {
+    // `user@example.com` is already an email, and `.` already splits a
+    // phone, a card, a SIN, and cue words such as `social.insurance`.
+    // A wide keyboard writes that dot as U+FF0E. Leaving the stop out
+    // sends the value. A short tail, `social.security`, and a cue 41
+    // characters away stay as written.
+    let stop = '\u{FF0E}';
+    let email = wide_dot("user@example.com");
+    let (vault, out, audit) = shield(&email);
+    assert_eq!(audit.email, 1, "{email} -> {out}");
+    assert_eq!(audit.phone, 0, "{email} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+    assert!(!out.contains(stop), "{email} -> {out}");
+    assert!(hidden(&out, "user"), "{email} -> {out}");
+    assert!(hidden(&out, "example"), "{email} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), email);
+
+    let local = wide_dot("user.name@example.com");
+    let (vault, out, audit) = shield(&local);
+    assert_eq!(audit.email, 1, "{local} -> {out}");
+    assert!(!out.contains(stop), "{local} -> {out}");
+    assert!(hidden(&out, "user"), "{local} -> {out}");
+    assert!(hidden(&out, "name"), "{local} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), local);
+
+    let uk = wide_dot("user@example.co.uk");
+    let (vault, out, audit) = shield(&uk);
+    assert_eq!(audit.email, 1, "{uk} -> {out}");
+    assert!(!out.contains(stop), "{uk} -> {out}");
+    assert!(hidden(&out, "example"), "{uk} -> {out}");
+    assert!(hidden(&out, "uk"), "{uk} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), uk);
+
+    let sentence = format!("mail {} today", wide_dot("user@example.com"));
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains(stop), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let ended = format!("mail {}{stop}", wide_dot("user@example.com"));
+    let (vault, out, audit) = shield(&ended);
+    assert_eq!(audit.email, 1, "{ended} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(stop), "{out}");
+    assert_eq!(out.matches(stop).count(), 1, "{ended} -> {out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), ended);
+
+    let phone = wide_dot("416.555.0123");
+    let (vault, out, audit) = shield(&phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert_eq!(audit.card, 0, "{phone} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+    assert!(!out.contains(stop), "{phone} -> {out}");
+    assert!(hidden(&out, "555"), "{phone} -> {out}");
+    assert!(hidden(&out, "0123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let wide_phone = widen_digits("416.555.0123").replace('.', "\u{FF0E}");
+    let (vault, out, audit) = shield(&wide_phone);
+    assert_eq!(audit.phone, 1, "{wide_phone} -> {out}");
+    assert!(hidden(&out, &widen_digits("555")), "{wide_phone} -> {out}");
+    assert!(hidden(&out, &widen_digits("0123")), "{wide_phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), wide_phone);
+
+    let intl = wide_dot("+44.20.7946.0958");
+    let (vault, out, audit) = shield(&intl);
+    assert_eq!(audit.phone, 1, "{intl} -> {out}");
+    assert!(hidden(&out, "7946"), "{intl} -> {out}");
+    assert!(hidden(&out, "0958"), "{intl} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), intl);
+
+    let card = wide_dot("4111.1111.1111.1111");
+    let (vault, out, audit) = shield(&card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert_eq!(audit.phone, 0, "{card} -> {out}");
+    assert!(out.starts_with("h1_card_"), "{card} -> {out}");
+    assert!(!out.contains(stop), "{card} -> {out}");
+    assert!(hidden(&out, "4111"), "{card} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let sin = valid_sin();
+    let grouped = wide_dot(&format!("{}.{}.{}", &sin[..3], &sin[3..6], &sin[6..]));
+    let cued_sin = format!("SIN {grouped}");
+    let (vault, out, audit) = shield(&cued_sin);
+    assert_eq!(audit.sin, 1, "{cued_sin} -> {out}");
+    assert_eq!(audit.phone, 0, "{cued_sin} -> {out}");
+    assert!(hidden(&out, &sin), "{cued_sin} -> {out}");
+    assert!(hidden(&out, &sin[..3]), "{cued_sin} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued_sin);
+
+    for cued in [
+        format!("social{stop}insurance {sin}"),
+        format!("social{stop} insurance {sin}"),
+        wide_dot(&format!("S.I.N. {sin}")),
+        wide_dot(&format!("N.A.S. {sin}")),
+    ] {
+        let (vault, out, audit) = shield(&cued);
+        assert_eq!(audit.sin, 1, "{cued} -> {out}");
+        assert!(hidden(&out, &sin), "{cued} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), cued);
+    }
+
+    let amex = format!("american{stop}express 4111111111111111");
+    let (vault, out, audit) = shield(&amex);
+    assert_eq!(audit.card, 1, "{amex} -> {out}");
+    assert!(hidden(&out, "4111"), "{amex} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), amex);
+
+    let head = "a".repeat(16);
+    let tail = "QRSTUVWXYZ123456";
+    let assigned = format!("api_key={head}{stop}{tail}");
+    let (vault, out, audit) = shield(&assigned);
+    assert_eq!(audit.secret, 1, "{assigned} -> {out}");
+    assert!(hidden(&out, &head), "{assigned} -> {out}");
+    assert!(hidden(&out, tail), "{assigned} -> {out}");
+    assert!(!out.contains(stop), "{assigned} -> {out}");
+    assert!(!vault.holds_surface(assigned.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"to":"{}"}}"#, wide_dot("user@example.com"));
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.email, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "example"), "{raw} -> {out}");
+    assert!(!out.contains(stop), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let far = format!("social{stop}insurance{}{sin}", " ".repeat(41));
+    let (_vault, out, audit) = shield(&far);
+    assert_eq!(audit.sin, 0, "{far} -> {out}");
+    assert_eq!(out, far);
+
+    let ended_secret = format!("see api_key={head}{stop} Next");
+    let (_vault, out, audit) = shield(&ended_secret);
+    assert_eq!(audit.secret, 1, "{ended_secret} -> {out}");
+    assert_eq!(
+        out,
+        format!("see h1_secret{stop} Next"),
+        "{ended_secret} -> {out}"
+    );
+    assert!(hidden(&out, &head), "{out}");
+
+    for bare in [
+        wide_dot("user@example.c"),
+        wide_dot("user@.example.com"),
+        format!("social{stop}security {sin}"),
+        grouped.clone(),
+        wide_dot("4111.1111.1111.1112"),
+        wide_dot(&format!("S.I.NISTER {sin}")),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
