@@ -5028,3 +5028,56 @@ fn shopify_access_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn middle_dot_between_groups_still_shields_the_number() {
+    // U+30FB and U+00B7 sit between groups the way a hyphen does.
+    // Leaving either mark out sends the number. A slash is still not
+    // a SIN separator.
+    let phone = "416\u{30FB}555\u{30FB}0123";
+    round_trip(phone, |audit| audit.phone);
+    let (vault, out, audit) = shield(phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert!(hidden(&out, "416"), "{phone} -> {out}");
+    assert!(hidden(&out, "555"), "{phone} -> {out}");
+    assert!(hidden(&out, "0123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let international = "+44\u{00B7}20\u{00B7}7946\u{00B7}0958";
+    round_trip(international, |audit| audit.phone);
+    let (vault, out, audit) = shield(international);
+    assert_eq!(audit.phone, 1, "{international} -> {out}");
+    assert!(hidden(&out, "44"), "{international} -> {out}");
+    assert!(hidden(&out, "7946"), "{international} -> {out}");
+    assert!(hidden(&out, "0958"), "{international} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), international);
+
+    let card = "4111\u{30FB}1111\u{30FB}1111\u{30FB}1111";
+    round_trip(card, |audit| audit.card);
+    let (vault, out, audit) = shield(card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(hidden(&out, "4111"), "{card} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let sin = "SIN 130\u{30FB}692\u{30FB}544";
+    let (vault, out, audit) = shield(sin);
+    assert_eq!(audit.sin, 1, "{sin} -> {out}");
+    assert!(out.starts_with("SIN h1_sin_"), "{sin} -> {out}");
+    assert!(hidden(&out, "130"), "{sin} -> {out}");
+    assert!(hidden(&out, "692"), "{sin} -> {out}");
+    assert!(hidden(&out, "544"), "{sin} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sin);
+
+    for bare in [
+        "not\u{30FB}a\u{30FB}phone",
+        "4111\u{30FB}1111\u{30FB}1111\u{30FB}1112",
+        "130\u{30FB}692\u{30FB}544",
+        "SIN 130/692/544",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
