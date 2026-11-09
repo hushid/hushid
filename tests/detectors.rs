@@ -1948,6 +1948,107 @@ fn json_quote_between_an_api_key_name_and_the_value_still_masks_it() {
 }
 
 #[test]
+fn hyphen_mark_in_an_api_key_name_still_masks_the_value() {
+    // `api-key=...` is already a secret. The hyphen in that name may be
+    // an en dash, a non-breaking hyphen, a minus sign, or a soft hyphen.
+    // Those marks are not an ASCII hyphen. Leaving them out sends the value.
+    let secret = "a".repeat(16);
+    let marks = [
+        '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2212}', '\u{00ad}',
+    ];
+    for mark in marks {
+        for text in [
+            format!("api{mark}key={secret}"),
+            format!("secret{mark}key: {secret}"),
+            format!("access{mark}token={secret}"),
+            format!("auth{mark}token: {secret}"),
+            format!("APP_API{mark}KEY={secret}"),
+            format!("X_ACCESS{mark}TOKEN={secret}"),
+            format!("export api{mark}key={secret} please"),
+        ] {
+            let (vault, out, audit) = shield(&text);
+            assert_eq!(audit.secret, 1, "{text} -> {out}");
+            assert_eq!(audit.card, 0, "{text} -> {out}");
+            assert!(!out.contains(&secret), "{text} -> {out}");
+            assert!(out.contains("h1_secret"), "{text} -> {out}");
+            assert!(!out.contains(mark), "{text} -> {out}");
+            assert!(!vault.holds_surface(secret.as_bytes()), "{text}");
+            assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+        }
+
+        let exported = format!("export api{mark}key={secret} please");
+        let (_vault, out, _) = shield(&exported);
+        assert_eq!(out, "export h1_secret please", "{exported} -> {out}");
+
+        let paired = format!("api{mark}key={secret} secret{mark}key={secret}");
+        let (vault, out, audit) = shield(&paired);
+        assert_eq!(audit.secret, 2, "{paired} -> {out}");
+        assert_eq!(out, "h1_secret h1_secret", "{paired} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()));
+
+        let card = format!("api{mark}key=4111-1111-1111-1111");
+        let (vault, out, audit) = shield(&card);
+        assert_eq!(audit.secret, 1, "{card} -> {out}");
+        assert_eq!(audit.card, 0, "{card} -> {out}");
+        assert_eq!(out, "h1_secret", "{card} -> {out}");
+        assert!(!vault.holds_surface(b"4111-1111-1111-1111"));
+
+        for text in [
+            format!("api{mark}key={}", "a".repeat(15)),
+            format!("somethingapi{mark}key={secret}"),
+            format!("api{mark}keyboard={secret}"),
+            format!("api{mark}key"),
+            format!("secret={secret}"),
+        ] {
+            let (_vault, out, audit) = shield(&text);
+            assert_eq!(audit.secret, 0, "{text} -> {out}");
+            assert_eq!(out, text, "{text} -> {out}");
+        }
+
+        let raw = format!(r#"{{"api{mark}key":"{secret}"}}"#);
+        let (vault, out, audit) = shield(&raw);
+        assert_eq!(audit.secret, 1, "{raw} -> {out}");
+        assert_eq!(out, r#"{"h1_secret"}"#, "{raw} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{raw}");
+
+        let documents = [
+            (
+                format!(r#"{{"api{mark}key":"{secret}"}}"#),
+                format!(r#"{{"api{mark}key":"h1_secret"}}"#),
+            ),
+            (
+                format!(r#"{{"api{mark}key": "{secret}"}}"#),
+                format!(r#"{{"api{mark}key": "h1_secret"}}"#),
+            ),
+            (
+                format!(r#"{{"APP_SECRET{mark}KEY":"{secret}"}}"#),
+                format!(r#"{{"APP_SECRET{mark}KEY":"h1_secret"}}"#),
+            ),
+            (
+                format!(r#"{{"cfg":"{{\"api{mark}key\":\"{secret}\"}}"}}"#),
+                format!(r#"{{"cfg":"{{\"api{mark}key\":\"h1_secret\"}}"}}"#),
+            ),
+        ];
+        for (input, expect) in documents {
+            let mut vault = Vault::new();
+            let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+            assert_eq!(audit.secret, 1, "{input} -> {out}");
+            assert_eq!(audit.card, 0, "{input} -> {out}");
+            assert_eq!(out, expect, "{input}");
+            assert!(!out.contains(&secret), "{input} -> {out}");
+            assert!(!vault.holds_surface(secret.as_bytes()), "{input}");
+            assert!(restore_json_write(&vault, &out).is_err(), "{out}");
+        }
+
+        let short = format!(r#"{{"api{mark}key":"{}"}}"#, "a".repeat(15));
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &short).unwrap();
+        assert_eq!(audit.secret, 0, "{short} -> {out}");
+        assert_eq!(out, short, "{short} -> {out}");
+    }
+}
+
+#[test]
 fn secrets_become_one_shared_mark_and_are_not_stored() {
     let key = format!("sk-{}", "a".repeat(20));
     let aws = "AKIAIOSFODNN7EXAMPLE";

@@ -330,10 +330,19 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
     push_assignment_secrets(text, out);
 }
 
-const ASSIGNMENT_NAME: &str =
-    r"(?:[A-Za-z0-9_]*_)?(?:api[_\-]?key|apikey|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)";
-
 const SECRET_RUN: &str = r"[A-Za-z0-9+/=_\-]{16,}";
+
+/// `api_key`, `secret_key`, `access_token`, and `auth_token`.
+///
+/// The mark inside `api-key`, `secret-key`, `access-token`, and
+/// `auth-token` is an underscore or a hyphen mark. An ASCII hyphen is
+/// not the only one. An en dash, a minus sign, or a soft hyphen is
+/// still that name. Leaving it out sends the value.
+fn assignment_name() -> String {
+    let sep = hyphen_class("_");
+    r"(?:[A-Za-z0-9_]*_)?(?:api{sep}?key|apikey|secret{sep}?key|access{sep}?token|auth{sep}?token)"
+        .replace("{sep}", &sep)
+}
 
 /// `api_key`, `secret_key`, `access_token`, and `auth_token` assignments.
 ///
@@ -342,8 +351,9 @@ const SECRET_RUN: &str = r"[A-Za-z0-9+/=_\-]{16,}";
 /// the name and the colon. The character before the name stays outside the span.
 fn push_assignment_secrets(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
+        let name = assignment_name();
         Regex::new(&format!(
-            r#"(?i)(?:^|[^A-Za-z0-9_])({ASSIGNMENT_NAME}"?\s*[=:]\s*["']?{SECRET_RUN})"#
+            r#"(?i)(?:^|[^A-Za-z0-9_])({name}"?\s*[=:]\s*["']?{SECRET_RUN})"#
         ))
         .expect("secret assignment pattern")
     });
@@ -369,10 +379,9 @@ fn push_assignment_secrets(text: &str, out: &mut Vec<RawHit>) {
 /// quote. The key has to be an assignment name, immediately before the colon.
 pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option<usize> {
     static KEY: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(&format!(
-            r#"(?i)(?:^|[^A-Za-z0-9_]){ASSIGNMENT_NAME}"\s*:\s*"$"#
-        ))
-        .expect("json assignment key")
+        let name = assignment_name();
+        Regex::new(&format!(r#"(?i)(?:^|[^A-Za-z0-9_]){name}"\s*:\s*"$"#))
+            .expect("json assignment key")
     });
     static RUN: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(&format!(r"^{SECRET_RUN}")).expect("secret run"));
