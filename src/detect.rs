@@ -132,9 +132,10 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
     static GROUPED: LazyLock<Regex> = LazyLock::new(|| {
         // 4-6-5, then 4-6-4, then 4-4-4-4, then 4-4-4-3. A shorter
         // alternative first eats a longer group, and the extra digit
-        // makes that match fail the boundary check.
+        // makes that match fail the boundary check. The separator is a
+        // space, a dot, or an ASCII hyphen (`4111.1111.1111.1111`).
         Regex::new(
-            r"\d{4}[\s\-]\d{6}[\s\-]\d{5}|\d{4}[\s\-]\d{6}[\s\-]\d{4}|\d{4}(?:[\s\-]\d{4}){3}|\d{4}(?:[\s\-]\d{4}){2}[\s\-]\d{3}",
+            r"\d{4}[\s.\-]\d{6}[\s.\-]\d{5}|\d{4}[\s.\-]\d{6}[\s.\-]\d{4}|\d{4}(?:[\s.\-]\d{4}){3}|\d{4}(?:[\s.\-]\d{4}){2}[\s.\-]\d{3}",
         )
         .expect("grouped card pattern")
     });
