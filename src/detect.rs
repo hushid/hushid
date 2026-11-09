@@ -454,6 +454,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             r"\bAIza[0-9A-Za-z_\-]{35}\b",
             r"\bnpm_[A-Za-z0-9]{36}\b",
             r"\bhf_[A-Za-z0-9]{20,}\b",
+            // DigitalOcean tokens are `dop_v1_` from the control panel,
+            // `doo_v1_` from the OAuth flow, and `dor_v1_` for a refresh
+            // token. The rules above do not see those prefixes, so the
+            // token stays in the clear. The published body is 64 letters.
+            // A short payload stays as written.
+            r"\b(?:dop|doo|dor)_v1_[A-Za-z0-9]{64}\b",
             r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b",
             r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b",
             r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}",
