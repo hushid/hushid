@@ -2857,3 +2857,60 @@ fn email_token_uses_the_email_kind() {
     let (_vault, out, _) = shield("a@b.co");
     assert!(out.starts_with("h1_email_"), "{out}");
 }
+
+#[test]
+fn pgp_private_key_block_is_masked() {
+    let body = "abcdefghijklmnopqrstuvwxyz";
+    let block = format!(
+        "-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG\n\n{body}\n-----END PGP PRIVATE KEY BLOCK-----"
+    );
+    let wrapped = format!("keep {block} please");
+    let (vault, out, audit) = shield(&wrapped);
+    assert_eq!(audit.secret, 1, "{wrapped} -> {out}");
+    assert_eq!(out, "keep h1_secret please");
+    assert!(hidden(&out, body), "{out}");
+    assert!(!out.contains("BEGIN"), "{out}");
+    assert!(!vault.holds_surface(block.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let second = block.replace(body, "ZYXWVUTSRQPONMLKJIHGFEDCBA");
+    let pair = format!("{block}\n{second}");
+    let (vault, out, audit) = shield(&pair);
+    assert_eq!(audit.secret, 2, "{pair} -> {out}");
+    assert_eq!(out, "h1_secret\nh1_secret");
+    assert!(hidden(&out, body), "{out}");
+    assert!(!vault.holds_surface(second.as_bytes()));
+
+    for token in [
+        format!("-----BEGIN PRIVATE KEY-----\n{body}\n-----END PRIVATE KEY-----"),
+        format!("-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\n-----END OPENSSH PRIVATE KEY-----"),
+        format!("-----BEGIN RSA PRIVATE KEY-----\n{body}\n-----END RSA PRIVATE KEY-----"),
+    ] {
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret");
+        assert!(hidden(&out, body), "{out}");
+        assert!(!vault.holds_surface(token.as_bytes()));
+    }
+
+    for bare in [
+        format!("-----BEGIN PGP PUBLIC KEY BLOCK-----\n{body}\n-----END PGP PUBLIC KEY BLOCK-----"),
+        format!("-----BEGIN PGP MESSAGE-----\n{body}\n-----END PGP MESSAGE-----"),
+        format!("-----BEGIN PGP PRIVATE KEY BLOCK-----\n{body}"),
+        "not a key".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+
+    let encoded = block.replace('\n', "\\n");
+    let raw = format!(r#"{{"key":"{encoded}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"key":"h1_secret"}"#);
+    assert!(hidden(&out, body), "{out}");
+    assert!(!vault.holds_surface(block.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+}
