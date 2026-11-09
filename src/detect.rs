@@ -360,6 +360,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // clear. A short payload stays as written. A body of another
             // length, once it contains an underscore, stays too.
             r"\bek_(?:live|test)_(?:(?:[A-Za-z0-9]{71}|[A-Za-z0-9]{76}|[A-Za-z0-9]{86}|[A-Za-z0-9]{92})_[A-Za-z0-9]{10}|[A-Za-z0-9]{10,})\b",
+            // A Terminal connection token is `pst_test_` or `pst_live_`.
+            // The API reference secret is 71 letters, an underscore, and
+            // 10 more. The OpenAPI fixture is 23 letters and has no
+            // underscore. The rules above do not see this prefix, so
+            // the secret stays in the clear. A shorter key is letters
+            // only, at least 10, like `sk_live_`. A short payload stays
+            // as written. A body of another length, once it contains an
+            // underscore, stays too.
+            r"\bpst_(?:live|test)_(?:[A-Za-z0-9]{71}_[A-Za-z0-9]{10}|[A-Za-z0-9]{10,})\b",
             r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}\b",
             r"\bAIza[0-9A-Za-z_\-]{35}\b",
             r"\bnpm_[A-Za-z0-9]{36}\b",
