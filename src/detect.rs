@@ -32,10 +32,10 @@ fn hyphen_class(rest: &str) -> String {
 ///
 /// `american-express` and `social.insurance` are still those phrases.
 /// An en dash, a minus sign, or a soft hyphen is that same mark. A dot
-/// is that mark too. Leaving the dot out sends the number. The phrase
-/// has no shorter cue.
+/// is that mark too, including the fullwidth full stop. Leaving the
+/// dot out sends the number. The phrase has no shorter cue.
 fn cue_word_gap() -> String {
-    format!("{}+", hyphen_class(r"\s."))
+    format!("{}+", hyphen_class(r"\s.\u{FF0E}"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,6 +112,13 @@ fn resolve(mut raw: Vec<RawHit>) -> Vec<Hit> {
 /// the address. The local part still does not start on the sign.
 const AT: &str = r"[@\u{FF20}]";
 
+/// ASCII `.` and the fullwidth full stop, U+FF0E, outside a character class.
+///
+/// A wide keyboard writes that stop where a dot already separates a
+/// value. Leaving it out sends the value. Inside a class the same
+/// character is `\u{FF0E}` beside `.`.
+const DOT: &str = r"(?:\.|\u{FF0E})";
+
 fn push_emails(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         // `'` , U+2019, and U+2018 belong in the local part (`o'brien@`).
@@ -127,10 +134,14 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // swallowed by the second one.
         // The at-sign may be ASCII `@` or the fullwidth sign. A wide
         // keyboard writes U+FF20. Leaving it out sends the address.
+        // The dot may be ASCII `.` or the fullwidth stop U+FF0E. That
+        // keyboard writes the stop in the local part and the domain.
+        // Leaving it out sends the address.
         Regex::new(
-            &r"\b[\p{L}\p{M}0-9._%+'\u{2018}\u{2019}][\p{L}\p{M}0-9._%+{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}0-9][\p{L}\p{M}0-9.{hyphen}]*\.(?:\p{L}\p{M}*){2,}\b"
+            &r"\b[\p{L}\p{M}0-9.\u{FF0E}_%+'\u{2018}\u{2019}][\p{L}\p{M}0-9.\u{FF0E}_%+{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}0-9][\p{L}\p{M}0-9.\u{FF0E}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
                 .replace("{hyphen}", HYPHEN)
-                .replace("{at}", AT),
+                .replace("{at}", AT)
+                .replace("{dot}", DOT),
         )
         .expect("email pattern")
     });
@@ -216,8 +227,9 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         // marks (`4111 - 1111 - 1111 - 1111`, a figure dash, an en dash,
         // a minus sign, or a soft hyphen). A slash is that separator
         // too. A phone already treats it as one. Leaving it out sends
-        // `4111/1111/1111/1111`. Four, four, five is the 13-digit
-        // grouping.
+        // `4111/1111/1111/1111`. A fullwidth full stop is that dot.
+        // Leaving it out sends the card when the stops are wide.
+        // Four, four, five is the 13-digit grouping.
         [
             r"\d{4}(?:{sep}+\d{4}){3}{sep}+\d{3}",
             r"\d{6}{sep}+\d{13}",
@@ -229,7 +241,7 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         ]
         .into_iter()
         .map(|pattern| {
-            Regex::new(&pattern.replace("{sep}", &hyphen_class(r"\s./")))
+            Regex::new(&pattern.replace("{sep}", &hyphen_class(r"\s./\u{FF0E}")))
                 .expect("grouped card pattern")
         })
         .collect()
@@ -294,10 +306,11 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
     // A run of whitespace, a dot, or a hyphen mark, so `130 - 692 - 544`
     // is still 3-3-3 when the hyphen is a figure dash, an en dash, a
     // minus sign, or a soft hyphen. `130.692.544` is that same number.
-    // A card and a phone already treat a dot as a separator. Leaving
-    // the dot out sends the digits. A slash is not this separator.
+    // A card and a phone already treat a dot as a separator, including
+    // the fullwidth full stop. Leaving the dot out sends the digits.
+    // A slash is not this separator.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        let sep = hyphen_class(r"\s.");
+        let sep = hyphen_class(r"\s.\u{FF0E}");
         Regex::new(&format!(r"\d{{3}}{sep}+\d{{3}}{sep}+\d{{3}}|\d{{9}}")).expect("sin pattern")
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -314,14 +327,21 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
         ];
         // `S.I.N.` and `N.A.S.` are the same cues as `SIN` and `NAS`.
         // A dot, a space, or a space and a dot may sit between the letters.
-        // Leaving that out sends the number. The trailing dot is optional.
-        // `S.I.NISTER` is not this cue.
+        // The dot may be the fullwidth full stop. Leaving that out sends
+        // the number. The trailing dot is optional. `S.I.NISTER` is not
+        // this cue.
         for (word, dotted) in [
-            ("SIN", r"S(?:\s*\.\s*|\s+)I(?:\s*\.\s*|\s+)N"),
-            ("NAS", r"N(?:\s*\.\s*|\s+)A(?:\s*\.\s*|\s+)S"),
+            (
+                "SIN",
+                format!(r"S(?:\s*{dot}\s*|\s+)I(?:\s*{dot}\s*|\s+)N", dot = DOT),
+            ),
+            (
+                "NAS",
+                format!(r"N(?:\s*{dot}\s*|\s+)A(?:\s*{dot}\s*|\s+)S", dot = DOT),
+            ),
         ] {
             patterns.push(format!(r"(?i)\b{word}\b"));
-            patterns.push(format!(r"(?i)\b{dotted}\b\.?"));
+            patterns.push(format!(r"(?i)\b{dotted}\b{dot}?", dot = DOT));
         }
         patterns
             .into_iter()
@@ -443,11 +463,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
 }
 
 // At least 16 token characters. A dot may sit between pieces
-// (`abcdefghijklmnop.QRSTUVWXYZ123456`). Leaving that dot out masks
-// the head and sends the tail. A dot with nothing after it stays
-// outside the value, so a sentence period stays.
-const SECRET_RUN: &str =
-    r"(?:[A-Za-z0-9+/=_\-]+\.)*[A-Za-z0-9+/=_\-]{16,}(?:\.[A-Za-z0-9+/=_\-]+)*";
+// (`abcdefghijklmnop.QRSTUVWXYZ123456`). The dot may be the fullwidth
+// stop. Leaving that dot out masks the head and sends the tail. A dot
+// with nothing after it stays outside the value, so a sentence period
+// stays.
+const SECRET_RUN: &str = r"(?:[A-Za-z0-9+/=_\-]+(?:\.|\u{FF0E}))*[A-Za-z0-9+/=_\-]{16,}(?:(?:\.|\u{FF0E})[A-Za-z0-9+/=_\-]+)*";
 
 /// `api_key`, `secret_key`, `access_token`, `auth_token`, and
 /// `session_token`.
@@ -517,12 +537,13 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
 ///
 /// The class is whitespace, a dot, a slash, or a hyphen mark, so a
 /// figure dash, an en dash, a minus sign, or a soft hyphen counts the
-/// same as an ASCII hyphen. Patterns repeat it when the gap may hold
-/// more than one, as in `416 - 555 - 0123`.
+/// same as an ASCII hyphen. A fullwidth full stop counts as that dot.
+/// Patterns repeat it when the gap may hold more than one, as in
+/// `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
     Regex::new(
         &body
-            .replace("{sep}", &hyphen_class(r"\s./"))
+            .replace("{sep}", &hyphen_class(r"\s./\u{FF0E}"))
             .replace("{plus}", PLUS)
             .replace("{idd}", IDD)
             .replace("{open}", OPEN_PAREN)
@@ -551,7 +572,7 @@ const OPEN_PAREN: &str = r"(?:\(|\u{FF08})";
 const CLOSE_PAREN: &str = r"(?:\)|\u{FF09})";
 
 fn international_sep_class() -> String {
-    hyphen_class(r"\s./()\u{FF08}\u{FF09}")
+    hyphen_class(r"\s./()\u{FF08}\u{FF09}\u{FF0E}")
 }
 
 /// Longest prefix of `text[start..end]` that is one international number.
