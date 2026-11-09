@@ -263,11 +263,13 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
 }
 
 fn push_sins(text: &str, out: &mut Vec<RawHit>) {
-    // A run of whitespace or a hyphen mark, so `130 - 692 - 544` is
-    // still 3-3-3 when the hyphen is a figure dash, an en dash, a
-    // minus sign, or a soft hyphen.
+    // A run of whitespace, a dot, or a hyphen mark, so `130 - 692 - 544`
+    // is still 3-3-3 when the hyphen is a figure dash, an en dash, a
+    // minus sign, or a soft hyphen. `130.692.544` is that same number.
+    // A card and a phone already treat a dot as a separator. Leaving
+    // the dot out sends the digits. A slash is not this separator.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        let sep = hyphen_class(r"\s");
+        let sep = hyphen_class(r"\s.");
         Regex::new(&format!(r"\d{{3}}{sep}+\d{{3}}{sep}+\d{{3}}|\d{{9}}")).expect("sin pattern")
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
