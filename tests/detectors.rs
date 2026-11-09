@@ -2951,6 +2951,49 @@ fn assignment_value_with_an_interior_dot_is_masked() {
 }
 
 #[test]
+fn session_token_assignment_is_masked() {
+    let secret = "a".repeat(20);
+    for text in [
+        format!("AWS_SESSION_TOKEN={secret}"),
+        format!("SESSION_TOKEN={secret}"),
+        format!("session token={secret}"),
+        format!("session-token={secret}"),
+        format!("export AWS_SESSION_TOKEN={secret} please"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(hidden(&out, &secret), "{text} -> {out}");
+        assert!(out.contains("h1_secret"), "{text} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{text}");
+        assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+    }
+    let exported = format!("export AWS_SESSION_TOKEN={secret} please");
+    let (_vault, out, _) = shield(&exported);
+    assert_eq!(out, "export h1_secret please");
+
+    let raw = format!(r#"{{"AWS_SESSION_TOKEN":"{secret}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"AWS_SESSION_TOKEN":"h1_secret"}"#);
+    assert!(hidden(&out, &secret), "{out}");
+    assert!(!vault.holds_surface(secret.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for text in [
+        format!("AWS_SESSION_TOKEN={}", "a".repeat(15)),
+        format!("session/token={secret}"),
+        format!("session.token={secret}"),
+        format!("notSESSION_TOKEN={secret}"),
+        format!("session={secret}"),
+    ] {
+        let (_vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 0, "{text} -> {out}");
+        assert_eq!(out, text, "{text} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();

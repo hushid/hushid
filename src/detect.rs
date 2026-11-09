@@ -383,22 +383,24 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
 const SECRET_RUN: &str =
     r"(?:[A-Za-z0-9+/=_\-]+\.)*[A-Za-z0-9+/=_\-]{16,}(?:\.[A-Za-z0-9+/=_\-]+)*";
 
-/// `api_key`, `secret_key`, `access_token`, and `auth_token`.
+/// `api_key`, `secret_key`, `access_token`, `auth_token`, and
+/// `session_token`.
 ///
 /// The mark inside `api-key`, `secret-key`, `access-token`, and
 /// `auth-token` is an underscore or a hyphen mark. An ASCII hyphen is
 /// not the only one. An en dash, a minus sign, or a soft hyphen is
 /// still that name. Whitespace between the words is that name too, so
 /// `api key` counts. `secret_access_key` is the AWS env name, including
-/// spaces or hyphens between the words. Leaving that name out sends the
-/// value. A slash or a dot between the words is not this name.
+/// spaces or hyphens between the words. `session_token` is the AWS
+/// session token. Leaving that name out sends the value. A slash or a
+/// dot between the words is not this name.
 fn assignment_name() -> String {
     let gap = format!("(?:{})*", hyphen_class(r"_\s"));
-    r"(?:[A-Za-z0-9_]*_)?(?:api{gap}key|secret{gap}access{gap}key|secret{gap}key|access{gap}token|auth{gap}token)"
+    r"(?:[A-Za-z0-9_]*_)?(?:api{gap}key|secret{gap}access{gap}key|secret{gap}key|access{gap}token|auth{gap}token|session{gap}token)"
         .replace("{gap}", &gap)
 }
 
-/// `api_key`, `secret_key`, `access_token`, and `auth_token` assignments.
+/// `api_key`, `secret_key`, `access_token`, `auth_token`, and `session_token` assignments.
 ///
 /// `_` is a word character, so a word boundary misses `MY_API_KEY`. The
 /// name may have a prefix before that `_`. A JSON key puts a quote between
