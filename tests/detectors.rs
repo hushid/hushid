@@ -213,6 +213,46 @@ fn sin_needs_a_cue_within_forty_characters() {
 }
 
 #[test]
+fn underscore_before_an_api_key_name_still_masks_the_value() {
+    let secret = "a".repeat(16);
+    for text in [
+        format!("MY_API_KEY={secret}"),
+        format!("APP_SECRET_KEY={secret}"),
+        format!("X_ACCESS_TOKEN={secret}"),
+        format!("export MY_API_KEY={secret} please"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(!out.contains(&secret), "{text} -> {out}");
+        assert!(out.contains("h1_secret"), "{text} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{text}");
+        assert!(!vault.holds_surface(text.as_bytes()), "{text}");
+    }
+    let exported = format!("export MY_API_KEY={secret} please");
+    let (_vault, out, _) = shield(&exported);
+    assert_eq!(out, "export h1_secret please");
+    let paired = format!("MY_API_KEY={secret} APP_SECRET_KEY={secret}");
+    let (vault, out, audit) = shield(&paired);
+    assert_eq!(audit.secret, 2, "{paired} -> {out}");
+    assert!(!out.contains(&secret), "{paired} -> {out}");
+    assert!(!vault.holds_surface(secret.as_bytes()));
+    let hyphen = format!("api-key: {secret}");
+    let (_vault, out, audit) = shield(&hyphen);
+    assert_eq!(audit.secret, 1, "{hyphen} -> {out}");
+    assert_eq!(out, "h1_secret");
+
+    for text in [
+        format!("MY_API_KEY={}", "a".repeat(15)),
+        format!("somethingapi_key={secret}"),
+        format!("secret={secret}"),
+    ] {
+        let (_vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 0, "{text} -> {out}");
+        assert_eq!(out, text);
+    }
+}
+
+#[test]
 fn secrets_become_one_shared_mark_and_are_not_stored() {
     let key = format!("sk-{}", "a".repeat(20));
     let aws = "AKIAIOSFODNN7EXAMPLE";

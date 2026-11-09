@@ -232,7 +232,6 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b",
             r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}",
             r"(?s)-----BEGIN (?:RSA |OPENSSH |EC |DSA |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |OPENSSH |EC |DSA |ENCRYPTED )?PRIVATE KEY-----",
-            r#"(?i)\b(?:api[_\-]?key|apikey|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)\s*[=:]\s*["']?[A-Za-z0-9+/=_\-]{16,}"#,
         ]
         .into_iter()
         .map(|pattern| Regex::new(pattern).expect("secret pattern"))
@@ -250,6 +249,35 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
                 },
             });
         }
+    }
+    push_assignment_secrets(text, out);
+}
+
+/// `api_key`, `secret_key`, `access_token`, and `auth_token` assignments.
+///
+/// `_` is a word character, so a word boundary misses `MY_API_KEY`. The
+/// name may have a prefix before that `_`. The character before the name
+/// stays outside the span.
+fn push_assignment_secrets(text: &str, out: &mut Vec<RawHit>) {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?i)(?:^|[^A-Za-z0-9_])((?:[A-Za-z0-9_]*_)?(?:api[_\-]?key|apikey|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)\s*[=:]\s*["']?[A-Za-z0-9+/=_\-]{16,})"#,
+        )
+        .expect("secret assignment pattern")
+    });
+    for caps in RE.captures_iter(text) {
+        let Some(hit) = caps.get(1) else {
+            continue;
+        };
+        out.push(RawHit {
+            tier: TIER_SECRET,
+            start: hit.start(),
+            end: hit.end(),
+            hit: Hit::Secret {
+                start: hit.start(),
+                end: hit.end(),
+            },
+        });
     }
 }
 
