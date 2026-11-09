@@ -171,6 +171,56 @@ fn email_apostrophe_stays_inside_the_address() {
 }
 
 #[test]
+fn left_single_quote_stays_inside_the_address() {
+    let mark = '\u{2018}';
+    let email = format!("o{mark}brien@example.com");
+    let (vault, out, audit) = shield(&email);
+    assert_eq!(audit.email, 1, "{email} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{out}");
+    assert!(!out.contains(mark), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), email);
+
+    let sentence = format!("mail o{mark}brien@example.com today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains(mark), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let prose = format!("o{mark}brien wrote a@b.co");
+    let (vault, out, audit) = shield(&prose);
+    assert_eq!(audit.email, 1, "{prose} -> {out}");
+    assert!(
+        out.starts_with(&format!("o{mark}brien wrote h1_email_")),
+        "{out}"
+    );
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), prose);
+
+    let raw = format!(r#"{{"to":"o{mark}brien@example.com"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.email, 1, "{raw} -> {out}");
+    assert!(!out.contains(mark), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let sin = "130692544";
+    for cued in [
+        format!("numéro d{mark}assurance sociale {sin}"),
+        format!("numero d{mark}assurance sociale {sin}"),
+    ] {
+        let (vault, out, audit) = shield(&cued);
+        assert_eq!(audit.sin, 1, "{cued} -> {out}");
+        assert!(hidden(&out, sin), "{cued} -> {out}");
+        assert!(out.contains(mark), "{cued} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), cued);
+    }
+}
+
+#[test]
 fn email_with_a_non_ascii_letter_stays_one_address() {
     for email in [
         "josé@example.com",
