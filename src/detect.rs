@@ -98,16 +98,17 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // `+1` may sit against a shaped number with no separator (`+1(416)`
         // or `+1416-555-0123`). A trunk `1` still needs a separator here.
         // `{sep}` is a space, a dot, an ASCII hyphen, a non-breaking hyphen,
-        // or a slash (`416/555-0123`).
+        // or a slash. A run of those still separates groups
+        // (`416 - 555 - 0123`).
         phone_pattern(
-            r"(?:\+1{sep}?|1{sep})?(?:\(\d{3}\){sep}?\d{3}{sep}\d{4}|\d{3}{sep}\d{3}{sep}\d{4})",
+            r"(?:\+1{sep}*|1{sep}+)?(?:\(\d{3}\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`. A bare `1` before more digits is not this form.
     static NANP_TRUNK: LazyLock<Regex> =
-        LazyLock::new(|| phone_pattern(r"1\(\d{3}\){sep}?\d{3}{sep}\d{4}"));
+        LazyLock::new(|| phone_pattern(r"1\(\d{3}\){sep}*\d{3}{sep}+\d{4}"));
     static INTERNATIONAL: LazyLock<Regex> =
-        LazyLock::new(|| phone_pattern(r"\+\d{1,3}(?:{sep}\d{1,4}){2,6}"));
+        LazyLock::new(|| phone_pattern(r"\+\d{1,3}(?:{sep}+\d{1,4}){2,6}"));
     static PLUS_DIGITS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\+\d{8,15}").expect("plus digits pattern"));
     for hit in NANP.find_iter(text).chain(NANP_TRUNK.find_iter(text)) {
@@ -133,9 +134,10 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         // 4-6-5, then 4-6-4, then 4-4-4-4, then 4-4-4-3. A shorter
         // alternative first eats a longer group, and the extra digit
         // makes that match fail the boundary check. The separator is a
-        // space, a dot, or an ASCII hyphen (`4111.1111.1111.1111`).
+        // run of spaces, dots, or ASCII hyphens
+        // (`4111 - 1111 - 1111 - 1111`).
         Regex::new(
-            r"\d{4}[\s.\-]\d{6}[\s.\-]\d{5}|\d{4}[\s.\-]\d{6}[\s.\-]\d{4}|\d{4}(?:[\s.\-]\d{4}){3}|\d{4}(?:[\s.\-]\d{4}){2}[\s.\-]\d{3}",
+            r"\d{4}[\s.\-]+\d{6}[\s.\-]+\d{5}|\d{4}[\s.\-]+\d{6}[\s.\-]+\d{4}|\d{4}(?:[\s.\-]+\d{4}){3}|\d{4}(?:[\s.\-]+\d{4}){2}[\s.\-]+\d{3}",
         )
         .expect("grouped card pattern")
     });
@@ -184,8 +186,9 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
 }
 
 fn push_sins(text: &str, out: &mut Vec<RawHit>) {
+    // A run of spaces or ASCII hyphens, so `130 - 692 - 544` is still 3-3-3.
     static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\d{3}[\s\-]\d{3}[\s\-]\d{3}|\d{9}").expect("sin pattern"));
+        LazyLock::new(|| Regex::new(r"\d{3}[\s\-]+\d{3}[\s\-]+\d{3}|\d{9}").expect("sin pattern"));
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         [
             r"(?i)\bsocial insurance\b",
@@ -307,7 +310,10 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
     RUN.find(value).map(|hit| hit.end())
 }
 
-/// `{sep}` stands for one phone-group separator.
+/// `{sep}` stands for one phone-group separator character.
+///
+/// Patterns repeat it when the gap may hold more than one, as in
+/// `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
     Regex::new(&body.replace("{sep}", r"[\s.\-\u{2011}/]")).expect("phone pattern")
 }

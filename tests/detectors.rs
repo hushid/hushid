@@ -352,6 +352,94 @@ fn sin_needs_a_cue_within_forty_characters() {
 }
 
 #[test]
+fn spaces_around_a_group_separator_still_shield_the_value() {
+    for phone in [
+        "416 - 555 - 0123",
+        "(416) 555 - 0123",
+        "(416) - 555 - 0123",
+        "1 - 800 - 555 - 0199",
+        "+1 416 - 555 - 0123",
+        "+1 - 416 - 555 - 0123",
+        "416  555  0123",
+    ] {
+        let (vault, out, audit) = shield(phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert!(!out.contains('-'), "{phone} -> {out}");
+        assert!(!out.contains(' '), "{phone} -> {out}");
+        assert!(!out.contains('('), "{phone} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+    let sentence = "call 416 - 555 - 0123 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert!(!out.contains("0123"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    for grouped in [
+        "4111 - 1111 - 1111 - 1111",
+        "3782 - 822463 - 10005",
+        "3782 - 8224 - 6310 - 005",
+        "3056 - 930902 - 5904",
+    ] {
+        let (vault, out, audit) = shield(grouped);
+        assert_eq!(audit.card, 1, "{grouped} -> {out}");
+        assert_eq!(audit.phone, 0, "{grouped} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{grouped} -> {out}");
+        assert!(!out.contains('-'), "{grouped} -> {out}");
+        assert!(!out.contains(' '), "{grouped} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), grouped);
+    }
+    let bad = "4111 - 1111 - 1111 - 1112";
+    let (_vault, out, audit) = shield(bad);
+    assert_eq!(out, bad);
+    assert_eq!(audit.card, 0);
+    let glued = "4111 - 1111 - 1111 - 11111";
+    let (_vault, out, audit) = shield(glued);
+    assert_eq!(out, glued);
+    assert_eq!(audit.card, 0);
+
+    let sin = valid_sin();
+    let spaced = format!("{} - {} - {}", &sin[..3], &sin[3..6], &sin[6..9]);
+    let cued = format!("SIN {spaced}");
+    let (vault, out, audit) = shield(&cued);
+    assert_eq!(audit.sin, 1, "{cued} -> {out}");
+    assert_eq!(audit.phone, 0, "{cued} -> {out}");
+    assert!(out.starts_with("SIN h1_sin_"), "{out}");
+    assert!(!out.contains('-'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued);
+    let (_vault, out, audit) = shield(&spaced);
+    assert_eq!(out, spaced, "{spaced}");
+    assert_eq!(audit.sin, 0);
+
+    // A space or a spaced hyphen in only one gap is not the 3-3-4 shape.
+    for bare in ["416 - 5550123", "416  5550123", "416 - 555 - 012"] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+    }
+
+    let raw = r#"{"n":"4111 - 1111 - 1111 - 1111"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.card, 1, "{raw} -> {out}");
+    assert!(!out.contains("4111"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let sin_raw = format!(r#"{{"nas":"{spaced}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &sin_raw).unwrap();
+    assert_eq!(audit.sin, 1, "{sin_raw} -> {out}");
+    assert!(!out.contains(&spaced), "{sin_raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), sin_raw);
+}
+
+#[test]
 fn underscore_before_an_api_key_name_still_masks_the_value() {
     let secret = "a".repeat(16);
     for text in [
