@@ -460,6 +460,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // token stays in the clear. The published body is 64 letters.
             // A short payload stays as written.
             r"\b(?:dop|doo|dor)_v1_[A-Za-z0-9]{64}\b",
+            // Vault 1.10 prefixes a service token with `hvs.`, a batch
+            // token with `hvb.`, and a recovery token with `hvr.`. The
+            // rules above do not see those prefixes, so the token stays
+            // in the clear. After the prefix, 24 or more characters are
+            // appended. A longer token may contain an underscore or a
+            // hyphen. A short payload stays as written. The earlier
+            // `s.`, `b.`, and `r.` prefixes stay too.
+            r"\bhv[sbr]\.[A-Za-z0-9_\-]{24,}\b",
             r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b",
             r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b",
             r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}",
