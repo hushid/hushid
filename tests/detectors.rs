@@ -76,6 +76,16 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
         "1(416) 555-0123",
         "+1(416)555.0123",
         "+1416-555-0123",
+        // Area code, slash, exchange, hyphen, line. Same groups as 416-555-0123.
+        "416/555-0123",
+        "416/555/0123",
+        "(416)/555-0123",
+        "1/800/555-0199",
+        "+1 416/555-0123",
+        // Non-breaking hyphen, the hyphen that stays on one line.
+        "416\u{2011}555\u{2011}0123",
+        "1\u{2011}800\u{2011}555\u{2011}0199",
+        "+1\u{2011}416\u{2011}555\u{2011}0123",
     ] {
         let (vault, out, audit) = shield(phone);
         assert_eq!(audit.phone, 1, "{phone} -> {out}");
@@ -89,6 +99,20 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
     assert!(out.ends_with(" today"), "{out}");
     assert!(!out.contains("416"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+    let slashed = "call 416/555-0123 today";
+    let (vault, out, audit) = shield(slashed);
+    assert_eq!(audit.phone, 1, "{slashed} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), slashed);
+    let unbroken = "call 416\u{2011}555\u{2011}0123 today";
+    let (vault, out, audit) = shield(unbroken);
+    assert_eq!(audit.phone, 1, "{unbroken} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), unbroken);
     for bare in [
         "4155550134",
         "(416)5550123",
@@ -97,6 +121,11 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
         "1(416)5550123",
         "11(416)555-0123",
         "21(416)555-0123",
+        // One separator, then a bare seven-digit tail, still stays.
+        "416/5550123",
+        "416\u{2011}5550123",
+        "+1/4165550123",
+        "+1\u{2011}4165550123",
     ] {
         let (_vault, out, audit) = shield(bare);
         assert_eq!(out, bare, "{bare} -> {out}");
