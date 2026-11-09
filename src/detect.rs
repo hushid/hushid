@@ -139,8 +139,11 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // keyboard writes those parentheses as fullwidth marks. That is
         // still the 3-3-4 number. Leaving the space, or the fullwidth
         // mark, out sends the digits when there is no leading plus.
+        // A `00` dialing prefix is that same plus (`001416-555-0123`).
+        // Leaving it out sends the number. A bare digit run after `00`
+        // is not this shape.
         phone_pattern(
-            r"(?:{plus}\s*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:(?:{plus}|{idd})\s*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`, including spaces inside the parentheses. A bare
@@ -160,11 +163,15 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // sends the number, or leaves the country code when the tail is a
     // 3-3-4. The same space applies to a plus and a digit run
     // (`+ 14165550123`). A fullwidth plus is that same sign.
+    // A `00` dialing prefix is that same plus (`0044 20 7946 0958`).
+    // The two zeros are not digits of the number. Leaving the prefix
+    // out sends it. A bare run after `00` stays as written.
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"{plus}\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}"
+            &r"(?:{plus}|{idd})\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}"
                 .replace("{sep}", &international_sep_class())
-                .replace("{plus}", PLUS),
+                .replace("{plus}", PLUS)
+                .replace("{idd}", IDD),
         )
         .expect("international phone pattern")
     });
@@ -490,6 +497,7 @@ fn phone_pattern(body: &str) -> Regex {
         &body
             .replace("{sep}", &hyphen_class(r"\s./"))
             .replace("{plus}", PLUS)
+            .replace("{idd}", IDD)
             .replace("{open}", OPEN_PAREN)
             .replace("{close}", CLOSE_PAREN),
     )
@@ -499,6 +507,12 @@ fn phone_pattern(body: &str) -> Regex {
 /// ASCII `+` and the fullwidth plus. A wide-character keyboard writes
 /// the fullwidth sign. Leaving it out sends the number.
 const PLUS: &str = r"(?:\+|\u{FF0B})";
+
+/// Dialing prefix written where a plus would sit (`0044` for `+44`).
+///
+/// The two zeros are not digits of the number. A bare run after this
+/// prefix stays as written. This is not a plus sign.
+const IDD: &str = "00";
 
 /// ASCII parentheses and the fullwidth pair. A wide-character keyboard
 /// writes those marks around a group. Leaving them out sends the number.
@@ -512,14 +526,16 @@ fn international_sep_class() -> String {
 /// Longest prefix of `text[start..end]` that is one international number.
 ///
 /// The regex match may include a later digit group. Fifteen digits is
-/// the longest number kept here. A shorter prefix is used only when the
-/// full match is past that, so a tail that still fits stays inside it.
+/// the longest number kept here. A leading `00` prefix is not part of
+/// that count. A shorter prefix is used only when the full match is past
+/// that, so a tail that still fits stays inside it.
 fn international_span(text: &str, start: usize, mut end: usize) -> Option<(usize, usize)> {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"^{plus}\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}$"
+            &r"^(?:{plus}|{idd})\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}$"
                 .replace("{sep}", &international_sep_class())
-                .replace("{plus}", PLUS),
+                .replace("{plus}", PLUS)
+                .replace("{idd}", IDD),
         )
         .expect("international phone span")
     });
@@ -529,7 +545,7 @@ fn international_span(text: &str, start: usize, mut end: usize) -> Option<(usize
     });
     loop {
         let slice = text.get(start..end)?;
-        let digits = digit_count(slice);
+        let digits = significant_phone_digits(slice);
         if (8..=15).contains(&digits)
             && digit_bounded(text, start, end)
             && !glued_paren_tail(slice)
@@ -607,6 +623,20 @@ fn digits_of(text: &str) -> Vec<u8> {
 
 fn digit_count(text: &str) -> usize {
     text.chars().filter(|ch| ch.is_ascii_digit()).count()
+}
+
+/// Digits of one international number, ignoring a leading `00` prefix.
+///
+/// `+44 20 7946 0958` is twelve digits. `0044 20 7946 0958` is that
+/// number with a dialing prefix. Counting the two zeros would keep
+/// `0044 20 794`, or drop the tail of a fifteen-digit number.
+fn significant_phone_digits(slice: &str) -> usize {
+    let digits = digit_count(slice);
+    if slice.starts_with(IDD) {
+        digits.saturating_sub(IDD.len())
+    } else {
+        digits
+    }
 }
 
 /// Five or more digits glued to `)` or `）` are a bare tail, not another group.
