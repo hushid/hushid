@@ -301,8 +301,16 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
             format!(r"(?i)\bnuméro{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
             format!(r"(?i)\bnumero{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
         ];
-        for word in ["SIN", "NAS"] {
+        // `S.I.N.` and `N.A.S.` are the same cues as `SIN` and `NAS`.
+        // A dot, or a space and a dot, may sit between the letters.
+        // Leaving that out sends the number. The trailing dot is optional.
+        // `S.I.NISTER` is not this cue.
+        for (word, dotted) in [
+            ("SIN", r"S\s*\.\s*I\s*\.\s*N"),
+            ("NAS", r"N\s*\.\s*A\s*\.\s*S"),
+        ] {
             patterns.push(format!(r"(?i)\b{word}\b"));
+            patterns.push(format!(r"(?i)\b{dotted}\b\.?"));
         }
         patterns
             .into_iter()

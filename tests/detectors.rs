@@ -1470,6 +1470,45 @@ fn sin_needs_a_cue_within_forty_characters() {
 }
 
 #[test]
+fn dotted_sin_cue_still_shields_the_number() {
+    let sin = valid_sin();
+    for cued in [
+        format!("S.I.N. {sin}"),
+        format!("S. I. N. {sin}"),
+        format!("s.i.n. {sin}"),
+        format!("N.A.S. {sin}"),
+        format!("N. A. S. {sin}"),
+        format!("see S.I.N. {sin} today"),
+    ] {
+        let (vault, out, audit) = shield(&cued);
+        assert_eq!(audit.sin, 1, "{cued} -> {out}");
+        assert_eq!(audit.phone, 0, "{cued} -> {out}");
+        assert!(hidden(&out, &sin), "{cued} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), cued);
+    }
+
+    let close = format!("S.I.N.{}{sin}", " ".repeat(40));
+    let (_vault, _out, audit) = shield(&close);
+    assert_eq!(audit.sin, 1, "{close}");
+
+    let far = format!("S.I.N.{}{sin}", " ".repeat(41));
+    let (_vault, out, audit) = shield(&far);
+    assert_eq!(audit.sin, 0, "{far} -> {out}");
+    assert_eq!(out, far);
+
+    for bare in [
+        sin.clone(),
+        format!("S.I.NISTER {sin}"),
+        format!("BUS.I.N {sin}"),
+        format!("S.I.N. {}", "130692543"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn dots_between_sin_groups_still_shield_the_number() {
     // `SIN 130 692 544` is already a SIN, and so is `130 - 692 - 544`.
     // Dots between those groups are that same number. A card and a phone
