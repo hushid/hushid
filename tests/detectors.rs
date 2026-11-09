@@ -5257,3 +5257,71 @@ fn fullwidth_slash_between_groups_still_shields_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn fullwidth_plus_in_the_local_part_still_shields_the_address() {
+    // `user+tag@example.com` is already an email. A wide keyboard writes
+    // that plus as U+FF0B. Leaving the sign out sends the head and keeps
+    // the tail. A plus in the domain, and a plus with no address, stay
+    // as written. A fullwidth plus before digits is still a phone.
+    let plus = '\u{FF0B}';
+    let email = format!("user{plus}tag@example.com");
+    let (vault, out, audit) = shield(&email);
+    assert_eq!(audit.email, 1, "{email} -> {out}");
+    assert_eq!(audit.phone, 0, "{email} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+    assert!(!out.contains(plus), "{email} -> {out}");
+    assert!(!out.contains('@'), "{email} -> {out}");
+    assert!(hidden(&out, "user"), "{email} -> {out}");
+    assert!(hidden(&out, "tag"), "{email} -> {out}");
+    assert!(hidden(&out, "example"), "{email} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), email);
+
+    let sentence = format!("mail user{plus}tag@example.com today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains(plus), "{out}");
+    assert!(hidden(&out, "user"), "{out}");
+    assert!(hidden(&out, "tag"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let wide_at = format!("user{plus}tag\u{FF20}example.com");
+    let (vault, out, audit) = shield(&wide_at);
+    assert_eq!(audit.email, 1, "{wide_at} -> {out}");
+    assert!(!out.contains(plus), "{wide_at} -> {out}");
+    assert!(!out.contains('\u{FF20}'), "{wide_at} -> {out}");
+    assert!(hidden(&out, "user"), "{wide_at} -> {out}");
+    assert!(hidden(&out, "example"), "{wide_at} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), wide_at);
+
+    let raw = format!(r#"{{"to":"user{plus}tag@example.com"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.email, 1, "{raw} -> {out}");
+    assert!(!out.contains(plus), "{raw} -> {out}");
+    assert!(hidden(&out, "user"), "{raw} -> {out}");
+    assert!(hidden(&out, "tag"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let phone = format!("{plus}14165550123");
+    let (vault, out, audit) = shield(&phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert_eq!(audit.email, 0, "{phone} -> {out}");
+    assert!(hidden(&out, "4165550123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    for bare in [
+        format!("user{plus}example.com"),
+        format!("user@ex{plus}ample.com"),
+        format!("cost {plus} shipping"),
+        format!("{plus}not-an-address"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

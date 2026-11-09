@@ -149,10 +149,14 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // U+FF10 through U+FF19. That keyboard writes `user１@`.
         // Leaving it out sends the address. A digit glued to the final
         // label stays outside it, same as `user@example.co1`.
+        // A plus in the local part may be the fullwidth sign. That
+        // keyboard writes `user＋tag@`. Leaving it out sends the head
+        // and keeps the tail. The sign is not part of the domain.
         Regex::new(
-            &r"\b[\p{L}\p{M}{digit}.\u{FF0E}\u{3002}_%+'\u{2018}\u{2019}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}_%+{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}{digit}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
+            &r"\b[\p{L}\p{M}{digit}.\u{FF0E}\u{3002}_%{plus}'\u{2018}\u{2019}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}_%{plus}{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}{digit}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
                 .replace("{digit}", DIGIT)
                 .replace("{hyphen}", HYPHEN)
+                .replace("{plus}", r"+\u{FF0B}")
                 .replace("{at}", AT)
                 .replace("{dot}", r"(?:\.|\u{FF0E}|\u{3002})"),
         )
