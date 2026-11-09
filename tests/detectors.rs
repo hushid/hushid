@@ -2758,6 +2758,56 @@ fn secret_access_key_assignment_is_masked() {
 }
 
 #[test]
+fn assignment_value_with_an_interior_dot_is_masked() {
+    let head = "a".repeat(16);
+    let tail = "QRSTUVWXYZ123456";
+    let value = format!("{head}.{tail}");
+    for text in [
+        format!("api_key={value}"),
+        format!("api_key={head}.{tail}.UVWXYZ"),
+        format!("api_key=abc.{}", "b".repeat(16)),
+        format!("export API_KEY={value} please"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(hidden(&out, &head), "{text} -> {out}");
+        assert!(hidden(&out, tail), "{text} -> {out}");
+        assert!(hidden(&out, "UVWXYZ"), "{text} -> {out}");
+        assert!(!out.contains('.'), "{text} -> {out}");
+        assert!(!vault.holds_surface(value.as_bytes()), "{text}");
+        assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+    }
+    let exported = format!("export API_KEY={value} please");
+    let (_vault, out, _) = shield(&exported);
+    assert_eq!(out, "export h1_secret please");
+
+    let sentence = format!("see api_key={head}. Next");
+    let (_vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret. Next", "{sentence} -> {out}");
+    assert!(hidden(&out, &head), "{out}");
+
+    let raw = format!(r#"{{"api_key":"{value}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"api_key":"h1_secret"}"#);
+    assert!(hidden(&out, tail), "{out}");
+    assert!(!vault.holds_surface(value.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for text in [
+        format!("api_key={}", "a".repeat(15)),
+        "api_key=abc.def".to_string(),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 0, "{text} -> {out}");
+        assert_eq!(out, text, "{text} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
