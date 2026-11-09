@@ -68,17 +68,38 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
         "415.555.0134",
         "+14155550134",
         "+44 20 7946 0958",
+        "+1(416)555-0123",
+        "1(416)555-0123",
+        "+1(416) 555-0123",
+        "1(416) 555-0123",
+        "+1(416)555.0123",
+        "+1416-555-0123",
     ] {
         let (vault, out, audit) = shield(phone);
         assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), phone);
     }
-    let (_vault, out, audit) = shield("4155550134");
-    assert_eq!(out, "4155550134");
-    assert_eq!(audit.phone, 0);
-    let (_vault, out, audit) = shield("(416)5550123");
-    assert_eq!(out, "(416)5550123");
-    assert_eq!(audit.phone, 0);
+    let sentence = "call +1(416)555-0123 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+    for bare in [
+        "4155550134",
+        "(416)5550123",
+        "14165550123",
+        "+1(416)5550123",
+        "1(416)5550123",
+        "11(416)555-0123",
+        "21(416)555-0123",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+    }
 }
 
 #[test]
