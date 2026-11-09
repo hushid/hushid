@@ -482,6 +482,99 @@ fn email_with_a_minus_sign_or_soft_hyphen_stays_one_address() {
 }
 
 #[test]
+fn fullwidth_at_sign_still_shields_the_address() {
+    // `user@example.com` is already an email. A wide keyboard writes
+    // the at-sign as U+FF20. Leaving that sign out sends the address.
+    // A bare sign, a missing domain, and a short tail stay as written.
+    let at = '\u{FF20}';
+    for (email, local, domain) in [
+        (format!("user{at}example.com"), "user", "example"),
+        (format!("marie+tag{at}example.com"), "marie", "example"),
+        (format!("o'brien{at}example.com"), "brien", "example"),
+        (format!("josé{at}example.com"), "josé", "example"),
+        (format!("jose\u{0301}{at}example.com"), "jose", "example"),
+        (format!("user{at}ex-ample.com"), "user", "ample"),
+        (format!("user{at}société.fr"), "user", "société"),
+        (format!("Jean-Luc{at}Example.COM"), "Jean", "Example"),
+    ] {
+        let (vault, out, audit) = shield(&email);
+        assert_eq!(audit.email, 1, "{email} -> {out}");
+        assert_eq!(audit.phone, 0, "{email} -> {out}");
+        assert_eq!(audit.card, 0, "{email} -> {out}");
+        assert_eq!(audit.sin, 0, "{email} -> {out}");
+        assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+        assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+        assert!(!out.contains(at), "{email} -> {out}");
+        assert!(!out.contains('@'), "{email} -> {out}");
+        assert!(hidden(&out, local), "{email} -> {out}");
+        assert!(hidden(&out, domain), "{email} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), email);
+    }
+
+    let sentence = format!("mail user{at}example.com today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains(at), "{out}");
+    assert!(hidden(&out, "user"), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let dotted = format!("mail user{at}example.com.");
+    let (vault, out, audit) = shield(&dotted);
+    assert_eq!(audit.email, 1, "{dotted} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with('.'), "{out}");
+    assert!(!out.contains(at), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), dotted);
+
+    let wrapped = format!("(user{at}example.com)");
+    let (vault, out, audit) = shield(&wrapped);
+    assert_eq!(audit.email, 1, "{wrapped} -> {out}");
+    assert!(out.starts_with("(h1_email_"), "{out}");
+    assert!(out.ends_with(')'), "{out}");
+    assert!(!out.contains(at), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), wrapped);
+
+    let pair = format!("a@b.co and user{at}example.com");
+    let (vault, out, audit) = shield(&pair);
+    assert_eq!(audit.email, 2, "{pair} -> {out}");
+    assert_eq!(out.matches("h1_email_").count(), 2, "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert!(!out.contains(at), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert!(hidden(&out, "b.co"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    let raw = format!(r#"{{"to":"user{at}example.com"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.email, 1, "{raw} -> {out}");
+    assert!(!out.contains(at), "{raw} -> {out}");
+    assert!(!out.contains('@'), "{raw} -> {out}");
+    assert!(hidden(&out, "example"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        format!("{at}example.com"),
+        format!("user{at}example"),
+        format!("user{at}example.c"),
+        format!("user{at}.com"),
+        format!("user {at} example.com"),
+        format!("user{at}{at}example.com"),
+        format!("cost {at} shipping"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn prose_name_is_not_a_hit() {
     let (_vault, out, audit) = shield("Marie lives in Montreal");
     assert_eq!(out, "Marie lives in Montreal");
