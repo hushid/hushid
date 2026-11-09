@@ -479,6 +479,19 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // `s.`, `b.`, and `r.` prefixes stay too.
             r"\bhv[sbr]\.[A-Za-z0-9_\-]{24,}\b",
             r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b",
+            // A 1Password service account token is `ops_` plus the
+            // URL-safe base64 of a JSON object. The body starts with
+            // `eyJ`. The JWT rule below needs a word boundary before
+            // `eyJ`, and the underscore sits against that `e`, so the
+            // token stays in the clear. The published example is 630
+            // characters after `ops_`. The same JSON with the sign-in
+            // address `my.1password.com` and a one-character email
+            // local part is 604. A shorter body stays as written. The
+            // encoding may include an underscore or a hyphen,
+            // including at the end, so this pattern does not use a
+            // trailing word boundary. A trailing `=` is padding and
+            // stays outside the token.
+            r"\bops_eyJ[A-Za-z0-9_-]{601,}",
             r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b",
             r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}={0,2}",
             r"(?s)-----BEGIN (?:RSA |OPENSSH |EC |DSA |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |OPENSSH |EC |DSA |ENCRYPTED )?PRIVATE KEY-----",

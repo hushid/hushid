@@ -4854,3 +4854,83 @@ fn pypi_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn onepassword_service_account_token_is_masked() {
+    // `eyJ` plus two dotted segments is already a secret. 1Password
+    // documents a service account token as `ops_` plus the URL-safe
+    // base64 of a JSON object, so the body starts with `eyJ`. The
+    // underscore sits against that `e`, and the JWT rule does not see
+    // it. The published example is 630 characters after `ops_`. The
+    // same JSON with the sign-in address `my.1password.com` and a
+    // one-character email local part is 604. A shorter body stays as
+    // written. A
+    // trailing `=` is padding and stays outside the token.
+    let body = format!("eyJ{}", "a".repeat(601));
+    let token = format!("ops_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "ops"), "{token} -> {out}");
+    assert!(hidden(&out, "eyJ"), "{token} -> {out}");
+    assert!(hidden(&out, &"a".repeat(601)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let hyphen_tail = format!("ops_eyJ{}-", "b".repeat(626));
+    let (vault, out, audit) = shield(&hyphen_tail);
+    assert_eq!(audit.secret, 1, "{hyphen_tail} -> {out}");
+    assert_eq!(out, "h1_secret", "{hyphen_tail} -> {out}");
+    assert!(hidden(&out, &"b".repeat(626)), "{out}");
+    assert!(!vault.holds_surface(hyphen_tail.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let mixed = format!("ops_eyJa1_{}-{}", "c".repeat(300), "d".repeat(323));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "ops"), "{out}");
+    assert!(hidden(&out, "a1"), "{out}");
+    assert!(hidden(&out, &"c".repeat(300)), "{out}");
+    assert!(hidden(&out, &"d".repeat(323)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let padded = format!("ops_{body}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret=", "{padded} -> {out}");
+    assert!(hidden(&out, &"a".repeat(601)), "{out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &"a".repeat(601)), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let published = format!("ops_eyJ{}", "a".repeat(627));
+    let (vault, out, audit) = shield(&published);
+    assert_eq!(audit.secret, 1, "{published} -> {out}");
+    assert_eq!(out, "h1_secret", "{published} -> {out}");
+    assert!(hidden(&out, &"a".repeat(627)), "{out}");
+    assert!(!vault.holds_surface(published.as_bytes()));
+
+    for bare in [
+        format!("ops_eyJ{}", "a".repeat(600)),
+        format!("ops_eyJ{}", "a".repeat(20)),
+        format!("ops_{}", "a".repeat(630)),
+        format!("wordops_{body}"),
+        format!("OPS_{body}"),
+        format!("ops_eyj{}", "a".repeat(627)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
