@@ -1,12 +1,16 @@
 use crate::audit::AuditRecord;
 use crate::detect::{find_hits, Hit};
 use crate::glossary::Glossary;
-use crate::shield::shield_text;
+use crate::shield::shield_in_context;
 use crate::token::{find_h1, TokenError, SECRET_MARK};
 use crate::vault::{RestoreError, Vault};
 use std::fmt;
 
 const MAX_JSON_DEPTH: u8 = 8;
+
+/// Surrounding characters kept for a cue. The longest cue plus the
+/// 40-character gap is 66, and the quote on this string takes one more.
+const CUE_CONTEXT_CHARS: usize = 96;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonError {
@@ -30,7 +34,8 @@ impl std::error::Error for JsonError {}
 /// Shield JSON string values, object keys, and numbers the detectors recognize.
 ///
 /// A number is replaced with a quoted token and restored as a number. A string
-/// whose text is itself a JSON object or array is shielded again. Keys and
+/// whose text is itself a JSON object or array is shielded again. A cue beside
+/// a string or a key counts the same way it does in plain text. Keys and
 /// numbers that no detector recognizes stay as they are.
 pub fn shield_json_strings(
     vault: &mut Vault,
@@ -67,7 +72,17 @@ fn shield_document(
             let (end, decoded) = parse_string(input, index)?;
             let after = skip_ws(input, end);
             let is_key = bytes.get(after) == Some(&b':');
-            let mapped = shield_decoded(vault, glossary, &decoded, audit, depth, is_key)?;
+            let before_ctx = suffix_chars(&input[..index + 1], CUE_CONTEXT_CHARS);
+            let after_ctx = prefix_chars(&input[end - 1..], CUE_CONTEXT_CHARS);
+            let mapped = shield_decoded(
+                vault,
+                glossary,
+                &decoded,
+                audit,
+                depth,
+                is_key,
+                (before_ctx, after_ctx),
+            )?;
             out.push('"');
             out.push_str(&encode_json(&mapped));
             out.push('"');
@@ -104,11 +119,14 @@ fn shield_decoded(
     audit: &mut AuditRecord,
     depth: u8,
     is_key: bool,
+    context: (&str, &str),
 ) -> Result<String, JsonError> {
     if !is_key && depth < MAX_JSON_DEPTH && is_json_document(decoded) {
         return shield_document(vault, glossary, decoded, audit, depth + 1);
     }
-    let (shielded, part) = shield_text(vault, glossary, decoded).map_err(JsonError::Token)?;
+    let (before, after) = context;
+    let (shielded, part) =
+        shield_in_context(vault, glossary, before, decoded, after).map_err(JsonError::Token)?;
     audit.merge(&part);
     Ok(shielded)
 }
@@ -422,6 +440,29 @@ fn decode_surrogate(high: u16, low: u16) -> Option<char> {
     }
     let value = 0x10000 + (((u32::from(high) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
     char::from_u32(value)
+}
+
+fn suffix_chars(text: &str, max_chars: usize) -> &str {
+    if max_chars == 0 {
+        return "";
+    }
+    let start = text
+        .char_indices()
+        .rev()
+        .nth(max_chars - 1)
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    &text[start..]
+}
+
+fn prefix_chars(text: &str, max_chars: usize) -> &str {
+    if max_chars == 0 {
+        return "";
+    }
+    match text.char_indices().nth(max_chars) {
+        Some((index, _)) => &text[..index],
+        None => text,
+    }
 }
 
 fn skip_ws(input: &str, mut index: usize) -> usize {

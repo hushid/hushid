@@ -84,6 +84,97 @@ fn json_number_sin_and_nested_document_round_trip() {
     assert!(!restored.contains("h1_"), "{restored}");
 }
 
+#[test]
+fn json_string_beside_a_cue_is_shielded() {
+    let sin = luhn_sin("13069254");
+    let spaced = format!("{} {} {}", &sin[..3], &sin[3..6], &sin[6..9]);
+    let shielded = [
+        (format!(r#"{{"sin":"{sin}"}}"#), sin.clone(), "sin"),
+        (format!(r#"{{"nas":"{spaced}"}}"#), spaced, "sin"),
+        (format!(r#"{{"{sin}":"NAS"}}"#), sin.clone(), "sin"),
+        (
+            format!(r#"{{"label":"SIN","id":"{sin}"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (format!(r#"{{"sin" : "{sin}"}}"#), sin.clone(), "sin"),
+        (format!("{{\n  \"sin\": \"{sin}\"\n}}"), sin.clone(), "sin"),
+        (
+            format!(r#"{{"note":"{{\"sin\":\"{sin}\"}}"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            format!(r#"{{"numéro d'assurance sociale":"{sin}"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            format!(
+                r#"{{"numéro d'assurance sociale":"{}","n":"{sin}"}}"#,
+                ".".repeat(30)
+            ),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            r#"{"card":"4111111111111111"}"#.to_string(),
+            "4111111111111111".to_string(),
+            "card",
+        ),
+        (
+            r#"{"visa":"4111111111111111"}"#.to_string(),
+            "4111111111111111".to_string(),
+            "card",
+        ),
+    ];
+    for (input, surface, kind) in shielded {
+        assert_json_surface_shielded(&input, &surface, kind);
+    }
+
+    // Three characters (`":"`) sit between the key and the digits.
+    // 37 more keep the cue inside the 40-character window. 38 push it out.
+    let near = format!(r#"{{"sin":"{}{sin}"}}"#, ".".repeat(37));
+    assert_json_surface_shielded(&near, &sin, "sin");
+    let far = format!(r#"{{"sin":"{}{sin}"}}"#, ".".repeat(38));
+    assert_json_left_as_written(&far);
+    let french_far = format!(
+        r#"{{"numéro d'assurance sociale":"{}","n":"{sin}"}}"#,
+        ".".repeat(31)
+    );
+    assert_json_left_as_written(&french_far);
+
+    for bare in [
+        format!(r#"{{"n":"{sin}"}}"#),
+        r#"{"n":"4111111111111111"}"#.to_string(),
+        r#"{"phone":"4155550134"}"#.to_string(),
+    ] {
+        assert_json_left_as_written(&bare);
+    }
+}
+
+fn assert_json_left_as_written(input: &str) {
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
+    assert_eq!(audit.sin, 0, "{input} -> {out}");
+    assert_eq!(audit.card, 0, "{input} -> {out}");
+    assert_eq!(audit.phone, 0, "{input} -> {out}");
+    assert_eq!(out, input);
+}
+
+fn assert_json_surface_shielded(input: &str, surface: &str, kind: &str) {
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
+    let count = match kind {
+        "sin" => audit.sin,
+        "card" => audit.card,
+        other => panic!("unexpected kind {other}"),
+    };
+    assert_eq!(count, 1, "{input} -> {out}");
+    assert!(!out.contains(surface), "{input} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
+}
+
 fn luhn_sin(body: &str) -> String {
     let mut sum = 0;
     let mut double = true;
