@@ -611,6 +611,108 @@ fn spaces_around_a_group_separator_still_shield_the_value() {
 }
 
 #[test]
+fn dash_punctuation_still_separates_a_grouped_number() {
+    // U+2012 is the figure dash Unicode assigns to a telephone number.
+    // U+2013 is the en dash a word processor inserts for a hyphen.
+    // U+2011 already separates a phone. The same mark between card or
+    // SIN groups is still that number.
+    let figure = '\u{2012}';
+    let en = '\u{2013}';
+    let nb = '\u{2011}';
+
+    for phone in [
+        format!("416{figure}555{figure}0123"),
+        format!("416{en}555{en}0123"),
+        format!("416 {en} 555 {en} 0123"),
+        format!("416{en}555-0123"),
+        format!("(416){en}555{en}0123"),
+        format!("+1{en}416{en}555{en}0123"),
+        format!("1{figure}800{figure}555{figure}0199"),
+    ] {
+        let (vault, out, audit) = shield(&phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+    let sentence = format!("call 416{en}555{en}0123 today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert!(!out.contains("0123"), "{out}");
+    assert!(!out.contains(en), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    for grouped in [
+        format!("4111{en}1111{en}1111{en}1111"),
+        format!("4111{nb}1111{nb}1111{nb}1111"),
+        format!("3782{figure}822463{figure}10005"),
+        format!("3782{en}8224{en}6310{en}005"),
+        format!("3056{en}930902{en}5904"),
+        format!("4111{en}1111{en}1111{en}1111{en}110"),
+    ] {
+        let (vault, out, audit) = shield(&grouped);
+        assert_eq!(audit.card, 1, "{grouped} -> {out}");
+        assert_eq!(audit.phone, 0, "{grouped} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{grouped} -> {out}");
+        assert_eq!(out.len(), "h1_card_".len() + 9, "{grouped} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), grouped);
+    }
+    let cued = format!("visa 4111{en}1111{en}1111{en}1111");
+    let (vault, out, audit) = shield(&cued);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.starts_with("visa h1_card_"), "{out}");
+    assert!(!out.contains("4111"), "{out}");
+    assert!(!out.contains(en), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued);
+
+    let sin = valid_sin();
+    let dashed = format!("{}{figure}{}{figure}{}", &sin[..3], &sin[3..6], &sin[6..]);
+    let cued_sin = format!("SIN {dashed}");
+    let (vault, out, audit) = shield(&cued_sin);
+    assert_eq!(audit.sin, 1, "{cued_sin} -> {out}");
+    assert_eq!(audit.phone, 0, "{cued_sin} -> {out}");
+    assert!(out.starts_with("SIN h1_sin_"), "{out}");
+    assert!(!out.contains(&sin), "{out}");
+    assert!(!out.contains(figure), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued_sin);
+
+    for bare in [
+        format!("416{en}5550123"),
+        format!("416{en}555 office{en}0123"),
+        format!("416{figure}555{figure}012"),
+        format!("4111{en}1111{en}1111{en}1112"),
+        format!("4111{en}1111{en}1111{en}11111"),
+        dashed.clone(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+    }
+
+    let raw = format!(r#"{{"n":"416{en}555{en}0123"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(!out.contains("416"), "{raw} -> {out}");
+    assert!(!out.contains(en), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let sin_raw = format!(r#"{{"nas":"{dashed}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &sin_raw).unwrap();
+    assert_eq!(audit.sin, 1, "{sin_raw} -> {out}");
+    assert!(!out.contains(&dashed), "{sin_raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), sin_raw);
+}
+
+#[test]
 fn underscore_before_an_api_key_name_still_masks_the_value() {
     let secret = "a".repeat(16);
     for text in [
