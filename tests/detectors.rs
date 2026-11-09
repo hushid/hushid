@@ -4786,3 +4786,71 @@ fn vault_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn pypi_api_token_is_masked() {
+    // `npm_` plus 36 letters is already a secret. PyPI documents an API
+    // token as `pypi-` plus a URL-safe base64 macaroon. The published
+    // body is at least 85 characters and may contain an underscore or
+    // a hyphen, including at the end. A shorter body stays as written.
+    // A trailing `=` is padding and stays outside the token.
+    let body = "a".repeat(85);
+    let token = format!("pypi-{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pypi"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let hyphen_tail = format!("pypi-{}-", "b".repeat(84));
+    let (vault, out, audit) = shield(&hyphen_tail);
+    assert_eq!(audit.secret, 1, "{hyphen_tail} -> {out}");
+    assert_eq!(out, "h1_secret", "{hyphen_tail} -> {out}");
+    assert!(hidden(&out, &"b".repeat(84)), "{out}");
+    assert!(!vault.holds_surface(hyphen_tail.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let mixed = format!("pypi-a1_{}-{}", "b".repeat(40), "c".repeat(41));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "pypi"), "{out}");
+    assert!(hidden(&out, "a1"), "{out}");
+    assert!(hidden(&out, &"b".repeat(40)), "{out}");
+    assert!(hidden(&out, &"c".repeat(41)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let padded = format!("pypi-{body}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret=", "{padded} -> {out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("pypi-{}", "a".repeat(84)),
+        format!("pypi-{}-", "a".repeat(83)),
+        format!("pypi-{}", "a".repeat(9)),
+        format!("wordpypi-{body}"),
+        format!("PyPI-{body}"),
+        format!("pypi_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

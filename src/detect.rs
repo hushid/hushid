@@ -453,6 +453,16 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}\b",
             r"\bAIza[0-9A-Za-z_\-]{35}\b",
             r"\bnpm_[A-Za-z0-9]{36}\b",
+            // A PyPI API token is `pypi-` and a URL-safe base64 macaroon.
+            // PyPI's scanner asks for at least 85 characters after the
+            // hyphen. The rules above do not see that prefix, so the
+            // token stays in the clear. The body may contain an
+            // underscore or a hyphen, including at the end. A word
+            // boundary there would leave that final hyphen, so the
+            // pattern stops at the first character outside this
+            // alphabet. A shorter body stays as written. A trailing
+            // `=` is padding and stays outside the token.
+            r"\bpypi-[A-Za-z0-9_-]{85,}",
             r"\bhf_[A-Za-z0-9]{20,}\b",
             // DigitalOcean tokens are `dop_v1_` from the control panel,
             // `doo_v1_` from the OAuth flow, and `dor_v1_` for a refresh
