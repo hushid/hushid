@@ -345,6 +345,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // Leaving the prefix out sends the token.
             r"\bxapp-[A-Za-z0-9-]{10,}\b",
             r"\bxoxe(?:\.xapp|\.xox[baprs])?-[A-Za-z0-9-]{10,}\b",
+            // Workflow tokens are `xwfp-`. Leaving that prefix out sends
+            // the token. The payload alphabet and the 10-character minimum
+            // match `xoxb-`. A short payload stays as written.
+            r"\bxwfp-[0-9A-Za-z-]{10,}",
             // Stripe webhook signing secret. Leaving the prefix out sends it.
             r"\bwhsec_[A-Za-z0-9]{20,}\b",
             r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{10,}\b",
