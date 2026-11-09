@@ -464,6 +464,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // alphabet. A shorter body stays as written. A trailing
             // `=` is padding and stays outside the token.
             r"\bpypi-[A-Za-z0-9_-]{85,}",
+            // A Shopify access token is `shpat_` (public and online
+            // admin), `shpca_` (custom apps), `shppa_` (legacy private
+            // apps), or `shpss_` (app secret). The body is 32 letters
+            // or digits. The rules above do not see those prefixes, so
+            // the token stays in the clear. A shorter body stays as
+            // written. A longer body stays too. The value is not stored.
+            r"\bshp(?:at|ca|pa|ss)_[0-9A-Za-z]{32}\b",
             r"\bhf_[A-Za-z0-9]{20,}\b",
             // DigitalOcean tokens are `dop_v1_` from the control panel,
             // `doo_v1_` from the OAuth flow, and `dor_v1_` for a refresh

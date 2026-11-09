@@ -4984,3 +4984,47 @@ fn ideographic_full_stop_still_shields_the_address() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn shopify_access_token_is_masked() {
+    // Shopify documents an access token as `shpat_` (public and online
+    // admin), `shpca_` (custom apps), `shppa_` (legacy private apps),
+    // or `shpss_` (app secret). The body is 32 letters or digits. A
+    // shorter body stays as written. A longer body stays too. The value
+    // is not stored.
+    let body = "a".repeat(32);
+    for prefix in ["shpat_", "shpca_", "shppa_", "shpss_"] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(
+            hidden(&out, prefix.trim_end_matches('_')),
+            "{token} -> {out}"
+        );
+        assert!(hidden(&out, &body), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let published = "shpat_r8TRc9ZXAvcVvcrmtr7qoVw69WeeY1ex";
+    let (vault, out, audit) = shield(&format!("see {published}.next"));
+    assert_eq!(audit.secret, 1, "{published} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{published} -> {out}");
+    assert!(hidden(&out, "shpat"), "{out}");
+    assert!(hidden(&out, "r8TRc9ZXAvcVvcrmtr7qoVw69WeeY1ex"), "{out}");
+    assert!(!vault.holds_surface(published.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("shpat_{}", "a".repeat(31)),
+        format!("shpat_{}", "a".repeat(33)),
+        format!("wordshpat_{body}"),
+        format!("SHPAT_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
