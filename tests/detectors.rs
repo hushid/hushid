@@ -5446,3 +5446,58 @@ fn numero_sign_in_the_sin_cue_still_shields_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn halfwidth_middle_dot_between_groups_still_shields_the_number() {
+    // U+FF65 sits between groups the way a hyphen does. Leaving that
+    // halfwidth middle dot out sends the number. A slash is still not
+    // a SIN separator.
+    let phone = "416\u{FF65}555\u{FF65}0123";
+    round_trip(phone, |audit| audit.phone);
+    let (vault, out, audit) = shield(phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert!(hidden(&out, "416"), "{phone} -> {out}");
+    assert!(hidden(&out, "555"), "{phone} -> {out}");
+    assert!(hidden(&out, "0123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let international = "+44\u{FF65}20\u{FF65}7946\u{FF65}0958";
+    round_trip(international, |audit| audit.phone);
+    let (vault, out, audit) = shield(international);
+    assert_eq!(audit.phone, 1, "{international} -> {out}");
+    assert!(hidden(&out, "44"), "{international} -> {out}");
+    assert!(hidden(&out, "20"), "{international} -> {out}");
+    assert!(hidden(&out, "7946"), "{international} -> {out}");
+    assert!(hidden(&out, "0958"), "{international} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), international);
+
+    let card = "4111\u{FF65}1111\u{FF65}1111\u{FF65}1111";
+    round_trip(card, |audit| audit.card);
+    let (vault, out, audit) = shield(card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(hidden(&out, "4111"), "{card} -> {out}");
+    assert!(hidden(&out, "1111"), "{card} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let sin = "SIN 130\u{FF65}692\u{FF65}544";
+    let (vault, out, audit) = shield(sin);
+    assert_eq!(audit.sin, 1, "{sin} -> {out}");
+    assert!(out.starts_with("SIN h1_sin_"), "{sin} -> {out}");
+    assert!(hidden(&out, "130"), "{sin} -> {out}");
+    assert!(hidden(&out, "692"), "{sin} -> {out}");
+    assert!(hidden(&out, "544"), "{sin} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sin);
+
+    for bare in [
+        "not\u{FF65}a\u{FF65}phone",
+        "4111\u{FF65}1111\u{FF65}1111\u{FF65}1112",
+        "130\u{FF65}692\u{FF65}544",
+        "SIN 130/692/544",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
