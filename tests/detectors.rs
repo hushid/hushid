@@ -3147,6 +3147,63 @@ fn stripe_connection_token_is_masked() {
 }
 
 #[test]
+fn stripe_organization_key_is_masked() {
+    // `sk_live_` plus 10 letters is already a secret. An organization
+    // key is `sk_org_` and the same kind of letters. The live and test
+    // rule stops before `org`, so the key stays in the clear. There is
+    // no `rk_org_` prefix. A short payload stays as written.
+    let minimum = format!("sk_org_{}", "a".repeat(10));
+    let (vault, out, audit) = shield(&minimum);
+    assert_eq!(audit.secret, 1, "{minimum} -> {out}");
+    assert_eq!(out, "h1_secret");
+    assert!(hidden(&out, "sk_org"), "{out}");
+    assert!(hidden(&out, &"a".repeat(10)), "{out}");
+    assert!(!vault.holds_surface(minimum.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let classic = format!("sk_org_{}", "4eC39HqLyjWDarjtT1zdp7dc");
+    let (vault, out, audit) = shield(&format!("see {classic}.next"));
+    assert_eq!(audit.secret, 1, "{classic} -> {out}");
+    assert_eq!(out, "see h1_secret.next");
+    assert!(hidden(&out, "sk_org"), "{out}");
+    assert!(hidden(&out, "4eC39HqLyjWDarjtT1zdp7dc"), "{out}");
+    assert!(!vault.holds_surface(classic.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let longer = format!("sk_org_{}", "B".repeat(99));
+    let (vault, out, audit) = shield(&format!("keep {longer} please"));
+    assert_eq!(audit.secret, 1, "{longer} -> {out}");
+    assert_eq!(out, "keep h1_secret please");
+    assert!(hidden(&out, "sk_org"), "{out}");
+    assert!(hidden(&out, &"B".repeat(99)), "{out}");
+    assert!(!vault.holds_surface(longer.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"secret":"{classic}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"secret":"h1_secret"}"#);
+    assert!(hidden(&out, "4eC39HqLyjWDarjtT1zdp7dc"), "{out}");
+    assert!(!vault.holds_surface(classic.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("sk_org_{}", "a".repeat(9)),
+        "sk_org_".to_string(),
+        format!("rk_org_{}", "a".repeat(10)),
+        format!("pk_org_{}", "a".repeat(10)),
+        format!("wordsk_org_{}", "a".repeat(10)),
+        format!("sk_org_{}_{}", "abcd", "efghijklmn"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn secret_access_key_assignment_is_masked() {
     let secret = "a".repeat(16);
     for text in [
