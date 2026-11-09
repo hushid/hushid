@@ -3664,6 +3664,59 @@ fn zero_zero_prefix_still_shields_the_number() {
 }
 
 #[test]
+fn nanp_exit_prefix_still_shields_the_number() {
+    for phone in [
+        "011 44 20 7946 0958",
+        "01144 20 7946 0958",
+        "01144-20-7946-0958",
+        "011 44 20 7946",
+    ] {
+        let (vault, out, audit) = shield(phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+        assert!(hidden(&out, "7946"), "{phone} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = "call 011 44 20 7946 0958 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "0958"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let longer = "011 44 20 7946 0958 9999";
+    let (vault, out, audit) = shield(longer);
+    assert_eq!(audit.phone, 1, "{longer} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(out.ends_with(" 9999"), "{out}");
+    assert!(visible(&out).contains("9999"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), longer);
+
+    let raw = r#"{"tel":"011 44 20 7946 0958"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "7946"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        "011442079460958",
+        "011 44 20 794",
+        "1011 44 20 7946 0958",
+        "44 20 7946 0958",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();

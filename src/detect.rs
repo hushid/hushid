@@ -524,11 +524,13 @@ fn phone_pattern(body: &str) -> Regex {
 /// the fullwidth sign. Leaving it out sends the number.
 const PLUS: &str = r"(?:\+|\u{FF0B})";
 
-/// Dialing prefix written where a plus would sit (`0044` for `+44`).
+/// Dialing prefix written where a plus would sit.
 ///
-/// The two zeros are not digits of the number. A bare run after this
-/// prefix stays as written. This is not a plus sign.
-const IDD: &str = "00";
+/// `00` is the prefix outside NANP (`0044` for `+44`). `011` is the
+/// NANP exit code (`011 44` for `+44`). Neither prefix is digits of
+/// the number. `011` is listed first so it is not read as `00`. A bare
+/// run after the prefix stays as written. This is not a plus sign.
+const IDD: &str = r"(?:011|00)";
 
 /// ASCII parentheses and the fullwidth pair. A wide-character keyboard
 /// writes those marks around a group. Leaving them out sends the number.
@@ -643,16 +645,20 @@ fn digit_count(text: &str) -> usize {
 
 /// Digits of one international number, ignoring a leading `00` prefix.
 ///
-/// `+44 20 7946 0958` is twelve digits. `0044 20 7946 0958` is that
-/// number with a dialing prefix. Counting the two zeros would keep
-/// `0044 20 794`, or drop the tail of a fifteen-digit number.
+/// `+44 20 7946 0958` is twelve digits. `0044 20 7946 0958` and
+/// `011 44 20 7946 0958` are that number with a dialing prefix.
+/// Counting the prefix would keep a short number, or drop the tail
+/// of a fifteen-digit number.
 fn significant_phone_digits(slice: &str) -> usize {
     let digits = digit_count(slice);
-    if slice.starts_with(IDD) {
-        digits.saturating_sub(IDD.len())
+    let prefix = if slice.starts_with("011") {
+        3
+    } else if slice.starts_with("00") {
+        2
     } else {
-        digits
-    }
+        0
+    };
+    digits.saturating_sub(prefix)
 }
 
 /// Five or more digits glued to `)` or `）` are a bare tail, not another group.
