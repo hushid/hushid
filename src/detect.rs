@@ -318,11 +318,12 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
         // SIN when a hyphen, an en dash, or a soft hyphen sits between
         // the words. That phrase has no shorter cue. U+2018 in
         // `d'assurance` is the left single quote. Leaving it out sends
-        // the number.
+        // the number. The é in `numéro` may be e and a combining acute.
+        // Leaving that form out sends the number.
         let gap = cue_word_gap();
         let mut patterns = vec![
             format!(r"(?i)\bsocial{gap}insurance\b"),
-            format!(r"(?i)\bnuméro{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
+            format!(r"(?i)\bnum(?:é|e\u{{0301}})ro{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
             format!(r"(?i)\bnumero{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
         ];
         // `S.I.N.` and `N.A.S.` are the same cues as `SIN` and `NAS`.

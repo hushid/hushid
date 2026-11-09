@@ -4243,3 +4243,101 @@ fn fullwidth_full_stop_still_shields_the_value() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn decomposed_accent_in_the_sin_cue_still_shields_the_number() {
+    // `numéro d'assurance sociale 130692544` is already a SIN. The é in
+    // numéro may be a combining acute. Leaving that form out sends the
+    // digits. The phrase has no shorter cue. A cue 41 characters away
+    // stays as written.
+    let sin = valid_sin();
+    let acute = '\u{0301}';
+    let cue = format!("nume{acute}ro d'assurance sociale");
+    let text = format!("{cue} {sin}");
+    let (vault, out, audit) = shield(&text);
+    assert_eq!(audit.sin, 1, "{text} -> {out}");
+    assert_eq!(audit.card, 0, "{text} -> {out}");
+    assert_eq!(audit.phone, 0, "{text} -> {out}");
+    assert!(out.starts_with(&format!("{cue} h1_sin_")), "{out}");
+    assert!(out.contains(acute), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), text);
+
+    let upper = format!("NUME{acute}RO D'ASSURANCE SOCIALE {sin}");
+    let (vault, out, audit) = shield(&upper);
+    assert_eq!(audit.sin, 1, "{upper} -> {out}");
+    assert!(
+        out.starts_with(&format!("NUME{acute}RO D'ASSURANCE SOCIALE h1_sin_")),
+        "{out}"
+    );
+    assert!(out.contains(acute), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), upper);
+
+    let grouped = format!("{cue} {} {} {}", &sin[..3], &sin[3..6], &sin[6..]);
+    let (vault, out, audit) = shield(&grouped);
+    assert_eq!(audit.sin, 1, "{grouped} -> {out}");
+    assert_eq!(audit.phone, 0, "{grouped} -> {out}");
+    assert!(out.starts_with(&format!("{cue} h1_sin_")), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert!(hidden(&out, &sin[..3]), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), grouped);
+
+    let sentence = format!("the {cue} is {sin} today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.sin, 1, "{sentence} -> {out}");
+    assert!(out.starts_with(&format!("the {cue} is h1_sin_")), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(out.contains(acute), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let quote = format!("nume{acute}ro d\u{2018}assurance sociale {sin}");
+    let (vault, out, audit) = shield(&quote);
+    assert_eq!(audit.sin, 1, "{quote} -> {out}");
+    assert!(out.contains('\u{2018}'), "{out}");
+    assert!(out.contains(acute), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), quote);
+
+    let near = format!("{cue}{}{sin}", ".".repeat(40));
+    let (vault, out, audit) = shield(&near);
+    assert_eq!(audit.sin, 1, "{near} -> {out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), near);
+
+    let after = format!("{sin}{}{cue}", ".".repeat(40));
+    let (vault, out, audit) = shield(&after);
+    assert_eq!(audit.sin, 1, "{after} -> {out}");
+    assert!(out.starts_with("h1_sin_"), "{out}");
+    assert!(out.ends_with(&cue), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), after);
+
+    let raw = format!(r#"{{"note":"{cue} {sin}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.sin, 1, "{raw} -> {out}");
+    assert!(out.contains(acute), "{out}");
+    assert!(hidden(&out, &sin), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let far = format!("{cue}{}{sin}", ".".repeat(41));
+    let (_vault, out, audit) = shield(&far);
+    assert_eq!(audit.sin, 0, "{far} -> {out}");
+    assert_eq!(out, far);
+
+    for bare in [
+        sin.clone(),
+        format!("nume{acute}ro d'assurance {sin}"),
+        format!("nume{acute}rod'assurance sociale {sin}"),
+        format!("nume{acute}security {sin}"),
+        format!("{cue} {}", "130692543"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
