@@ -106,12 +106,15 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     static NANP: LazyLock<Regex> = LazyLock::new(|| {
         // `+1` may sit against a shaped number with no separator (`+1(416)`
         // or `+1416-555-0123`). A trunk `1` still needs a separator here.
-        // A run of `{sep}` still separates groups (`416 - 555 - 0123`).
-        // Whitespace may sit inside the area-code parentheses (`( 416 )`),
-        // including a non-breaking space. That is still the 3-3-4 number.
-        // Leaving the space out sends the digits when there is no leading plus.
+        // Whitespace may sit between `+` and that trunk digit
+        // (`+ 1416-555-0123`). Leaving it out sends the digit when the
+        // tail is already a phone. A run of `{sep}` still separates groups
+        // (`416 - 555 - 0123`). Whitespace may sit inside the area-code
+        // parentheses (`( 416 )`), including a non-breaking space. That is
+        // still the 3-3-4 number. Leaving the space out sends the digits
+        // when there is no leading plus.
         phone_pattern(
-            r"(?:\+1{sep}*|1{sep}+)?(?:\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:\+\s*1{sep}*|1{sep}+)?(?:\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`, including spaces inside the parentheses. A bare
@@ -123,13 +126,17 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // hold more than four digits (`+44 7700 900123`). Five or more
     // digits glued to `)` are still a bare tail (`+44 (20)79460958`).
     // The NANP separator stays without parentheses, so a bare
-    // `(416)5550123` is still not a phone.
+    // `(416)5550123` is still not a phone. Whitespace may sit between
+    // `+` and the country code (`+ 44 20 7946 0958`). Leaving it out
+    // sends the number, or leaves the country code when the tail is a
+    // 3-3-4. The same space applies to a plus and a digit run
+    // (`+ 14165550123`).
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(&r"\+\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", r"[\s./()\p{Pd}]"))
+        Regex::new(&r"\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", r"[\s./()\p{Pd}]"))
             .expect("international phone pattern")
     });
     static PLUS_DIGITS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\+\d{8,15}").expect("plus digits pattern"));
+        LazyLock::new(|| Regex::new(r"\+\s*\d{8,15}").expect("plus digits pattern"));
     for hit in NANP.find_iter(text).chain(NANP_TRUNK.find_iter(text)) {
         if digit_bounded(text, hit.start(), hit.end()) {
             out.push(span(TIER_PHONE, Kind::Phone, hit.start(), hit.end()));
