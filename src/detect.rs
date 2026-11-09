@@ -95,18 +95,17 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     static NANP: LazyLock<Regex> = LazyLock::new(|| {
         // `+1` may sit against a shaped number with no separator (`+1(416)`
         // or `+1416-555-0123`). A trunk `1` still needs a separator here.
-        Regex::new(
-            r"(?:\+1[\s.\-]?|1[\s.\-])?(?:\(\d{3}\)[\s.\-]?\d{3}[\s.\-]\d{4}|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})",
+        // `{sep}` is a space, a dot, an ASCII hyphen, a non-breaking hyphen,
+        // or a slash (`416/555-0123`).
+        phone_pattern(
+            r"(?:\+1{sep}?|1{sep})?(?:\(\d{3}\){sep}?\d{3}{sep}\d{4}|\d{3}{sep}\d{3}{sep}\d{4})",
         )
-        .expect("nanp pattern")
     });
     // `1(416)555-0123`. A bare `1` before more digits is not this form.
-    static NANP_TRUNK: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"1\(\d{3}\)[\s.\-]?\d{3}[\s.\-]\d{4}").expect("nanp trunk pattern")
-    });
-    static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\+\d{1,3}(?:[\s.\-]\d{1,4}){2,6}").expect("international pattern")
-    });
+    static NANP_TRUNK: LazyLock<Regex> =
+        LazyLock::new(|| phone_pattern(r"1\(\d{3}\){sep}?\d{3}{sep}\d{4}"));
+    static INTERNATIONAL: LazyLock<Regex> =
+        LazyLock::new(|| phone_pattern(r"\+\d{1,3}(?:{sep}\d{1,4}){2,6}"));
     static PLUS_DIGITS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\+\d{8,15}").expect("plus digits pattern"));
     for hit in NANP.find_iter(text).chain(NANP_TRUNK.find_iter(text)) {
@@ -303,6 +302,11 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
         return None;
     }
     RUN.find(value).map(|hit| hit.end())
+}
+
+/// `{sep}` stands for one phone-group separator.
+fn phone_pattern(body: &str) -> Regex {
+    Regex::new(&body.replace("{sep}", r"[\s.\-\u{2011}/]")).expect("phone pattern")
 }
 
 fn span(tier: u8, kind: Kind, start: usize, end: usize) -> RawHit {
