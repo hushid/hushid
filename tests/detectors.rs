@@ -3809,6 +3809,141 @@ fn nanp_exit_prefix_still_shields_the_number() {
     }
 }
 
+#[test]
+fn separator_after_a_dialing_prefix_still_shields_the_number() {
+    // `0044-20-7946-0958` and `00 44 20 7946 0958` are already phones.
+    // A hyphen, a dot, or a slash already separates groups. That same
+    // mark between the `00` or `011` prefix and the country code left
+    // `00-44-20-7946-0958` in the clear. `00-1-416-555-0123` kept the
+    // prefix and shielded only the tail. The prefix digits are not part
+    // of the number. A bare run after the prefix stays as written. A
+    // plus still takes only whitespace before the country code.
+    let en = '\u{2013}';
+    let wide_00 = widen_digits("00");
+    let wide_011 = widen_digits("011");
+    for phone in [
+        "00-44-20-7946-0958",
+        "00.44.20.7946.0958",
+        "00/44/20/7946/0958",
+        "00 - 44 - 20 - 7946 - 0958",
+        "011-44-20-7946-0958",
+        "011.44.20.7946.0958",
+        "011/44/20/7946/0958",
+        "011 - 44 - 20 - 7946 - 0958",
+        "00-44 (20) 7946 0958",
+        "011-44 (20) 7946 0958",
+        "00-44-7700-900123",
+        "00-1-416-555-0123",
+        "00-1416-555-0123",
+        "00.1.416.555.0123",
+        "011-1-416-555-0123",
+        "011-1416-555-0123",
+        "00-1(416)555-0123",
+        &format!("00{en}44{en}20{en}7946{en}0958"),
+        &format!("{wide_00}-44-20-7946-0958"),
+        &format!("{wide_011}-1-416-555-0123"),
+    ] {
+        let (vault, out, audit) = shield(phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+        assert!(!out.contains('('), "{phone} -> {out}");
+        assert!(!out.contains(' '), "{phone} -> {out}");
+        for group in ["7946", "0958", "7700", "900123", "416", "0123", "555"] {
+            if phone.contains(group) {
+                assert!(hidden(&out, group), "{phone} -> {out}");
+            }
+        }
+        if phone.contains(&wide_00) {
+            assert!(hidden(&out, &wide_00), "{phone} -> {out}");
+        }
+        if phone.contains(&wide_011) {
+            assert!(hidden(&out, &wide_011), "{phone} -> {out}");
+        }
+        if phone.contains("00") {
+            assert!(hidden(&out, "00"), "{phone} -> {out}");
+        }
+        if phone.contains("011") {
+            assert!(hidden(&out, "011"), "{phone} -> {out}");
+        }
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = "call 00-44-20-7946-0958 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "0958"), "{out}");
+    assert!(hidden(&out, "00"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let glued_letter = "x00-44-20-7946-0958";
+    let (vault, out, audit) = shield(glued_letter);
+    assert_eq!(audit.phone, 1, "{glued_letter} -> {out}");
+    assert!(out.starts_with("xh1_phone_"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "00"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), glued_letter);
+
+    let pair = "call 00-44-20-7946-0958 or 011-1-416-555-0123 today";
+    let (vault, out, audit) = shield(pair);
+    assert_eq!(audit.phone, 2, "{pair} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(out.contains(" or "), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "00"), "{out}");
+    assert!(hidden(&out, "011"), "{out}");
+    assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    let longer = "00-44-20-7946-0958-9999";
+    let (vault, out, audit) = shield(longer);
+    assert_eq!(audit.phone, 1, "{longer} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(out.ends_with("-9999"), "{out}");
+    assert!(visible(&out).contains("9999"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "00"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), longer);
+
+    for bare in [
+        "00-442079460958",
+        "011-442079460958",
+        "00-14165550123",
+        "011-14165550123",
+        "00-44-20-794",
+        "00-44-20-12",
+        "00-44",
+        "100-44-20-7946-0958",
+        "90044-20-7946-0958",
+        "+-44-20-7946-0958",
+        "00-44 (20)79460958",
+        "44-20-7946-0958",
+        "011442079460958",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+    }
+
+    let raw = r#"{"tel":"00-44-20-7946-0958"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "7946"), "{raw} -> {out}");
+    assert!(hidden(&out, "0958"), "{raw} -> {out}");
+    assert!(hidden(&out, "00"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+}
+
 fn widen_digits(text: &str) -> String {
     text.chars()
         .map(|ch| match ch {
