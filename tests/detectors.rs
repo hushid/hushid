@@ -3024,6 +3024,82 @@ fn stripe_ephemeral_key_is_masked() {
 }
 
 #[test]
+fn stripe_connection_token_is_masked() {
+    // `ek_test_` plus 71 letters, an underscore, and 10 more is already
+    // a secret. A Terminal connection token is `pst_test_` or `pst_live_`.
+    // The API reference secret is that same body and tail. The OpenAPI
+    // fixture is 23 letters and has no underscore. The `ek_` rule does
+    // not see this prefix, so the secret stays in the clear. A shorter
+    // key is letters only, at least 10, like `sk_live_`.
+    let published = "pst_test_YWNjdF8xTTJKVGtMa2RJd0h1N2l4LE81ZEdIalZ6NlVuMUdjM3c3WkRnN0ZYRHZxRURwTXo_00gNK2DWAV";
+    let body = "YWNjdF8xTTJKVGtMa2RJd0h1N2l4LE81ZEdIalZ6NlVuMUdjM3c3WkRnN0ZYRHZxRURwTXo";
+    let tail = "00gNK2DWAV";
+    let (vault, out, audit) = shield(published);
+    assert_eq!(audit.secret, 1, "{published} -> {out}");
+    assert_eq!(out, "h1_secret", "{published} -> {out}");
+    assert!(hidden(&out, "pst_"), "{published} -> {out}");
+    assert!(hidden(&out, body), "{published} -> {out}");
+    assert!(hidden(&out, tail), "{published} -> {out}");
+    assert!(hidden(&out, "81"), "{published} -> {out}");
+    assert!(!vault.holds_surface(published.as_bytes()), "{published}");
+    assert!(vault.restore_write(&out).is_err(), "{published}");
+
+    let live = format!("pst_live_{}_{}", "C".repeat(71), "b".repeat(10));
+    let (vault, out, audit) = shield(&format!("see {live}.next"));
+    assert_eq!(audit.secret, 1, "{live} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{live} -> {out}");
+    assert!(hidden(&out, "pst_live"), "{out}");
+    assert!(hidden(&out, &"C".repeat(71)), "{out}");
+    assert!(hidden(&out, &"b".repeat(10)), "{out}");
+    assert!(!vault.holds_surface(live.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let fixture = "pst_test_iPPfmBn7kZ0gIJ4xpehqTnC";
+    let (vault, out, audit) = shield(&format!("see {fixture} please"));
+    assert_eq!(audit.secret, 1, "{fixture} -> {out}");
+    assert_eq!(out, "see h1_secret please");
+    assert!(hidden(&out, "pst_test"), "{out}");
+    assert!(hidden(&out, "iPPfmBn7kZ0gIJ4xpehqTnC"), "{out}");
+    assert!(hidden(&out, "0"), "{fixture} -> {out}");
+    assert!(!vault.holds_surface(fixture.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let short = format!("pst_test_{}", "d".repeat(10));
+    let (vault, out, audit) = shield(&short);
+    assert_eq!(audit.secret, 1, "{short} -> {out}");
+    assert_eq!(out, "h1_secret");
+    assert!(hidden(&out, "pst_test"), "{out}");
+    assert!(hidden(&out, &"d".repeat(10)), "{out}");
+    assert!(!vault.holds_surface(short.as_bytes()));
+
+    let raw = format!(r#"{{"secret":"{published}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"secret":"h1_secret"}"#);
+    assert!(hidden(&out, tail), "{out}");
+    assert!(hidden(&out, "81"), "{out}");
+    assert!(!vault.holds_surface(published.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("pst_test_{}", "d".repeat(9)),
+        "pst_test_123".to_string(),
+        format!("wordpst_test_{}", "d".repeat(10)),
+        format!("pst_prod_{}", "d".repeat(10)),
+        format!("pst_test_{}_{}", "F".repeat(70), "g".repeat(10)),
+        format!("pst_test_{}_{}", "H".repeat(76), "i".repeat(10)),
+        format!("pst_test_{}_{}", "J".repeat(71), "k".repeat(9)),
+        format!("pst_test_{}_{}", "p".repeat(10), "q".repeat(10)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn secret_access_key_assignment_is_masked() {
     let secret = "a".repeat(16);
     for text in [
