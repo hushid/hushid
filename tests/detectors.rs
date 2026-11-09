@@ -3770,6 +3770,74 @@ fn fullwidth_digits_still_shield_the_number() {
 }
 
 #[test]
+fn fullwidth_dialing_prefix_still_shields_the_number() {
+    // `011 44 20 7946 0958` and `0044 20 7946 0958` are already phones.
+    // A wide keyboard writes the prefix digits fullwidth. The prefix
+    // is still the ASCII characters `011` and `00`, so the number stays
+    // in the clear. Those digits are not part of the number. Counting
+    // them would keep `0044 20 794`, or cut the tail off a 15-digit
+    // number. A bare run stays as written.
+    for phone in [
+        widen_digits("011 44 20 7946 0958"),
+        widen_digits("01144 20 7946 0958"),
+        widen_digits("0044 20 7946 0958"),
+        widen_digits("00 44 20 7946 0958"),
+        widen_digits("0044 20 7946 0958 999"),
+        format!("{} 44 20 7946 0958", widen_digits("011")),
+    ] {
+        let (vault, out, audit) = shield(&phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+        assert!(hidden(&out, &widen_digits("7946")), "{phone} -> {out}");
+        assert!(hidden(&out, "7946"), "{phone} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = format!("call {} today", widen_digits("011 44 20 7946 0958"));
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, &widen_digits("7946")), "{out}");
+    assert!(hidden(&out, &widen_digits("0958")), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let longer = widen_digits("011 44 20 7946 0958 9999");
+    let (vault, out, audit) = shield(&longer);
+    assert_eq!(audit.phone, 1, "{longer} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(out.ends_with(&widen_digits(" 9999")), "{out}");
+    assert!(visible(&out).contains(&widen_digits("9999")), "{out}");
+    assert!(hidden(&out, &widen_digits("7946")), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), longer);
+
+    let raw = format!(r#"{{"tel":"{}"}}"#, widen_digits("011 44 20 7946 0958"));
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, &widen_digits("7946")), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        widen_digits("011442079460958"),
+        widen_digits("0044 20 794"),
+        widen_digits("1011 44 20 7946 0958"),
+        widen_digits("44 20 7946 0958"),
+        widen_digits("00"),
+        widen_digits("011 44"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();

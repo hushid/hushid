@@ -528,9 +528,11 @@ const PLUS: &str = r"(?:\+|\u{FF0B})";
 ///
 /// `00` is the prefix outside NANP (`0044` for `+44`). `011` is the
 /// NANP exit code (`011 44` for `+44`). Neither prefix is digits of
-/// the number. `011` is listed first so it is not read as `00`. A bare
-/// run after the prefix stays as written. This is not a plus sign.
-const IDD: &str = r"(?:011|00)";
+/// the number. `011` is listed first so it is not read as `00`. Each
+/// of those digits may be fullwidth. A wide keyboard writes `０１１`
+/// and `００`. Leaving that form out sends the number. A bare run
+/// after the prefix stays as written. This is not a plus sign.
+const IDD: &str = r"(?:(?:0|\u{FF10})(?:1|\u{FF11})(?:1|\u{FF11})|(?:0|\u{FF10})(?:0|\u{FF10}))";
 
 /// ASCII parentheses and the fullwidth pair. A wide-character keyboard
 /// writes those marks around a group. Leaving them out sends the number.
@@ -666,17 +668,24 @@ fn digit_count(text: &str) -> usize {
 /// `+44 20 7946 0958` is twelve digits. `0044 20 7946 0958` and
 /// `011 44 20 7946 0958` are that number with a dialing prefix.
 /// Counting the prefix would keep a short number, or drop the tail
-/// of a fifteen-digit number.
+/// of a fifteen-digit number. The prefix digits may be fullwidth.
 fn significant_phone_digits(slice: &str) -> usize {
     let digits = digit_count(slice);
-    let prefix = if slice.starts_with("011") {
-        3
-    } else if slice.starts_with("00") {
-        2
-    } else {
-        0
-    };
-    digits.saturating_sub(prefix)
+    digits.saturating_sub(idd_prefix_digits(slice))
+}
+
+/// `011` or `00` at the start of a matched number, ASCII or fullwidth.
+///
+/// `011` is three digits and `00` is two. A leading plus is not this
+/// prefix. The count is digits, not bytes, so a fullwidth prefix still
+/// comes out of the fifteen-digit limit.
+fn idd_prefix_digits(slice: &str) -> usize {
+    let mut digits = slice.chars().map(narrow_digit);
+    match (digits.next(), digits.next(), digits.next()) {
+        (Some(Some(b'0')), Some(Some(b'1')), Some(Some(b'1'))) => 3,
+        (Some(Some(b'0')), Some(Some(b'0')), _) => 2,
+        _ => 0,
+    }
 }
 
 /// Five or more digits glued to `)` or `）` are a bare tail, not another group.
