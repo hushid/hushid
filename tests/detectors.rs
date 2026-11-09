@@ -486,6 +486,97 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
 }
 
 #[test]
+fn spaces_inside_a_canadian_area_code_still_shield_the_number() {
+    // `(416) 555-0123` is already a phone. Spaces inside the parentheses
+    // are that same number. `+1 ( 416 )` is already international. The
+    // trunk form without a plus stayed in the clear, and so did a
+    // non-breaking space or a tab in that gap.
+    let nbsp = '\u{00a0}';
+    for phone in [
+        "( 416 ) 555-0123",
+        "( 416) 555-0123",
+        "(416 ) 555-0123",
+        "(  416  ) 555-0123",
+        "( 416 ) 555 - 0123",
+        "1 ( 416 ) 555-0123",
+        "1( 416 )555-0123",
+        "1( 416 ) 555-0123",
+        "+1 ( 416 ) 555-0123",
+        "+1( 416 )555-0123",
+        &format!("({nbsp}416{nbsp}) 555-0123"),
+        "(\t416\t) 555-0123",
+    ] {
+        let (vault, out, audit) = shield(phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+        assert!(!out.contains('('), "{phone} -> {out}");
+        assert!(!out.contains(')'), "{phone} -> {out}");
+        assert!(!out.contains("416"), "{phone} -> {out}");
+        assert!(!out.contains("0123"), "{phone} -> {out}");
+        assert!(!out.contains(nbsp), "{phone} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = "call ( 416 ) 555-0123 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert!(!out.contains('('), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let glued_letter = "x( 416 ) 555-0123";
+    let (vault, out, audit) = shield(glued_letter);
+    assert_eq!(audit.phone, 1, "{glued_letter} -> {out}");
+    assert!(out.starts_with("xh1_phone_"), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), glued_letter);
+
+    let pair = "call ( 416 ) 555-0123 or 1( 604 ) 555-0199 today";
+    let (vault, out, audit) = shield(pair);
+    assert_eq!(audit.phone, 2, "{pair} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(out.contains(" or "), "{out}");
+    assert!(!out.contains("416"), "{out}");
+    assert!(!out.contains("604"), "{out}");
+    assert!(!out.contains('('), "{out}");
+    assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    for bare in [
+        "( 416 ) 5550123",
+        "( 416 )5550123",
+        "+1( 416 )5550123",
+        "1 ( 416 ) 5550123",
+        "( 416 ) 555-012",
+        "( 416 ) 555-01234",
+        "9( 416 ) 555-0123",
+        "21( 416 ) 555-0123",
+        "( 20 ) 7946 0958",
+        "( see 416 ) 555-0123",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+    }
+
+    let raw = r#"{"tel":"( 416 ) 555-0123"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(!out.contains("416"), "{raw} -> {out}");
+    assert!(!out.contains('('), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+}
+
+#[test]
 fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     let grouped = "4111-1111-1111-1111";
     let (vault, out, audit) = shield(grouped);

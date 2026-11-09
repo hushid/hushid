@@ -107,13 +107,17 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // `+1` may sit against a shaped number with no separator (`+1(416)`
         // or `+1416-555-0123`). A trunk `1` still needs a separator here.
         // A run of `{sep}` still separates groups (`416 - 555 - 0123`).
+        // Whitespace may sit inside the area-code parentheses (`( 416 )`),
+        // including a non-breaking space. That is still the 3-3-4 number.
+        // Leaving the space out sends the digits when there is no leading plus.
         phone_pattern(
-            r"(?:\+1{sep}*|1{sep}+)?(?:\(\d{3}\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:\+1{sep}*|1{sep}+)?(?:\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
-    // `1(416)555-0123`. A bare `1` before more digits is not this form.
+    // `1(416)555-0123`, including spaces inside the parentheses. A bare
+    // `1` before more digits is not this form.
     static NANP_TRUNK: LazyLock<Regex> =
-        LazyLock::new(|| phone_pattern(r"1\(\d{3}\){sep}*\d{3}{sep}+\d{4}"));
+        LazyLock::new(|| phone_pattern(r"1\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}"));
     // Parentheses wrap one group (`+44 (20) 7946 0958`). A trunk zero
     // may sit against the next digits (`+33 (0)1`). A later group may
     // hold more than four digits (`+44 7700 900123`). Five or more
