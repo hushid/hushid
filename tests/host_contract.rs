@@ -153,6 +153,61 @@ fn json_string_beside_a_cue_is_shielded() {
     }
 }
 
+#[test]
+fn json_cue_beside_a_nested_document_reaches_the_value() {
+    let sin = luhn_sin("13069254");
+    // Ten characters (`":"{"id":"`) sit between the cue and the digits.
+    // 30 more stay inside the 40-character window. 31 push the cue out.
+    let shielded = [
+        (
+            format!(r#"{{"sin":"{{\"id\":{sin}}}"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            format!(r#"{{"sin":"{{\"id\":\"{sin}\"}}"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (format!(r#"{{"sin":"[{sin}]"}}"#), sin.clone(), "sin"),
+        (
+            format!(r#"{{"n":"{{\"id\":\"{sin}\"}}","k":"SIN"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            format!(r#"{{"n":"{{\"id\":{sin}}}","k":"SIN"}}"#),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            format!(r#"{{"sin":"{{\"id\":\"{}{sin}\"}}"}}"#, ".".repeat(30)),
+            sin.clone(),
+            "sin",
+        ),
+        (
+            r#"{"visa":"{\"pan\":\"4111111111111111\"}"}"#.to_string(),
+            "4111111111111111".to_string(),
+            "card",
+        ),
+        (
+            r#"{"card":"{\"pan\":4111111111111111}"}"#.to_string(),
+            "4111111111111111".to_string(),
+            "card",
+        ),
+    ];
+    for (input, surface, kind) in shielded {
+        assert_json_surface_shielded(&input, &surface, kind);
+    }
+
+    let far = format!(r#"{{"sin":"{{\"id\":\"{}{sin}\"}}"}}"#, ".".repeat(31));
+    assert_json_left_as_written(&far);
+    let bare = format!(r#"{{"note":"{{\"id\":{sin}}}"}}"#);
+    assert_json_left_as_written(&bare);
+    let bare_card = r#"{"note":"{\"pan\":\"4111111111111111\"}"}"#;
+    assert_json_left_as_written(bare_card);
+}
+
 fn assert_json_left_as_written(input: &str) {
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();

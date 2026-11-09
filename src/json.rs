@@ -35,15 +35,16 @@ impl std::error::Error for JsonError {}
 ///
 /// A number is replaced with a quoted token and restored as a number. A string
 /// whose text is itself a JSON object or array is shielded again. A cue beside
-/// a string or a key counts the same way it does in plain text. Keys and
-/// numbers that no detector recognizes stay as they are.
+/// a string or a key counts the same way it does in plain text, including a
+/// value inside that nested document. Keys and numbers that no detector
+/// recognizes stay as they are.
 pub fn shield_json_strings(
     vault: &mut Vault,
     glossary: &Glossary,
     input: &str,
 ) -> Result<(String, AuditRecord), JsonError> {
     let mut audit = AuditRecord::default();
-    let text = shield_document(vault, glossary, input, &mut audit, 0)?;
+    let text = shield_document(vault, glossary, input, &mut audit, 0, ("", ""))?;
     Ok((text, audit))
 }
 
@@ -62,8 +63,10 @@ fn shield_document(
     input: &str,
     audit: &mut AuditRecord,
     depth: u8,
+    context: (&str, &str),
 ) -> Result<String, JsonError> {
-    let hits = find_hits(input, glossary);
+    let (outer_before, outer_after) = context;
+    let hits = hits_in_value(outer_before, input, outer_after, glossary);
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
     let mut index = 0;
@@ -72,8 +75,8 @@ fn shield_document(
             let (end, decoded) = parse_string(input, index)?;
             let after = skip_ws(input, end);
             let is_key = bytes.get(after) == Some(&b':');
-            let before_ctx = suffix_chars(&input[..index + 1], CUE_CONTEXT_CHARS);
-            let after_ctx = prefix_chars(&input[end - 1..], CUE_CONTEXT_CHARS);
+            let before_ctx = join_suffix(outer_before, &input[..index + 1], CUE_CONTEXT_CHARS);
+            let after_ctx = join_prefix(&input[end - 1..], outer_after, CUE_CONTEXT_CHARS);
             let mapped = shield_decoded(
                 vault,
                 glossary,
@@ -81,7 +84,7 @@ fn shield_document(
                 audit,
                 depth,
                 is_key,
-                (before_ctx, after_ctx),
+                (&before_ctx, &after_ctx),
             )?;
             out.push('"');
             out.push_str(&encode_json(&mapped));
@@ -122,7 +125,7 @@ fn shield_decoded(
     context: (&str, &str),
 ) -> Result<String, JsonError> {
     if !is_key && depth < MAX_JSON_DEPTH && is_json_document(decoded) {
-        return shield_document(vault, glossary, decoded, audit, depth + 1);
+        return shield_document(vault, glossary, decoded, audit, depth + 1, context);
     }
     let (before, after) = context;
     let (shielded, part) =
@@ -203,6 +206,43 @@ fn json_number_literal<'a>(vault: &'a Vault, text: &str) -> Option<&'a str> {
         Some(surface)
     } else {
         None
+    }
+}
+
+fn hits_in_value(before: &str, input: &str, after: &str, glossary: &Glossary) -> Vec<Hit> {
+    if before.is_empty() && after.is_empty() {
+        return find_hits(input, glossary);
+    }
+    let mut scan = String::with_capacity(before.len() + input.len() + after.len());
+    scan.push_str(before);
+    scan.push_str(input);
+    scan.push_str(after);
+    let origin = before.len();
+    let limit = origin + input.len();
+    find_hits(&scan, glossary)
+        .into_iter()
+        .filter_map(|hit| {
+            let (start, end) = hit_span(&hit);
+            if start >= origin && end <= limit {
+                Some(shift_hit(hit, origin))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn shift_hit(hit: Hit, origin: usize) -> Hit {
+    match hit {
+        Hit::Secret { start, end } => Hit::Secret {
+            start: start - origin,
+            end: end - origin,
+        },
+        Hit::Reversible { kind, start, end } => Hit::Reversible {
+            kind,
+            start: start - origin,
+            end: end - origin,
+        },
     }
 }
 
@@ -440,6 +480,28 @@ fn decode_surrogate(high: u16, low: u16) -> Option<char> {
     }
     let value = 0x10000 + (((u32::from(high) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
     char::from_u32(value)
+}
+
+fn join_suffix(outer: &str, local: &str, max_chars: usize) -> String {
+    // `local` may be the whole prefix of a large document. A shorter tail
+    // means it already holds `max_chars`, so the outer cue is out of range.
+    let local_tail = suffix_chars(local, max_chars);
+    if local_tail.len() != local.len() {
+        return local_tail.to_string();
+    }
+    let mut out = suffix_chars(outer, max_chars - local_tail.chars().count()).to_string();
+    out.push_str(local_tail);
+    out
+}
+
+fn join_prefix(local: &str, outer: &str, max_chars: usize) -> String {
+    let local_head = prefix_chars(local, max_chars);
+    if local_head.len() != local.len() {
+        return local_head.to_string();
+    }
+    let mut out = local_head.to_string();
+    out.push_str(prefix_chars(outer, max_chars - local_head.chars().count()));
+    out
 }
 
 fn suffix_chars(text: &str, max_chars: usize) -> &str {
