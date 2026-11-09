@@ -2188,6 +2188,143 @@ fn hyphen_mark_in_an_api_key_name_still_masks_the_value() {
 }
 
 #[test]
+fn whitespace_inside_an_api_key_name_still_masks_the_value() {
+    // `api_key=...` and `api-key=...` are already secrets. A space, a
+    // non-breaking space, or a line break between those words is still
+    // that name. Leaving it out sends the value.
+    let secret = "a".repeat(16);
+    let nbsp = '\u{00a0}'.to_string();
+    let gaps = [" ", "  ", nbsp.as_str()];
+    for gap in gaps {
+        for text in [
+            format!("api{gap}key={secret}"),
+            format!("secret{gap}key: {secret}"),
+            format!("access{gap}token={secret}"),
+            format!("auth{gap}token: {secret}"),
+            format!("APP_API{gap}KEY={secret}"),
+            format!("X_ACCESS{gap}TOKEN={secret}"),
+            format!("export api{gap}key={secret} please"),
+        ] {
+            let (vault, out, audit) = shield(&text);
+            assert_eq!(audit.secret, 1, "{text:?} -> {out}");
+            assert_eq!(audit.card, 0, "{text:?} -> {out}");
+            assert!(!out.contains(&secret), "{text:?} -> {out}");
+            assert!(out.contains("h1_secret"), "{text:?} -> {out}");
+            if gap != " " {
+                assert!(!out.contains(gap), "{text:?} -> {out}");
+            }
+            assert!(!vault.holds_surface(secret.as_bytes()), "{text:?}");
+            assert!(vault.restore_write(&out).is_err(), "{text:?} -> {out}");
+        }
+
+        let exported = format!("export api{gap}key={secret} please");
+        let (_vault, out, _) = shield(&exported);
+        assert_eq!(out, "export h1_secret please", "{exported:?} -> {out}");
+
+        let paired = format!("api{gap}key={secret} secret{gap}key={secret}");
+        let (vault, out, audit) = shield(&paired);
+        assert_eq!(audit.secret, 2, "{paired:?} -> {out}");
+        assert_eq!(out, "h1_secret h1_secret", "{paired:?} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()));
+
+        let card = format!("api{gap}key=4111-1111-1111-1111");
+        let (vault, out, audit) = shield(&card);
+        assert_eq!(audit.secret, 1, "{card:?} -> {out}");
+        assert_eq!(audit.card, 0, "{card:?} -> {out}");
+        assert_eq!(out, "h1_secret", "{card:?} -> {out}");
+        assert!(!vault.holds_surface(b"4111-1111-1111-1111"));
+
+        for text in [
+            format!("api{gap}key={}", "a".repeat(15)),
+            format!("somethingapi{gap}key={secret}"),
+            format!("api{gap}keyboard={secret}"),
+            format!("api{gap}key"),
+            format!("secret={secret}"),
+            format!("api/{gap}key={secret}"),
+            format!("api.{gap}key={secret}"),
+        ] {
+            let (_vault, out, audit) = shield(&text);
+            assert_eq!(audit.secret, 0, "{text:?} -> {out}");
+            assert_eq!(out, text, "{text:?} -> {out}");
+        }
+
+        let raw = format!(r#"{{"api{gap}key":"{secret}"}}"#);
+        let (vault, out, audit) = shield(&raw);
+        assert_eq!(audit.secret, 1, "{raw:?} -> {out}");
+        assert_eq!(out, r#"{"h1_secret"}"#, "{raw:?} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{raw:?}");
+
+        let documents = [
+            (
+                format!(r#"{{"api{gap}key":"{secret}"}}"#),
+                format!(r#"{{"api{gap}key":"h1_secret"}}"#),
+            ),
+            (
+                format!(r#"{{"api{gap}key": "{secret}"}}"#),
+                format!(r#"{{"api{gap}key": "h1_secret"}}"#),
+            ),
+            (
+                format!(r#"{{"APP_SECRET{gap}KEY":"{secret}"}}"#),
+                format!(r#"{{"APP_SECRET{gap}KEY":"h1_secret"}}"#),
+            ),
+            (
+                format!(r#"{{"cfg":"{{\"api{gap}key\":\"{secret}\"}}"}}"#),
+                format!(r#"{{"cfg":"{{\"api{gap}key\":\"h1_secret\"}}"}}"#),
+            ),
+        ];
+        for (input, expect) in documents {
+            let mut vault = Vault::new();
+            let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+            assert_eq!(audit.secret, 1, "{input:?} -> {out}");
+            assert_eq!(audit.card, 0, "{input:?} -> {out}");
+            assert_eq!(out, expect, "{input:?}");
+            assert!(!out.contains(&secret), "{input:?} -> {out}");
+            assert!(!vault.holds_surface(secret.as_bytes()), "{input:?}");
+            assert!(restore_json_write(&vault, &out).is_err(), "{out}");
+        }
+
+        let short = format!(r#"{{"api{gap}key":"{}"}}"#, "a".repeat(15));
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &short).unwrap();
+        assert_eq!(audit.secret, 0, "{short:?} -> {out}");
+        assert_eq!(out, short, "{short:?} -> {out}");
+    }
+
+    for gap in ["\t", "\n"] {
+        let text = format!("api{gap}key={secret}");
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text:?} -> {out}");
+        assert_eq!(out, "h1_secret", "{text:?} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{text:?}");
+        let broken = format!("api/{gap}key={secret}");
+        let (_vault, out, audit) = shield(&broken);
+        assert_eq!(audit.secret, 0, "{broken:?} -> {out}");
+        assert_eq!(out, broken, "{broken:?} -> {out}");
+    }
+
+    let glued = format!("apikey={secret}");
+    let (vault, out, audit) = shield(&glued);
+    assert_eq!(audit.secret, 1, "{glued} -> {out}");
+    assert_eq!(out, "h1_secret", "{glued} -> {out}");
+    assert!(!vault.holds_surface(secret.as_bytes()));
+
+    let mixed = format!("api - key={secret}");
+    let (vault, out, audit) = shield(&mixed);
+    assert_eq!(audit.secret, 1, "{mixed:?} -> {out}");
+    assert_eq!(out, "h1_secret", "{mixed:?} -> {out}");
+    assert!(!vault.holds_surface(secret.as_bytes()));
+
+    let as_number = format!(r#"{{"api key":{}}}"#, "1".repeat(16));
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &as_number).unwrap();
+    assert_eq!(audit.secret, 1, "{as_number} -> {out}");
+    assert_eq!(out, r#"{"api key":"h1_secret"}"#, "{as_number} -> {out}");
+    assert!(!out.contains(&"1".repeat(16)), "{as_number} -> {out}");
+    assert!(!vault.holds_surface("1".repeat(16).as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err(), "{out}");
+}
+
+#[test]
 fn secrets_become_one_shared_mark_and_are_not_stored() {
     let key = format!("sk-{}", "a".repeat(20));
     let aws = "AKIAIOSFODNN7EXAMPLE";

@@ -354,11 +354,12 @@ const SECRET_RUN: &str = r"[A-Za-z0-9+/=_\-]{16,}";
 /// The mark inside `api-key`, `secret-key`, `access-token`, and
 /// `auth-token` is an underscore or a hyphen mark. An ASCII hyphen is
 /// not the only one. An en dash, a minus sign, or a soft hyphen is
-/// still that name. Leaving it out sends the value.
+/// still that name. Whitespace between the words is that name too, so
+/// `api key` counts. Leaving the space or the hyphen mark out sends the value.
 fn assignment_name() -> String {
-    let sep = hyphen_class("_");
-    r"(?:[A-Za-z0-9_]*_)?(?:api{sep}?key|apikey|secret{sep}?key|access{sep}?token|auth{sep}?token)"
-        .replace("{sep}", &sep)
+    let gap = format!("(?:{})*", hyphen_class(r"_\s"));
+    r"(?:[A-Za-z0-9_]*_)?(?:api{gap}key|secret{gap}key|access{gap}token|auth{gap}token)"
+        .replace("{gap}", &gap)
 }
 
 /// `api_key`, `secret_key`, `access_token`, and `auth_token` assignments.
