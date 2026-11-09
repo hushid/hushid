@@ -3388,6 +3388,133 @@ fn fullwidth_parentheses_still_shield_the_number() {
 }
 
 #[test]
+fn zero_zero_prefix_still_shields_the_number() {
+    // `+44 20 7946 0958` and `+1416-555-0123` are already phones. A `00`
+    // dialing prefix is that same leading plus. `0044 20 7946 0958` stayed
+    // in the clear. The two zeros are not digits of the number: counting
+    // them would keep `0044 20 794` or cut the tail off a 15-digit number.
+    // A bare run after `00` stays as written. `00` is not a plus sign.
+    let nbsp = '\u{00a0}';
+    let en = '\u{2013}';
+    let open = "\u{FF08}";
+    let close = "\u{FF09}";
+    for phone in [
+        "0044 20 7946 0958",
+        "0044-20-7946-0958",
+        "0044 20 - 7946 - 0958",
+        "0044/20/7946/0958",
+        "00 44 20 7946 0958",
+        "0044 (20) 7946 0958",
+        "0044(20)7946 0958",
+        "0044 (20) 7946-0958",
+        "0044 (0)20 7946 0958",
+        "0044 (0) 20 7946 0958",
+        "0033 (0)1 23 45 67 89",
+        "0033 (0) 1 23 45 67 89",
+        "0044 7700 900123",
+        "0049 30 12345678",
+        "0044 20 7946 0958 999",
+        "0044 20 7946",
+        "001 416 555 0123",
+        "001-416-555-0123",
+        "001(416)555-0123",
+        "001416-555-0123",
+        "00 1416-555-0123",
+        "00 1 (416) 555-0123",
+        &format!("0044{en}20{en}7946{en}0958"),
+        &format!("00{nbsp}44 20 7946 0958"),
+        "00\t44 20 7946 0958",
+        &format!("0044 {open}20{close} 7946 0958"),
+    ] {
+        let (vault, out, audit) = shield(phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert_eq!(audit.card, 0, "{phone} -> {out}");
+        assert_eq!(audit.sin, 0, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+        assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+        assert!(!out.contains('('), "{phone} -> {out}");
+        assert!(!out.contains(')'), "{phone} -> {out}");
+        assert!(!out.contains(open), "{phone} -> {out}");
+        assert!(!out.contains(close), "{phone} -> {out}");
+        assert!(!out.contains(nbsp), "{phone} -> {out}");
+        for group in [
+            "7946", "0958", "7700", "900123", "12345678", "416", "0123", "23 45",
+        ] {
+            if phone.contains(group) {
+                assert!(hidden(&out, group), "{phone} -> {out}");
+            }
+        }
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = "call 0044 20 7946 0958 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "0958"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let glued_letter = "x0044 20 7946 0958";
+    let (vault, out, audit) = shield(glued_letter);
+    assert_eq!(audit.phone, 1, "{glued_letter} -> {out}");
+    assert!(out.starts_with("xh1_phone_"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), glued_letter);
+
+    let pair = "call 0044 20 7946 0958 or 001 416 555 0123 today";
+    let (vault, out, audit) = shield(pair);
+    assert_eq!(audit.phone, 2, "{pair} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(out.contains(" or "), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert_eq!(out.matches("h1_phone_").count(), 2, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    let longer = "0044 20 7946 0958 9999";
+    let (vault, out, audit) = shield(longer);
+    assert_eq!(audit.phone, 1, "{longer} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{out}");
+    assert!(out.ends_with(" 9999"), "{out}");
+    assert!(visible(&out).contains("9999"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), longer);
+
+    for bare in [
+        "00442079460958",
+        "0014165550123",
+        "0044 (20)79460958",
+        "0044 (20)79460 958",
+        "0044 20 794",
+        "0044 20 12",
+        "0044 7700 9001239999",
+        "90044 20 7946 0958",
+        "100 20 7946 0958",
+        "44 20 7946 0958",
+        "00",
+        "00 44",
+        "call 20 7946 0958 today",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+    }
+
+    let raw = r#"{"tel":"0044 20 7946 0958"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "7946"), "{raw} -> {out}");
+    assert!(hidden(&out, "0958"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
