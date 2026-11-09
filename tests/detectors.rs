@@ -114,6 +114,33 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     assert_eq!(audit.card, 1, "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), amex);
 
+    // Same digits as `amex`, in the other usual groups of four.
+    for amex_fours in [
+        "3782 8224 6310 005",
+        "3782-8224-6310-005",
+        "3782 8224-6310 005",
+    ] {
+        let (vault, out, audit) = shield(amex_fours);
+        assert_eq!(audit.card, 1, "{amex_fours} -> {out}");
+        assert_eq!(audit.phone, 0, "{amex_fours} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{amex_fours} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), amex_fours);
+    }
+    let cued_fours = "visa 3782 8224 6310 005";
+    let (vault, out, audit) = shield(cued_fours);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.starts_with("visa h1_card_"), "{out}");
+    assert!(!out.contains("3782"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued_fours);
+    let bad_fours = "3782 8224 6310 006";
+    let (_vault, out, audit) = shield(bad_fours);
+    assert_eq!(out, bad_fours);
+    assert_eq!(audit.card, 0);
+    let glued_fours = "3782 8224 6310 0051";
+    let (_vault, out, audit) = shield(glued_fours);
+    assert_eq!(out, glued_fours);
+    assert_eq!(audit.card, 0);
+
     let cued = "visa 4111111111111111";
     let (vault, out, audit) = shield(cued);
     assert_eq!(audit.card, 1, "{out}");
