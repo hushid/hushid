@@ -314,6 +314,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             r"\bgho_[A-Za-z0-9]{36}\b",
             r"\bghu_[A-Za-z0-9]{36}\b",
             r"\bghs_[A-Za-z0-9]{36}\b",
+            // The current installation token is `ghs_`, a numeric app id,
+            // `_`, and a three-part JWT. `ghs_` plus 36 letters does not
+            // match that. The `_` sits against `eyJ`, so the JWT rule
+            // does not see it either. Leaving the shape out sends the payload.
+            r"\bghs_[0-9]+_[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
             r"\bghr_[A-Za-z0-9]{36}\b",
             r"\bglpat-[A-Za-z0-9_\-]{20,}\b",
             r"\bxox[baprs]-[0-9A-Za-z-]{10,}",

@@ -2384,6 +2384,131 @@ fn temporary_aws_access_key_id_is_masked() {
 }
 
 #[test]
+fn github_app_installation_token_is_masked() {
+    // `ghs_` plus 36 letters is already a secret. A current installation
+    // token is `ghs_`, a numeric app id, `_`, and a three-part JWT. The
+    // `_` sits against `eyJ`, so the JWT rule does not see it either.
+    // The payload stays in the clear.
+    let header = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9";
+    let payload = "PAYLOADPAYLOADPAYLOAD";
+    let signature = "S".repeat(40);
+    let token = format!("ghs_15368_{header}.{payload}.{signature}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret");
+    assert!(hidden(&out, "PAYLOAD"), "{out}");
+    assert!(hidden(&out, "15368"), "{out}");
+    assert!(!out.contains("eyJ"), "{out}");
+    assert!(!out.contains(&signature), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let hyphen_ended = format!("ghs_99_{header}.{payload}.{}-", "S".repeat(39));
+    let mixed = format!(
+        "ghs_7_{header}.PAY_LOAD-PAYLOADPAYLOAD.SIG_NA-TURE{}",
+        "S".repeat(20)
+    );
+    for text in [
+        format!("export GITHUB_TOKEN={token} please"),
+        format!("see {token}."),
+        format!("see {token}, next"),
+        format!("use {hyphen_ended} now"),
+        format!("tok {mixed} end"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(hidden(&out, "PAYLOAD"), "{text} -> {out}");
+        assert!(hidden(&out, "PAY"), "{text} -> {out}");
+        assert!(hidden(&out, "15368"), "{text} -> {out}");
+        assert!(!out.contains("eyJ"), "{text} -> {out}");
+        assert!(!out.contains("SIG_NA"), "{text} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{text}");
+        assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+    }
+
+    let exported = format!("export GITHUB_TOKEN={token} please");
+    let (_vault, out, _) = shield(&exported);
+    assert_eq!(
+        out, "export GITHUB_TOKEN=h1_secret please",
+        "{exported} -> {out}"
+    );
+
+    let dotted = format!("see {token}.");
+    let (_vault, out, _) = shield(&dotted);
+    assert_eq!(out, "see h1_secret.", "{dotted} -> {out}");
+
+    let comma = format!("see {token}, next");
+    let (_vault, out, _) = shield(&comma);
+    assert_eq!(out, "see h1_secret, next", "{comma} -> {out}");
+
+    let ended = format!("use {hyphen_ended} now");
+    let (_vault, out, _) = shield(&ended);
+    assert_eq!(out, "use h1_secret now", "{ended} -> {out}");
+    assert!(!out.contains('-'), "{ended} -> {out}");
+
+    let old = format!("ghs_{}", "a".repeat(36));
+    let paired = format!("{token} {old}");
+    let (vault, out, audit) = shield(&paired);
+    assert_eq!(audit.secret, 2, "{paired} -> {out}");
+    assert_eq!(out, "h1_secret h1_secret");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(!vault.holds_surface(old.as_bytes()));
+
+    let old_sentence = format!("use {old}.");
+    let (_vault, out, audit) = shield(&old_sentence);
+    assert_eq!(audit.secret, 1, "{old_sentence} -> {out}");
+    assert_eq!(out, "use h1_secret.");
+
+    let minimum = format!(
+        "ghs_42_{}.{}.{}",
+        "a".repeat(10),
+        "b".repeat(10),
+        "c".repeat(10)
+    );
+    let (vault, out, audit) = shield(&minimum);
+    assert_eq!(audit.secret, 1, "{minimum} -> {out}");
+    assert_eq!(out, "h1_secret");
+    assert!(hidden(&out, &"a".repeat(10)), "{out}");
+    assert!(!vault.holds_surface(minimum.as_bytes()));
+
+    for bare in [
+        format!("ghs_{}", "a".repeat(35)),
+        format!("ghs_{}", "a".repeat(37)),
+        "ghs_short".to_string(),
+        format!("ghs_15368_{header}.{payload}"),
+        format!(
+            "ghs_1_{}.{}.{}",
+            "a".repeat(9),
+            "b".repeat(9),
+            "c".repeat(9)
+        ),
+        format!("xghs_15368_{header}.{payload}.{signature}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "PAYLOAD"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let nested = format!(r#"{{"note":"use {token} today"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &nested).unwrap();
+    assert_eq!(audit.secret, 1, "{nested} -> {out}");
+    assert_eq!(out, r#"{"note":"use h1_secret today"}"#);
+    assert!(hidden(&out, "PAYLOAD"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
