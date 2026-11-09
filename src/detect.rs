@@ -87,8 +87,13 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // them out starts the match after the mark, so that head is sent.
         // A letter outside ASCII belongs too (`josé@`, `société.fr`),
         // including a decomposed accent. Leaving it out sends the address.
+        // Dash punctuation is that hyphen when a word processor inserts
+        // it in the local part or a domain label. Leaving it out sends
+        // the head, or the whole address when the mark sits in the domain.
+        // The local part does not start on that dash, so a dash between
+        // two addresses is not swallowed by the second one.
         Regex::new(
-            r"\b[\p{L}\p{M}0-9._%+\-'\u{2019}]+@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.\-]*\.(?:\p{L}\p{M}*){2,}\b",
+            r"\b[\p{L}\p{M}0-9._%+'\u{2019}][\p{L}\p{M}0-9._%+\p{Pd}'\u{2019}]*@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.\p{Pd}]*\.(?:\p{L}\p{M}*){2,}\b",
         )
         .expect("email pattern")
     });

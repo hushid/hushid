@@ -158,6 +158,116 @@ fn email_with_a_non_ascii_letter_stays_one_address() {
 }
 
 #[test]
+fn email_with_dash_punctuation_stays_one_address() {
+    // U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash,
+    // U+2013 en dash. A word processor uses these where an ASCII hyphen
+    // was typed. The address is still one span.
+    let hyphen = '\u{2010}';
+    let nb = '\u{2011}';
+    let figure = '\u{2012}';
+    let en = '\u{2013}';
+    for email in [
+        "jean-luc@example.com".to_string(),
+        "user@ex-ample.com".to_string(),
+        format!("jean{en}luc@example.com"),
+        format!("marie.jean{en}luc@example.com"),
+        format!("jean{en}luc+tag@example.com"),
+        format!("Jean{en}Luc@Example.COM"),
+        format!("jean{hyphen}luc@example.com"),
+        format!("jean{nb}luc@example.com"),
+        format!("jean{figure}luc@example.com"),
+        format!("user@jean{en}luc.fr"),
+        format!("user@ex{en}ample.com"),
+        format!("Élise{en}Marie.O'Brien@Société.fr"),
+    ] {
+        let (vault, out, audit) = shield(&email);
+        assert_eq!(audit.email, 1, "{email} -> {out}");
+        assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+        assert!(!out.contains('@'), "{email} -> {out}");
+        assert!(
+            !out.contains(hyphen)
+                && !out.contains(nb)
+                && !out.contains(figure)
+                && !out.contains(en)
+                && !out.contains('É')
+                && !out.contains('é')
+                && !out.contains('\''),
+            "{email} -> {out}"
+        );
+        assert_eq!(vault.restore_write(&out).unwrap(), email);
+    }
+
+    let sentence = format!("écrire à jean{en}luc@example.com aujourd'hui");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.starts_with("écrire à h1_email_"), "{out}");
+    assert!(out.ends_with(" aujourd'hui"), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert!(!out.contains("jean"), "{out}");
+    assert!(!out.contains(en), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let raw = format!(r#"{{"to":"jean{en}luc@example.com"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert!(!out.contains("jean"), "{out}");
+    assert!(!out.contains(en), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    // A dash with no space is part of the local part, same as `note-a@`.
+    // A dash before a space, or a leading dash, is not.
+    let inside = format!("note{en}a@b.co");
+    let (vault, out, audit) = shield(&inside);
+    assert_eq!(audit.email, 1, "{inside} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{out}");
+    assert!(!out.contains(en), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), inside);
+
+    let spaced = format!("note{en} a@b.co");
+    let (vault, out, audit) = shield(&spaced);
+    assert_eq!(audit.email, 1, "{spaced} -> {out}");
+    assert!(out.starts_with(&format!("note{en} h1_email_")), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), spaced);
+
+    let leading = format!("{en}a@b.co");
+    let (vault, out, audit) = shield(&leading);
+    assert_eq!(audit.email, 1, "{leading} -> {out}");
+    assert!(out.starts_with(&format!("{en}h1_email_")), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), leading);
+
+    let after = format!("mail a@b.co{en}next");
+    let (vault, out, audit) = shield(&after);
+    assert_eq!(audit.email, 1, "{after} -> {out}");
+    assert!(out.starts_with("mail h1_email_"), "{out}");
+    assert!(out.ends_with(&format!("{en}next")), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), after);
+
+    let pair = format!("a@b.co{en}c@d.co");
+    let (vault, out, audit) = shield(&pair);
+    assert_eq!(audit.email, 2, "{pair} -> {out}");
+    assert!(out.contains(en), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(out.matches("h1_email_").count(), 2, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+    for bare in [
+        format!("jean{en}luc habite ici"),
+        format!("jean{en}luc@home"),
+        format!("marie.jean{en}luc wrote"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn prose_name_is_not_a_hit() {
     let (_vault, out, audit) = shield("Marie lives in Montreal");
     assert_eq!(out, "Marie lives in Montreal");
