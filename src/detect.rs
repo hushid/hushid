@@ -202,9 +202,13 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         LazyLock::new(|| Regex::new(r"\d{13,19}").expect("card run pattern"));
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         [
-            r"(?i)\bcredit card\b",
-            r"(?i)\bamerican express\b",
-            r"(?i)\bmaster card\b",
+            // The space between cue words may be any whitespace, including
+            // a non-breaking space. A plain space is not the only mark
+            // between `american` and `express`, and that phrase has no
+            // shorter cue. Leaving the mark out sends the card.
+            r"(?i)\bcredit\s+card\b",
+            r"(?i)\bamerican\s+express\b",
+            r"(?i)\bmaster\s+card\b",
             r"(?i)\bmastercard\b",
             r"(?i)\bvisa\b",
             r"(?i)\bamex\b",
@@ -254,9 +258,12 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         [
-            r"(?i)\bsocial insurance\b",
-            r"(?i)\bnuméro d['’]assurance sociale\b",
-            r"(?i)\bnumero d['’]assurance sociale\b",
+            // Same whitespace as a card cue. `social insurance 130692544`
+            // stays a SIN when a non-breaking space, a thin space, or a
+            // tab sits between the words. A plain space is not required.
+            r"(?i)\bsocial\s+insurance\b",
+            r"(?i)\bnuméro\s+d['’]assurance\s+sociale\b",
+            r"(?i)\bnumero\s+d['’]assurance\s+sociale\b",
             r"(?i)\bSIN\b",
             r"(?i)\bNAS\b",
         ]
