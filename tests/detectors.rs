@@ -3931,6 +3931,42 @@ fn fullwidth_dialing_prefix_still_shields_the_number() {
 }
 
 #[test]
+fn dot_between_cue_words_still_shields_the_number() {
+    let sin = valid_sin();
+    for cued in [
+        format!("social.insurance {sin}"),
+        format!("social. insurance {sin}"),
+        format!("SOCIAL.INSURANCE {sin}"),
+    ] {
+        let (vault, out, audit) = shield(&cued);
+        assert_eq!(audit.sin, 1, "{cued} -> {out}");
+        assert!(hidden(&out, &sin), "{cued} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), cued);
+    }
+
+    let card = "american.express 4111111111111111";
+    let (vault, out, audit) = shield(card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(hidden(&out, "4111"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    let far = format!("social.insurance{}{sin}", " ".repeat(41));
+    let (_vault, out, audit) = shield(&far);
+    assert_eq!(audit.sin, 0, "{far} -> {out}");
+    assert_eq!(out, far);
+
+    for bare in [
+        sin.clone(),
+        format!("social.security {sin}"),
+        format!("insurance {sin}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
