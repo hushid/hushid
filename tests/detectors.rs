@@ -5143,3 +5143,117 @@ fn arabic_indic_digits_still_shield_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn fullwidth_slash_between_groups_still_shields_the_number() {
+    // `416/555/0123` and `4111/1111/1111/1111` are already a phone and
+    // a card. A wide keyboard writes that slash as U+FF0F. Leaving the
+    // mark out sends the number. A slash is still not a SIN separator.
+    let slash = '\u{FF0F}';
+    let phone = format!("416{slash}555{slash}0123");
+    round_trip(&phone, |audit| audit.phone);
+    let (vault, out, audit) = shield(&phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert_eq!(audit.card, 0, "{phone} -> {out}");
+    assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+    assert!(!out.contains(slash), "{phone} -> {out}");
+    assert!(hidden(&out, "416"), "{phone} -> {out}");
+    assert!(hidden(&out, "555"), "{phone} -> {out}");
+    assert!(hidden(&out, "0123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let mixed = format!("416{slash}555-0123");
+    round_trip(&mixed, |audit| audit.phone);
+    let (vault, out, audit) = shield(&mixed);
+    assert_eq!(audit.phone, 1, "{mixed} -> {out}");
+    assert!(hidden(&out, "416"), "{mixed} -> {out}");
+    assert!(hidden(&out, "0123"), "{mixed} -> {out}");
+    assert!(!out.contains(slash), "{mixed} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), mixed);
+
+    let trunk = format!("1{slash}800{slash}555-0199");
+    round_trip(&trunk, |audit| audit.phone);
+    let (vault, out, audit) = shield(&trunk);
+    assert_eq!(audit.phone, 1, "{trunk} -> {out}");
+    assert!(hidden(&out, "800"), "{trunk} -> {out}");
+    assert!(hidden(&out, "0199"), "{trunk} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), trunk);
+
+    let international = format!("+44{slash}20{slash}7946{slash}0958");
+    round_trip(&international, |audit| audit.phone);
+    let (vault, out, audit) = shield(&international);
+    assert_eq!(audit.phone, 1, "{international} -> {out}");
+    assert!(hidden(&out, "44"), "{international} -> {out}");
+    assert!(hidden(&out, "7946"), "{international} -> {out}");
+    assert!(hidden(&out, "0958"), "{international} -> {out}");
+    assert!(!out.contains(slash), "{international} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), international);
+
+    let prefixed = format!("00{slash}44{slash}20{slash}7946{slash}0958");
+    round_trip(&prefixed, |audit| audit.phone);
+    let (vault, out, audit) = shield(&prefixed);
+    assert_eq!(audit.phone, 1, "{prefixed} -> {out}");
+    assert!(hidden(&out, "7946"), "{prefixed} -> {out}");
+    assert!(hidden(&out, "0958"), "{prefixed} -> {out}");
+    assert!(!out.contains(slash), "{prefixed} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), prefixed);
+
+    let wide_phone = widen_digits("416/555/0123").replace('/', "\u{FF0F}");
+    let (vault, out, audit) = shield(&wide_phone);
+    assert_eq!(audit.phone, 1, "{wide_phone} -> {out}");
+    assert!(hidden(&out, &widen_digits("555")), "{wide_phone} -> {out}");
+    assert!(hidden(&out, &widen_digits("0123")), "{wide_phone} -> {out}");
+    assert!(!out.contains(slash), "{wide_phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), wide_phone);
+
+    for slashed in [
+        format!("4111{slash}1111{slash}1111{slash}1111"),
+        format!("3782{slash}8224{slash}6310{slash}005"),
+        format!("3056{slash}930902{slash}5904"),
+        format!("4111 {slash} 1111 {slash} 1111 {slash} 1111"),
+    ] {
+        let (vault, out, audit) = shield(&slashed);
+        assert_eq!(audit.card, 1, "{slashed} -> {out}");
+        assert_eq!(audit.phone, 0, "{slashed} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{slashed} -> {out}");
+        assert!(!out.contains(slash), "{slashed} -> {out}");
+        for group in slashed.split(|ch: char| !ch.is_ascii_digit()) {
+            if group.len() >= 4 {
+                assert!(hidden(&out, group), "{slashed} -> {out}");
+            }
+        }
+        assert_eq!(vault.restore_write(&out).unwrap(), slashed);
+    }
+
+    let sentence = format!("pay visa 4111{slash}1111{slash}1111{slash}1111 today.");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.card, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("pay visa h1_card_"), "{out}");
+    assert!(out.ends_with(" today."), "{out}");
+    assert!(!out.contains(slash), "{out}");
+    assert!(hidden(&out, "4111"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let raw = format!(r#"{{"visa":"4111{slash}1111{slash}1111{slash}1111"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.card, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "4111"), "{raw} -> {out}");
+    assert!(!out.contains(slash), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        format!("416{slash}5550123"),
+        format!("+1{slash}4165550123"),
+        format!("4111{slash}1111{slash}1111{slash}1112"),
+        format!("4111{slash}1111{slash}1111{slash}11111"),
+        format!("SIN 130{slash}692{slash}544"),
+        format!("not{slash}a{slash}phone"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

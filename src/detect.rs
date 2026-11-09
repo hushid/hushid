@@ -248,8 +248,9 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         // marks (`4111 - 1111 - 1111 - 1111`, a figure dash, an en dash,
         // a minus sign, or a soft hyphen). A slash is that separator
         // too. A phone already treats it as one. Leaving it out sends
-        // `4111/1111/1111/1111`. A fullwidth full stop is that dot.
-        // Leaving it out sends the card when the stops are wide.
+        // `4111/1111/1111/1111`. A fullwidth solidus is that slash.
+        // Leaving it out sends the same card. A fullwidth full stop is
+        // that dot. Leaving it out sends the card when the stops are wide.
         // Four, four, five is the 13-digit grouping.
         [
             r"\d{4}(?:{sep}+\d{4}){3}{sep}+\d{3}",
@@ -262,9 +263,13 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         ]
         .into_iter()
         .map(|pattern| {
-            // A middle dot is that separator. Leaving it out sends the number.
-            Regex::new(&pattern.replace("{sep}", &hyphen_class(r"\s./\u{FF0E}\u{30FB}\u{00B7}")))
-                .expect("grouped card pattern")
+            // A middle dot is that separator. A fullwidth solidus is the
+            // slash above. Leaving either mark out sends the number.
+            Regex::new(&pattern.replace(
+                "{sep}",
+                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}"),
+            ))
+            .expect("grouped card pattern")
         })
         .collect()
     });
@@ -330,7 +335,7 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
     // minus sign, or a soft hyphen. `130.692.544` is that same number.
     // A card and a phone already treat a dot as a separator, including
     // the fullwidth full stop. Leaving the dot out sends the digits.
-    // A slash is not this separator.
+    // A slash is not this separator. A fullwidth solidus is not one either.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         // A middle dot is that separator. Leaving it out sends the number.
         let sep = hyphen_class(r"\s.\u{FF0E}\u{30FB}\u{00B7}");
@@ -606,13 +611,17 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
 /// The class is whitespace, a dot, a slash, or a hyphen mark, so a
 /// figure dash, an en dash, a minus sign, or a soft hyphen counts the
 /// same as an ASCII hyphen. A fullwidth full stop counts as that dot.
-/// Patterns repeat it when the gap may hold more than one, as in
-/// `416 - 555 - 0123`.
+/// A fullwidth solidus counts as that slash. Patterns repeat it when
+/// the gap may hold more than one, as in `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
     Regex::new(
         &body
-            // A middle dot is that separator. Leaving it out sends the number.
-            .replace("{sep}", &hyphen_class(r"\s./\u{FF0E}\u{30FB}\u{00B7}"))
+            // A middle dot is that separator. A fullwidth solidus is that
+            // slash. Leaving either mark out sends the number.
+            .replace(
+                "{sep}",
+                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}"),
+            )
             .replace("{plus}", PLUS)
             .replace("{idd}", IDD)
             .replace("{open}", OPEN_PAREN)
@@ -641,8 +650,9 @@ const OPEN_PAREN: &str = r"(?:\(|\u{FF08})";
 const CLOSE_PAREN: &str = r"(?:\)|\u{FF09})";
 
 fn international_sep_class() -> String {
-    // A middle dot is that separator. Leaving it out sends the number.
-    hyphen_class(r"\s./()\u{FF08}\u{FF09}\u{FF0E}\u{30FB}\u{00B7}")
+    // A middle dot is that separator. A fullwidth solidus is that
+    // slash. Leaving either mark out sends the number.
+    hyphen_class(r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FF0E}\u{30FB}\u{00B7}")
 }
 
 /// Longest prefix of `text[start..end]` that is one international number.
