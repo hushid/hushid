@@ -268,6 +268,111 @@ fn email_with_dash_punctuation_stays_one_address() {
 }
 
 #[test]
+fn email_with_a_minus_sign_or_soft_hyphen_stays_one_address() {
+    // `jean-luc@example.com` is already one address when the hyphen is
+    // dash punctuation. U+2212 MINUS SIGN and U+00AD SOFT HYPHEN are
+    // that same mark. Leaving them out sends the head and keeps
+    // `luc@`, or sends the whole address when the mark sits in the
+    // domain. The local part still does not start on the mark.
+    let minus = '\u{2212}';
+    let soft = '\u{00ad}';
+    for mark in [minus, soft] {
+        for email in [
+            format!("jean{mark}luc@example.com"),
+            format!("marie.jean{mark}luc@example.com"),
+            format!("jean{mark}luc+tag@example.com"),
+            format!("user@ex{mark}ample.com"),
+            format!("user@jean{mark}luc.fr"),
+            format!("note{mark}a@b.co"),
+            format!("Élise{mark}Marie.O'Brien@Société.fr"),
+        ] {
+            let (vault, out, audit) = shield(&email);
+            assert_eq!(audit.email, 1, "{email} -> {out}");
+            assert_eq!(audit.phone, 0, "{email} -> {out}");
+            assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+            assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+            assert!(!out.contains('@'), "{email} -> {out}");
+            assert!(!out.contains(mark), "{email} -> {out}");
+            assert!(!out.contains("jean"), "{email} -> {out}");
+            assert!(!out.contains("ample"), "{email} -> {out}");
+            assert!(!out.contains("note"), "{email} -> {out}");
+            assert_eq!(vault.restore_write(&out).unwrap(), email);
+        }
+
+        let sentence = format!("écrire à jean{mark}luc@example.com aujourd'hui");
+        let (vault, out, audit) = shield(&sentence);
+        assert_eq!(audit.email, 1, "{sentence} -> {out}");
+        assert!(out.starts_with("écrire à h1_email_"), "{out}");
+        assert!(out.ends_with(" aujourd'hui"), "{out}");
+        assert!(!out.contains('@'), "{out}");
+        assert!(!out.contains("jean"), "{out}");
+        assert!(!out.contains(mark), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+        let dotted = format!("mail user@ex{mark}ample.com.");
+        let (vault, out, audit) = shield(&dotted);
+        assert_eq!(audit.email, 1, "{dotted} -> {out}");
+        assert!(out.starts_with("mail h1_email_"), "{out}");
+        assert!(out.ends_with('.'), "{out}");
+        assert!(!out.contains(mark), "{out}");
+        assert!(!out.contains('@'), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), dotted);
+
+        let pair = format!("a@b.co{mark}c@d.co");
+        let (vault, out, audit) = shield(&pair);
+        assert_eq!(audit.email, 2, "{pair} -> {out}");
+        assert!(out.contains(mark), "{out}");
+        assert!(!out.contains('@'), "{out}");
+        assert_eq!(out.matches("h1_email_").count(), 2, "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), pair);
+
+        let spaced = format!("note{mark} a@b.co");
+        let (vault, out, audit) = shield(&spaced);
+        assert_eq!(audit.email, 1, "{spaced} -> {out}");
+        assert!(out.starts_with(&format!("note{mark} h1_email_")), "{out}");
+        assert!(!out.contains('@'), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), spaced);
+
+        let leading = format!("{mark}a@b.co");
+        let (vault, out, audit) = shield(&leading);
+        assert_eq!(audit.email, 1, "{leading} -> {out}");
+        assert!(out.starts_with(&format!("{mark}h1_email_")), "{out}");
+        assert!(!out.contains('@'), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), leading);
+
+        let prose = format!("jean{mark}luc wrote a@b.co");
+        let (vault, out, audit) = shield(&prose);
+        assert_eq!(audit.email, 1, "{prose} -> {out}");
+        assert!(
+            out.starts_with(&format!("jean{mark}luc wrote h1_email_")),
+            "{out}"
+        );
+        assert!(!out.contains('@'), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), prose);
+
+        let raw = format!(r#"{{"to":"jean{mark}luc@example.com"}}"#);
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+        assert_eq!(audit.email, 1, "{raw} -> {out}");
+        assert!(!out.contains('@'), "{out}");
+        assert!(!out.contains("jean"), "{out}");
+        assert!(!out.contains(mark), "{out}");
+        assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+        for bare in [
+            format!("jean{mark}luc habite ici"),
+            format!("jean{mark}luc@home"),
+            format!("marie.jean{mark}luc wrote"),
+            format!("user@{mark}example.com"),
+        ] {
+            let (_vault, out, audit) = shield(&bare);
+            assert_eq!(out, bare, "{bare} -> {out}");
+            assert_eq!(audit.email, 0, "{bare} -> {out}");
+        }
+    }
+}
+
+#[test]
 fn prose_name_is_not_a_hit() {
     let (_vault, out, audit) = shield("Marie lives in Montreal");
     assert_eq!(out, "Marie lives in Montreal");
@@ -1305,6 +1410,110 @@ fn dash_punctuation_still_separates_a_grouped_number() {
     assert_eq!(audit.sin, 1, "{sin_raw} -> {out}");
     assert!(!out.contains(&dashed), "{sin_raw} -> {out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), sin_raw);
+}
+
+#[test]
+fn minus_sign_or_soft_hyphen_still_separates_a_grouped_number() {
+    // `416-555-0123` and `4111-1111-1111-1111` are already grouped
+    // numbers when the hyphen is dash punctuation. U+2212 MINUS SIGN
+    // and U+00AD SOFT HYPHEN are that same separator. Leaving either
+    // one out sends the digits. A bare tail and a single subscriber
+    // block stay as written.
+    let minus = '\u{2212}';
+    let soft = '\u{00ad}';
+    for mark in [minus, soft] {
+        for phone in [
+            format!("416{mark}555{mark}0123"),
+            format!("416 {mark} 555 {mark} 0123"),
+            format!("(416){mark}555{mark}0123"),
+            format!("+1{mark}416{mark}555{mark}0123"),
+            format!("+44{mark}20{mark}7946{mark}0958"),
+            format!("+44 (20){mark}7946{mark}0958"),
+            format!("+33 (0)1{mark}23{mark}45{mark}67{mark}89"),
+        ] {
+            let (vault, out, audit) = shield(&phone);
+            assert_eq!(audit.phone, 1, "{phone} -> {out}");
+            assert_eq!(audit.card, 0, "{phone} -> {out}");
+            assert_eq!(audit.sin, 0, "{phone} -> {out}");
+            assert!(out.starts_with("h1_phone_"), "{phone} -> {out}");
+            assert_eq!(out.len(), "h1_phone_".len() + 9, "{phone} -> {out}");
+            assert!(!out.contains(mark), "{phone} -> {out}");
+            assert_eq!(vault.restore_write(&out).unwrap(), phone);
+        }
+
+        let sentence = format!("call 416{mark}555{mark}0123 today");
+        let (vault, out, audit) = shield(&sentence);
+        assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+        assert!(out.starts_with("call h1_phone_"), "{out}");
+        assert!(out.ends_with(" today"), "{out}");
+        assert!(!out.contains("416"), "{out}");
+        assert!(!out.contains("0123"), "{out}");
+        assert!(!out.contains(mark), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+        for grouped in [
+            format!("4111{mark}1111{mark}1111{mark}1111"),
+            format!("3782{mark}822463{mark}10005"),
+            format!("4111 {mark} 1111 {mark} 1111 {mark} 1111"),
+        ] {
+            let (vault, out, audit) = shield(&grouped);
+            assert_eq!(audit.card, 1, "{grouped} -> {out}");
+            assert_eq!(audit.phone, 0, "{grouped} -> {out}");
+            assert!(out.starts_with("h1_card_"), "{grouped} -> {out}");
+            assert_eq!(out.len(), "h1_card_".len() + 9, "{grouped} -> {out}");
+            assert!(!out.contains(mark), "{grouped} -> {out}");
+            assert_eq!(vault.restore_write(&out).unwrap(), grouped);
+        }
+
+        let cued = format!("visa 4111{mark}1111{mark}1111{mark}1111");
+        let (vault, out, audit) = shield(&cued);
+        assert_eq!(audit.card, 1, "{cued} -> {out}");
+        assert!(out.starts_with("visa h1_card_"), "{out}");
+        assert!(!out.contains("4111"), "{out}");
+        assert!(!out.contains(mark), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), cued);
+
+        let sin = valid_sin();
+        let dashed = format!("{}{mark}{}{mark}{}", &sin[..3], &sin[3..6], &sin[6..]);
+        let cued_sin = format!("SIN {dashed}");
+        let (vault, out, audit) = shield(&cued_sin);
+        assert_eq!(audit.sin, 1, "{cued_sin} -> {out}");
+        assert_eq!(audit.phone, 0, "{cued_sin} -> {out}");
+        assert!(out.starts_with("SIN h1_sin_"), "{out}");
+        assert!(!out.contains(&sin), "{out}");
+        assert!(!out.contains(mark), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), cued_sin);
+
+        for bare in [
+            format!("416{mark}5550123"),
+            format!("416{mark}555 office{mark}0123"),
+            format!("+44{mark}7700900123"),
+            format!("4111{mark}1111{mark}1111{mark}1112"),
+            format!("4111{mark}1111{mark}1111{mark}11111"),
+            dashed.clone(),
+        ] {
+            let (_vault, out, audit) = shield(&bare);
+            assert_eq!(out, bare, "{bare} -> {out}");
+            assert_eq!(audit.phone, 0, "{bare} -> {out}");
+            assert_eq!(audit.card, 0, "{bare} -> {out}");
+            assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        }
+
+        let raw = format!(r#"{{"n":"416{mark}555{mark}0123"}}"#);
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+        assert_eq!(audit.phone, 1, "{raw} -> {out}");
+        assert!(!out.contains("416"), "{raw} -> {out}");
+        assert!(!out.contains(mark), "{raw} -> {out}");
+        assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+        let sin_raw = format!(r#"{{"nas":"{dashed}"}}"#);
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &sin_raw).unwrap();
+        assert_eq!(audit.sin, 1, "{sin_raw} -> {out}");
+        assert!(!out.contains(&dashed), "{sin_raw} -> {out}");
+        assert_eq!(restore_json_write(&vault, &out).unwrap(), sin_raw);
+    }
 }
 
 #[test]
