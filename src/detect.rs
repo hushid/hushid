@@ -28,12 +28,14 @@ fn hyphen_class(rest: &str) -> String {
     class
 }
 
-/// One or more whitespace characters or hyphen marks between cue words.
+/// One or more whitespace characters, dots, or hyphen marks between cue words.
 ///
-/// `american-express` is still `american express`. An en dash, a minus
-/// sign, or a soft hyphen is that same mark. The phrase has no shorter cue.
+/// `american-express` and `social.insurance` are still those phrases.
+/// An en dash, a minus sign, or a soft hyphen is that same mark. A dot
+/// is that mark too. Leaving the dot out sends the number. The phrase
+/// has no shorter cue.
 fn cue_word_gap() -> String {
-    format!("{}+", hyphen_class(r"\s"))
+    format!("{}+", hyphen_class(r"\s."))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
