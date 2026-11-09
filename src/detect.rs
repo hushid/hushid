@@ -164,9 +164,12 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // mark, out sends the digits when there is no leading plus.
         // A `00` dialing prefix is that same plus (`001416-555-0123`).
         // Leaving it out sends the number. A bare digit run after `00`
-        // is not this shape.
+        // is not this shape. A phone separator may sit between that
+        // prefix and the trunk (`00-1416-555-0123`). Whitespace already
+        // may. Leaving the mark out sends the number. `011` is that
+        // same prefix.
         phone_pattern(
-            r"(?:(?:{plus}|{idd})\s*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:{plus}\s*1{sep}*|{idd}{sep}*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`, including spaces inside the parentheses. A bare
@@ -188,10 +191,15 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // (`+ 14165550123`). A fullwidth plus is that same sign.
     // A `00` dialing prefix is that same plus (`0044 20 7946 0958`).
     // The two zeros are not digits of the number. Leaving the prefix
-    // out sends it. A bare run after `00` stays as written.
+    // out sends it. A bare run after `00` stays as written. The mark
+    // between the prefix and the country code is the same separator
+    // as between groups (`00-44-20-7946-0958`). Whitespace already
+    // may. Leaving it out sends the number, or leaves the prefix when
+    // the tail is already a phone (`00-1-416-555-0123`). A plus still
+    // takes only whitespace before the country code.
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"(?:{plus}|{idd})\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}"
+            &r"(?:{plus}\s*|{idd}{sep}*)\d{1,3}(?:{sep}+\d{1,14}){2,6}"
                 .replace("{sep}", &international_sep_class())
                 .replace("{plus}", PLUS)
                 .replace("{idd}", IDD),
@@ -585,7 +593,7 @@ fn international_sep_class() -> String {
 fn international_span(text: &str, start: usize, mut end: usize) -> Option<(usize, usize)> {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"^(?:{plus}|{idd})\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}$"
+            &r"^(?:{plus}\s*|{idd}{sep}*)\d{1,3}(?:{sep}+\d{1,14}){2,6}$"
                 .replace("{sep}", &international_sep_class())
                 .replace("{plus}", PLUS)
                 .replace("{idd}", IDD),
