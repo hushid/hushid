@@ -269,6 +269,55 @@ fn shaped_card_and_cued_card_round_trip_bare_luhn_stays() {
     let (_vault, out, audit) = shield(bad);
     assert_eq!(out, bad);
     assert_eq!(audit.card, 0);
+
+    // Same groups, with a dot between them.
+    for dotted in [
+        "4111.1111.1111.1111",
+        "3782.822463.10005",
+        "3782.8224.6310.005",
+        "3056.930902.5904",
+    ] {
+        let (vault, out, audit) = shield(dotted);
+        assert_eq!(audit.card, 1, "{dotted} -> {out}");
+        assert_eq!(audit.phone, 0, "{dotted} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{dotted} -> {out}");
+        assert!(!out.contains(dotted), "{dotted} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), dotted);
+    }
+    let cued_dotted = "visa 4111.1111.1111.1111";
+    let (vault, out, audit) = shield(cued_dotted);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.starts_with("visa h1_card_"), "{out}");
+    assert!(!out.contains("4111"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued_dotted);
+    let dotted_sentence = "pay visa 4111.1111.1111.1111 today.";
+    let (vault, out, audit) = shield(dotted_sentence);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.starts_with("pay visa h1_card_"), "{out}");
+    assert!(out.ends_with(" today."), "{out}");
+    assert!(!out.contains("4111"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), dotted_sentence);
+    let bad_dotted = "4111.1111.1111.1112";
+    let (_vault, out, audit) = shield(bad_dotted);
+    assert_eq!(out, bad_dotted);
+    assert_eq!(audit.card, 0);
+    let glued_dotted = "4111.1111.1111.11111";
+    let (_vault, out, audit) = shield(glued_dotted);
+    assert_eq!(out, glued_dotted);
+    assert_eq!(audit.card, 0);
+
+    let raw = r#"{"visa":"4111.1111.1111.1111"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.card, 1, "{raw} -> {out}");
+    assert!(!out.contains("4111"), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+    let bare_dotted = r#"{"n":"4111.1111.1111.1111"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), bare_dotted).unwrap();
+    assert_eq!(audit.card, 1, "{bare_dotted} -> {out}");
+    assert!(!out.contains("4111"), "{bare_dotted} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), bare_dotted);
 }
 
 #[test]
