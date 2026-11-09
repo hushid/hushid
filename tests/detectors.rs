@@ -64,6 +64,7 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
     for phone in [
         "+1 415 555 0134",
         "(415) 555-0134",
+        "(416)555-0123",
         "415.555.0134",
         "+14155550134",
         "+44 20 7946 0958",
@@ -74,6 +75,9 @@ fn shaped_phone_round_trip_and_bare_digits_stay() {
     }
     let (_vault, out, audit) = shield("4155550134");
     assert_eq!(out, "4155550134");
+    assert_eq!(audit.phone, 0);
+    let (_vault, out, audit) = shield("(416)5550123");
+    assert_eq!(out, "(416)5550123");
     assert_eq!(audit.phone, 0);
 }
 

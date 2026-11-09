@@ -1,9 +1,12 @@
 use crate::audit::AuditRecord;
+use crate::detect::{find_hits, Hit};
 use crate::glossary::Glossary;
 use crate::shield::shield_text;
-use crate::token::{find_h1, TokenError};
+use crate::token::{find_h1, TokenError, SECRET_MARK};
 use crate::vault::{RestoreError, Vault};
 use std::fmt;
+
+const MAX_JSON_DEPTH: u8 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsonError {
@@ -24,43 +27,38 @@ impl fmt::Display for JsonError {
 
 impl std::error::Error for JsonError {}
 
-/// Shield decoded JSON string values. Keys and numbers stay as they are.
+/// Shield JSON string values, object keys, and numbers the detectors recognize.
+///
+/// A number is replaced with a quoted token and restored as a number. A string
+/// whose text is itself a JSON object or array is shielded again. Keys and
+/// numbers that no detector recognizes stay as they are.
 pub fn shield_json_strings(
     vault: &mut Vault,
     glossary: &Glossary,
     input: &str,
 ) -> Result<(String, AuditRecord), JsonError> {
     let mut audit = AuditRecord::default();
-    let text = map_string_values(input, |value| {
-        let (shielded, part) = shield_text(vault, glossary, value).map_err(JsonError::Token)?;
-        audit.merge(&part);
-        Ok(shielded)
-    })?;
+    let text = shield_document(vault, glossary, input, &mut audit, 0)?;
     Ok((text, audit))
 }
 
-/// Restore string values and fail if any `h1_` span remains.
-///
-/// Keys are not rewritten. A token or secret mark left in a key fails the write.
+/// Restore JSON keys, string values, and numbers. An unresolved `h1_` span fails.
 pub fn restore_json_write(vault: &Vault, input: &str) -> Result<String, JsonError> {
-    let text = map_string_values(input, |value| {
-        vault.restore_write(value).map_err(JsonError::Restore)
-    })?;
-    if find_h1(&text, 0).is_some() {
-        return match vault.restore_write(&text) {
-            Err(err) => Err(JsonError::Restore(err)),
-            Ok(_) => Err(JsonError::Restore(RestoreError::Unresolved {
-                at: find_h1(&text, 0).unwrap_or(0),
-            })),
-        };
+    let text = restore_document(vault, input, 0)?;
+    if let Some(at) = find_h1(&text, 0) {
+        return Err(JsonError::Restore(RestoreError::Unresolved { at }));
     }
     Ok(text)
 }
 
-fn map_string_values(
+fn shield_document(
+    vault: &mut Vault,
+    glossary: &Glossary,
     input: &str,
-    mut map_value: impl FnMut(&str) -> Result<String, JsonError>,
+    audit: &mut AuditRecord,
+    depth: u8,
 ) -> Result<String, JsonError> {
+    let hits = find_hits(input, glossary);
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
     let mut index = 0;
@@ -68,14 +66,23 @@ fn map_string_values(
         if bytes[index] == b'"' {
             let (end, decoded) = parse_string(input, index)?;
             let after = skip_ws(input, end);
-            let is_key = input.as_bytes().get(after) == Some(&b':');
-            if is_key {
-                out.push_str(&input[index..end]);
+            let is_key = bytes.get(after) == Some(&b':');
+            let mapped = shield_decoded(vault, glossary, &decoded, audit, depth, is_key)?;
+            out.push('"');
+            out.push_str(&encode_json(&mapped));
+            out.push('"');
+            index = end;
+            continue;
+        }
+        if let Some(end) = parse_number(input, index) {
+            if let Some(hit) = covering_hit(&hits, index, end) {
+                let raw = &input[index..end];
+                let token = token_for_hit(vault, audit, hit, raw.as_bytes())?;
+                out.push('"');
+                out.push_str(&token);
+                out.push('"');
             } else {
-                let mapped = map_value(&decoded)?;
-                out.push('"');
-                out.push_str(&encode_json(&mapped));
-                out.push('"');
+                out.push_str(&input[index..end]);
             }
             index = end;
             continue;
@@ -88,6 +95,229 @@ fn map_string_values(
         index += ch.len_utf8();
     }
     Ok(out)
+}
+
+fn shield_decoded(
+    vault: &mut Vault,
+    glossary: &Glossary,
+    decoded: &str,
+    audit: &mut AuditRecord,
+    depth: u8,
+    is_key: bool,
+) -> Result<String, JsonError> {
+    if !is_key && depth < MAX_JSON_DEPTH && is_json_document(decoded) {
+        return shield_document(vault, glossary, decoded, audit, depth + 1);
+    }
+    let (shielded, part) = shield_text(vault, glossary, decoded).map_err(JsonError::Token)?;
+    audit.merge(&part);
+    Ok(shielded)
+}
+
+fn token_for_hit(
+    vault: &mut Vault,
+    audit: &mut AuditRecord,
+    hit: &Hit,
+    surface: &[u8],
+) -> Result<String, JsonError> {
+    match hit {
+        Hit::Secret { .. } => {
+            audit.secret += 1;
+            Ok(SECRET_MARK.to_string())
+        }
+        Hit::Reversible { kind, .. } => {
+            let token = vault
+                .issue_json_number(*kind, surface)
+                .map_err(JsonError::Token)?;
+            audit.bump(*kind);
+            Ok(token)
+        }
+    }
+}
+
+fn restore_document(vault: &Vault, input: &str, depth: u8) -> Result<String, JsonError> {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            let (end, decoded) = parse_string(input, index)?;
+            let after = skip_ws(input, end);
+            let is_key = bytes.get(after) == Some(&b':');
+            if !is_key {
+                if let Some(literal) = json_number_literal(vault, &decoded) {
+                    out.push_str(literal);
+                    index = end;
+                    continue;
+                }
+            }
+            let mapped = if !is_key && depth < MAX_JSON_DEPTH && is_json_document(&decoded) {
+                restore_document(vault, &decoded, depth + 1)?
+            } else {
+                vault.restore_write(&decoded).map_err(JsonError::Restore)?
+            };
+            out.push('"');
+            out.push_str(&encode_json(&mapped));
+            out.push('"');
+            index = end;
+            continue;
+        }
+        if let Some(end) = parse_number(input, index) {
+            out.push_str(&input[index..end]);
+            index = end;
+            continue;
+        }
+        let ch = input[index..]
+            .chars()
+            .next()
+            .ok_or(JsonError::Syntax { at: index })?;
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    Ok(out)
+}
+
+fn json_number_literal<'a>(vault: &'a Vault, text: &str) -> Option<&'a str> {
+    if !vault.is_json_number_token(text) {
+        return None;
+    }
+    let surface = std::str::from_utf8(vault.get(text)?).ok()?;
+    if parse_number(surface, 0) == Some(surface.len()) {
+        Some(surface)
+    } else {
+        None
+    }
+}
+
+fn covering_hit(hits: &[Hit], start: usize, end: usize) -> Option<&Hit> {
+    hits.iter().find(|hit| {
+        let (hit_start, hit_end) = hit_span(hit);
+        hit_start < end && start < hit_end
+    })
+}
+
+fn hit_span(hit: &Hit) -> (usize, usize) {
+    match *hit {
+        Hit::Secret { start, end } | Hit::Reversible { start, end, .. } => (start, end),
+    }
+}
+
+fn parse_number(input: &str, start: usize) -> Option<usize> {
+    let bytes = input.as_bytes();
+    let mut index = start;
+    if bytes.get(index) == Some(&b'-') {
+        index += 1;
+    }
+    let digits_at = index;
+    if bytes.get(index) == Some(&b'0') {
+        index += 1;
+    } else if bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+            index += 1;
+        }
+    } else {
+        return None;
+    }
+    if index == digits_at {
+        return None;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let fraction_at = index;
+        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+            index += 1;
+        }
+        if index == fraction_at {
+            return None;
+        }
+    }
+    if bytes
+        .get(index)
+        .is_some_and(|byte| *byte == b'e' || *byte == b'E')
+    {
+        index += 1;
+        if bytes
+            .get(index)
+            .is_some_and(|byte| *byte == b'+' || *byte == b'-')
+        {
+            index += 1;
+        }
+        let exponent_at = index;
+        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+            index += 1;
+        }
+        if index == exponent_at {
+            return None;
+        }
+    }
+    if index == start {
+        return None;
+    }
+    Some(index)
+}
+
+fn is_json_document(input: &str) -> bool {
+    let trimmed = input.trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return false;
+    }
+    match skip_value(trimmed, 0) {
+        Some(end) => trimmed[end..].trim().is_empty(),
+        None => false,
+    }
+}
+
+fn skip_value(input: &str, start: usize) -> Option<usize> {
+    let index = skip_ws(input, start);
+    let bytes = input.as_bytes();
+    match bytes.get(index)? {
+        b'"' => parse_string(input, index).ok().map(|(end, _)| end),
+        b'{' => skip_container(input, index, b'{', b'}'),
+        b'[' => skip_container(input, index, b'[', b']'),
+        b't' => skip_literal(input, index, "true"),
+        b'f' => skip_literal(input, index, "false"),
+        b'n' => skip_literal(input, index, "null"),
+        b'-' | b'0'..=b'9' => parse_number(input, index),
+        _ => None,
+    }
+}
+
+fn skip_container(input: &str, start: usize, open: u8, close: u8) -> Option<usize> {
+    let bytes = input.as_bytes();
+    if bytes.get(start) != Some(&open) {
+        return None;
+    }
+    let mut index = skip_ws(input, start + 1);
+    if bytes.get(index) == Some(&close) {
+        return Some(index + 1);
+    }
+    loop {
+        if open == b'{' {
+            if bytes.get(index) != Some(&b'"') {
+                return None;
+            }
+            let (after_key, _) = parse_string(input, index).ok()?;
+            index = skip_ws(input, after_key);
+            if bytes.get(index) != Some(&b':') {
+                return None;
+            }
+            index += 1;
+        }
+        index = skip_value(input, index)?;
+        index = skip_ws(input, index);
+        match bytes.get(index)? {
+            byte if *byte == close => return Some(index + 1),
+            b',' => index = skip_ws(input, index + 1),
+            _ => return None,
+        }
+    }
+}
+
+fn skip_literal(input: &str, start: usize, literal: &str) -> Option<usize> {
+    if input.get(start..)?.starts_with(literal) {
+        Some(start + literal.len())
+    } else {
+        None
+    }
 }
 
 fn parse_string(input: &str, start: usize) -> Result<(usize, String), JsonError> {

@@ -14,8 +14,15 @@ const HEADER: &str = "hushid-vault 1";
 /// Loading a missing file is an error. This type has no method that
 /// rebuilds the map by scanning a clear transcript.
 #[derive(Clone)]
+struct Entry {
+    surface: Vec<u8>,
+    /// The surface was a JSON number. Restore writes it back without quotes.
+    json_number: bool,
+}
+
+#[derive(Clone)]
 pub struct Vault {
-    entries: BTreeMap<String, Vec<u8>>,
+    entries: BTreeMap<String, Entry>,
 }
 
 impl fmt::Debug for Vault {
@@ -96,8 +103,31 @@ impl Vault {
     }
 
     pub fn issue(&mut self, kind: Kind, surface: &[u8]) -> Result<String, TokenError> {
+        self.insert(kind, surface, false)
+    }
+
+    pub(crate) fn issue_json_number(
+        &mut self,
+        kind: Kind,
+        surface: &[u8],
+    ) -> Result<String, TokenError> {
+        self.insert(kind, surface, true)
+    }
+
+    fn insert(
+        &mut self,
+        kind: Kind,
+        surface: &[u8],
+        json_number: bool,
+    ) -> Result<String, TokenError> {
         let token = random_token(kind)?;
-        self.entries.insert(token.clone(), surface.to_vec());
+        self.entries.insert(
+            token.clone(),
+            Entry {
+                surface: surface.to_vec(),
+                json_number,
+            },
+        );
         Ok(token)
     }
 
@@ -111,9 +141,10 @@ impl Vault {
         surface: &[u8],
     ) -> Result<String, TokenError> {
         let token = format_token(kind, payload)?;
-        self.entries
-            .entry(token.clone())
-            .or_insert_with(|| surface.to_vec());
+        self.entries.entry(token.clone()).or_insert_with(|| Entry {
+            surface: surface.to_vec(),
+            json_number: false,
+        });
         Ok(token)
     }
 
@@ -122,11 +153,25 @@ impl Vault {
         if parsed.end != token.len() || !parsed.check_ok {
             return None;
         }
-        self.entries.get(&parsed.canonical).map(Vec::as_slice)
+        self.entries
+            .get(&parsed.canonical)
+            .map(|entry| entry.surface.as_slice())
+    }
+
+    pub(crate) fn is_json_number_token(&self, token: &str) -> bool {
+        let Some(parsed) = parse_token_at(token, 0) else {
+            return false;
+        };
+        if parsed.end != token.len() || !parsed.check_ok {
+            return false;
+        }
+        self.entries
+            .get(&parsed.canonical)
+            .is_some_and(|entry| entry.json_number)
     }
 
     pub fn holds_surface(&self, bytes: &[u8]) -> bool {
-        self.entries.values().any(|stored| stored == bytes)
+        self.entries.values().any(|entry| entry.surface == bytes)
     }
 
     pub fn restore_display(&self, text: &str) -> String {
@@ -145,10 +190,13 @@ impl Vault {
     pub fn save(&self, path: &Path) -> Result<(), VaultError> {
         let mut body = String::from(HEADER);
         body.push('\n');
-        for (token, surface) in &self.entries {
+        for (token, entry) in &self.entries {
             body.push_str(token);
             body.push(' ');
-            body.push_str(&hex_encode(surface));
+            body.push_str(&hex_encode(&entry.surface));
+            if entry.json_number {
+                body.push_str(" n");
+            }
             body.push('\n');
         }
         write_private(path, body.as_bytes())?;
@@ -167,13 +215,29 @@ impl Vault {
             if line.is_empty() {
                 continue;
             }
-            let (token, hex) = line.split_once(' ').ok_or(VaultError::Corrupt)?;
+            let mut parts = line.split(' ');
+            let token = parts.next().ok_or(VaultError::Corrupt)?;
+            let hex = parts.next().ok_or(VaultError::Corrupt)?;
+            let json_number = match parts.next() {
+                None => false,
+                Some("n") => true,
+                Some(_) => return Err(VaultError::Corrupt),
+            };
+            if parts.next().is_some() {
+                return Err(VaultError::Corrupt);
+            }
             let parsed = parse_token_at(token, 0).ok_or(VaultError::Corrupt)?;
             if parsed.end != token.len() || !parsed.check_ok || parsed.canonical != token {
                 return Err(VaultError::Corrupt);
             }
-            let bytes = hex_decode(hex).ok_or(VaultError::Corrupt)?;
-            entries.insert(token.to_string(), bytes);
+            let surface = hex_decode(hex).ok_or(VaultError::Corrupt)?;
+            entries.insert(
+                token.to_string(),
+                Entry {
+                    surface,
+                    json_number,
+                },
+            );
         }
         Ok(Self { entries })
     }
@@ -198,9 +262,9 @@ fn walk(text: &str, vault: &Vault, strict: bool) -> Result<String, RestoreError>
         }
         if let Some(parsed) = parse_token_at(text, at) {
             if parsed.check_ok {
-                if let Some(bytes) = vault.entries.get(&parsed.canonical) {
-                    let surface =
-                        std::str::from_utf8(bytes).map_err(|_| RestoreError::NotUtf8 { at })?;
+                if let Some(entry) = vault.entries.get(&parsed.canonical) {
+                    let surface = std::str::from_utf8(&entry.surface)
+                        .map_err(|_| RestoreError::NotUtf8 { at })?;
                     out.push_str(surface);
                     index = parsed.end;
                     continue;
