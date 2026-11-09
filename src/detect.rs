@@ -150,7 +150,7 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // (`+ 14165550123`).
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", &hyphen_class(r"\s./()")),
+            &r"\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", &international_sep_class()),
         )
         .expect("international phone pattern")
     });
@@ -162,12 +162,8 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         }
     }
     for hit in INTERNATIONAL.find_iter(text) {
-        let digits = digit_count(hit.as_str());
-        if (8..=15).contains(&digits)
-            && digit_bounded(text, hit.start(), hit.end())
-            && !glued_paren_tail(hit.as_str())
-        {
-            out.push(span(TIER_PHONE, Kind::Phone, hit.start(), hit.end()));
+        if let Some((start, end)) = international_span(text, hit.start(), hit.end()) {
+            out.push(span(TIER_PHONE, Kind::Phone, start, end));
         }
     }
     for hit in PLUS_DIGITS.find_iter(text) {
@@ -385,6 +381,48 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
 /// more than one, as in `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
     Regex::new(&body.replace("{sep}", &hyphen_class(r"\s./"))).expect("phone pattern")
+}
+
+fn international_sep_class() -> String {
+    hyphen_class(r"\s./()")
+}
+
+/// Longest prefix of `text[start..end]` that is one international number.
+///
+/// The regex match may include a later digit group. Fifteen digits is
+/// the longest number kept here. A shorter prefix is used only when the
+/// full match is past that, so a tail that still fits stays inside it.
+fn international_span(text: &str, start: usize, mut end: usize) -> Option<(usize, usize)> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            &r"^\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}$".replace("{sep}", &international_sep_class()),
+        )
+        .expect("international phone span")
+    });
+    static TRAIL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(&r"{sep}+\d+$".replace("{sep}", &international_sep_class()))
+            .expect("phone group tail")
+    });
+    loop {
+        let slice = text.get(start..end)?;
+        let digits = digit_count(slice);
+        if (8..=15).contains(&digits)
+            && digit_bounded(text, start, end)
+            && !glued_paren_tail(slice)
+            && RE.is_match(slice)
+        {
+            return Some((start, end));
+        }
+        if digits <= 15 {
+            return None;
+        }
+        let trail = TRAIL.find(slice)?;
+        let next = start + trail.start();
+        if next >= end {
+            return None;
+        }
+        end = next;
+    }
 }
 
 fn span(tier: u8, kind: Kind, start: usize, end: usize) -> RawHit {
