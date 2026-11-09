@@ -1479,6 +1479,9 @@ fn dotted_sin_cue_still_shields_the_number() {
         format!("N.A.S. {sin}"),
         format!("N. A. S. {sin}"),
         format!("see S.I.N. {sin} today"),
+        format!("S I N {sin}"),
+        format!("N A S {sin}"),
+        format!("s i n {sin}"),
     ] {
         let (vault, out, audit) = shield(&cued);
         assert_eq!(audit.sin, 1, "{cued} -> {out}");
