@@ -5390,3 +5390,59 @@ fn telegram_bot_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn numero_sign_in_the_sin_cue_still_shields_the_number() {
+    // `n°` and `nº` are that same cue. Leaving the sign out sends the number.
+    let sin = "130692544";
+    let degree = '\u{00B0}';
+    let ordinal = '\u{00BA}';
+    let cue = format!("n{degree} d'assurance sociale");
+
+    let text = format!("{cue} {sin}");
+    let (vault, out, audit) = shield(&text);
+    assert_eq!(audit.sin, 1, "{text} -> {out}");
+    assert!(out.starts_with(&format!("{cue} h1_sin_")), "{out}");
+    assert!(out.contains(degree), "{out}");
+    assert!(hidden(&out, sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), text);
+
+    let grouped = format!(
+        "n{ordinal} d'assurance sociale {} {} {}",
+        &sin[..3],
+        &sin[3..6],
+        &sin[6..]
+    );
+    let (vault, out, audit) = shield(&grouped);
+    assert_eq!(audit.sin, 1, "{grouped} -> {out}");
+    assert!(
+        out.starts_with(&format!("n{ordinal} d'assurance sociale h1_sin_")),
+        "{out}"
+    );
+    assert!(out.contains(ordinal), "{out}");
+    assert!(hidden(&out, sin), "{out}");
+    assert!(hidden(&out, &sin[..3]), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), grouped);
+
+    let sentence = format!("the {cue} is {sin} today");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.sin, 1, "{sentence} -> {out}");
+    assert!(out.starts_with(&format!("the {cue} is h1_sin_")), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(out.contains(degree), "{out}");
+    assert!(hidden(&out, sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    for bare in [
+        sin.to_string(),
+        format!("{cue} 130692545"),
+        format!("{cue}{}{sin}", " ".repeat(41)),
+        format!("note {sin}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
