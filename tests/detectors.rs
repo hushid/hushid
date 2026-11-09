@@ -739,6 +739,83 @@ fn nineteen_digit_card_grouped_in_fours_round_trips() {
 }
 
 #[test]
+fn nineteen_digit_card_grouped_as_six_and_thirteen_round_trips() {
+    // `4111 1111 1111 1111 110` is already a card. The same digits
+    // grouped as six and thirteen stayed in the clear, including
+    // beside a card cue. That cue only sees a contiguous digit run.
+    let pan = "4111111111111111110";
+    let other = "4111111111111100006";
+    let en = '\u{2013}';
+    for grouped in [
+        format!("{} {}", &pan[..6], &pan[6..]),
+        format!("{}-{}", &pan[..6], &pan[6..]),
+        format!("{}.{}", &pan[..6], &pan[6..]),
+        format!("{} - {}", &pan[..6], &pan[6..]),
+        format!("{}-{}", &other[..6], &other[6..]),
+        format!("{}{en}{}", &pan[..6], &pan[6..]),
+    ] {
+        let (vault, out, audit) = shield(&grouped);
+        assert_eq!(audit.card, 1, "{grouped} -> {out}");
+        assert_eq!(audit.phone, 0, "{grouped} -> {out}");
+        assert_eq!(audit.sin, 0, "{grouped} -> {out}");
+        assert!(out.starts_with("h1_card_"), "{grouped} -> {out}");
+        assert!(
+            !out.contains(' ') && !out.contains('-') && !out.contains('.') && !out.contains(en),
+            "{grouped} -> {out}"
+        );
+        assert!(!out.contains(&pan[..6]), "{grouped} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), grouped);
+    }
+
+    let cued = format!("card {} {}", &pan[..6], &pan[6..]);
+    let (vault, out, audit) = shield(&cued);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.starts_with("card h1_card_"), "{out}");
+    assert!(!out.contains(&pan[..6]), "{out}");
+    assert!(!out.contains(&pan[6..]), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), cued);
+
+    let sentence = format!("pay {cued} today.");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.starts_with("pay card h1_card_"), "{out}");
+    assert!(out.ends_with(" today."), "{out}");
+    assert!(!out.contains(&pan[..6]), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    // A code after the number is not part of the card.
+    let with_code = format!("{} {} 123", &pan[..6], &pan[6..]);
+    let (vault, out, audit) = shield(&with_code);
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.ends_with(" 123"), "{out}");
+    assert!(!out.contains(&pan[..6]), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), with_code);
+
+    let bad = format!("{} {}", &pan[..6], "1111111111111");
+    let (_vault, out, audit) = shield(&bad);
+    assert_eq!(out, bad, "{out}");
+    assert_eq!(audit.card, 0, "{out}");
+
+    let glued = format!("{} {}1", &pan[..6], &pan[6..]);
+    let (_vault, out, audit) = shield(&glued);
+    assert_eq!(out, glued, "{out}");
+    assert_eq!(audit.card, 0, "{out}");
+
+    let leading = format!("9{} {}", &pan[..6], &pan[6..]);
+    let (_vault, out, audit) = shield(&leading);
+    assert_eq!(out, leading, "{out}");
+    assert_eq!(audit.card, 0, "{out}");
+
+    let raw = format!(r#"{{"pan":"{} {}"}}"#, &pan[..6], &pan[6..]);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.card, 1, "{raw} -> {out}");
+    assert!(!out.contains(&pan[..6]), "{raw} -> {out}");
+    assert!(!out.contains(&pan[6..]), "{raw} -> {out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+}
+
+#[test]
 fn sin_needs_a_cue_within_forty_characters() {
     let sin = valid_sin();
     let shaped = format!("SIN {} {} {}", &sin[0..3], &sin[3..6], &sin[6..9]);
