@@ -4712,3 +4712,77 @@ fn fullwidth_digits_still_shield_the_address() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn vault_token_is_masked() {
+    // Vault documents `hvs.` for a service token, `hvb.` for a batch
+    // token, and `hvr.` for a recovery token. After that prefix, 24 or
+    // more characters are appended. A longer token may contain an
+    // underscore or a hyphen. A short payload stays as written. The
+    // earlier `s.`, `b.`, and `r.` prefixes stay too.
+    let body = "a".repeat(24);
+    for prefix in ["hvs.", "hvb.", "hvr."] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(
+            hidden(&out, prefix.trim_end_matches('.')),
+            "{token} -> {out}"
+        );
+        assert!(hidden(&out, &body), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let token = format!("hvs.{body}");
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "hvs"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let mixed = format!("hvs.aaaaaaa_{}", "b".repeat(16));
+    let (vault, out, audit) = shield(&mixed);
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "h1_secret", "{mixed} -> {out}");
+    assert!(hidden(&out, "aaaaaaa"), "{out}");
+    assert!(hidden(&out, &"b".repeat(16)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+
+    let hyphenated = format!("hvb.{}-{}", "c".repeat(12), "d".repeat(12));
+    let (vault, out, audit) = shield(&hyphenated);
+    assert_eq!(audit.secret, 1, "{hyphenated} -> {out}");
+    assert_eq!(out, "h1_secret", "{hyphenated} -> {out}");
+    assert!(hidden(&out, &"c".repeat(12)), "{out}");
+    assert!(hidden(&out, &"d".repeat(12)), "{out}");
+    assert!(!vault.holds_surface(hyphenated.as_bytes()));
+
+    let token = format!("hvs.{body}");
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("hvs.{}", "a".repeat(23)),
+        format!("hvs.{}", "a".repeat(9)),
+        format!("hvs.{}-{}", "a".repeat(10), "b".repeat(10)),
+        format!("wordhvs.{body}"),
+        format!("hvx.{body}"),
+        format!("s.{body}"),
+        format!("b.{body}"),
+        format!("r.{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
