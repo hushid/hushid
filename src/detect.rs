@@ -13,6 +13,21 @@ const TIER_GLOSSARY: u8 = 5;
 
 const CUE_WINDOW: usize = 40;
 
+/// Dash punctuation, U+2212 MINUS SIGN, and U+00AD SOFT HYPHEN.
+///
+/// Those two marks look like a hyphen and are not `\p{Pd}`. Leaving
+/// them out sends the head of an email, or the whole grouped number.
+const HYPHEN: &str = r"\p{Pd}\u{2212}\u{00AD}";
+
+fn hyphen_class(rest: &str) -> String {
+    let mut class = String::with_capacity(rest.len() + HYPHEN.len() + 2);
+    class.push('[');
+    class.push_str(rest);
+    class.push_str(HYPHEN);
+    class.push(']');
+    class
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Hit {
     Secret {
@@ -87,13 +102,15 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // them out starts the match after the mark, so that head is sent.
         // A letter outside ASCII belongs too (`josé@`, `société.fr`),
         // including a decomposed accent. Leaving it out sends the address.
-        // Dash punctuation is that hyphen when a word processor inserts
-        // it in the local part or a domain label. Leaving it out sends
-        // the head, or the whole address when the mark sits in the domain.
-        // The local part does not start on that dash, so a dash between
-        // two addresses is not swallowed by the second one.
+        // A hyphen mark in the local part or a domain label is part of
+        // the address. The mark is dash punctuation, a minus sign, or a
+        // soft hyphen. Leaving it out sends the head, or the whole
+        // address when the mark sits in the domain. The local part does
+        // not start on that mark, so a mark between two addresses is not
+        // swallowed by the second one.
         Regex::new(
-            r"\b[\p{L}\p{M}0-9._%+'\u{2019}][\p{L}\p{M}0-9._%+\p{Pd}'\u{2019}]*@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.\p{Pd}]*\.(?:\p{L}\p{M}*){2,}\b",
+            &r"\b[\p{L}\p{M}0-9._%+'\u{2019}][\p{L}\p{M}0-9._%+{hyphen}'\u{2019}]*@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.{hyphen}]*\.(?:\p{L}\p{M}*){2,}\b"
+                .replace("{hyphen}", HYPHEN),
         )
         .expect("email pattern")
     });
@@ -132,8 +149,10 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // 3-3-4. The same space applies to a plus and a digit run
     // (`+ 14165550123`).
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(&r"\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", r"[\s./()\p{Pd}]"))
-            .expect("international phone pattern")
+        Regex::new(
+            &r"\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", &hyphen_class(r"\s./()")),
+        )
+        .expect("international phone pattern")
     });
     static PLUS_DIGITS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\+\s*\d{8,15}").expect("plus digits pattern"));
@@ -163,10 +182,10 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         // 4-4-4-4-3, 6-13, 4-6-5, 4-6-4, 4-4-4-4, 4-4-4-3, and 4-4-5.
         // Each shape is its own search. One alternation would take a
         // 16-digit card plus a three-digit tail, fail Luhn, and skip
-        // the card. The separator is a run of whitespace, dots, or
-        // dash punctuation (`4111 - 1111 - 1111 - 1111`, including a
-        // figure dash or an en dash). Four, four, five is the 13-digit
-        // grouping.
+        // the card. The separator is a run of whitespace, dots, or hyphen
+        // marks (`4111 - 1111 - 1111 - 1111`, a figure dash, an en dash,
+        // a minus sign, or a soft hyphen). Four, four, five is the
+        // 13-digit grouping.
         [
             r"\d{4}(?:{sep}+\d{4}){3}{sep}+\d{3}",
             r"\d{6}{sep}+\d{13}",
@@ -178,7 +197,8 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         ]
         .into_iter()
         .map(|pattern| {
-            Regex::new(&pattern.replace("{sep}", r"[\s.\p{Pd}]")).expect("grouped card pattern")
+            Regex::new(&pattern.replace("{sep}", &hyphen_class(r"\s.")))
+                .expect("grouped card pattern")
         })
         .collect()
     });
@@ -229,10 +249,12 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
 }
 
 fn push_sins(text: &str, out: &mut Vec<RawHit>) {
-    // A run of whitespace or dash punctuation, so `130 - 692 - 544` is
-    // still 3-3-3 when the hyphen is a figure dash or an en dash.
+    // A run of whitespace or a hyphen mark, so `130 - 692 - 544` is
+    // still 3-3-3 when the hyphen is a figure dash, an en dash, a
+    // minus sign, or a soft hyphen.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\d{3}[\s\p{Pd}]+\d{3}[\s\p{Pd}]+\d{3}|\d{9}").expect("sin pattern")
+        let sep = hyphen_class(r"\s");
+        Regex::new(&format!(r"\d{{3}}{sep}+\d{{3}}{sep}+\d{{3}}|\d{{9}}")).expect("sin pattern")
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         [
@@ -357,12 +379,12 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
 
 /// `{sep}` stands for one phone-group separator.
 ///
-/// The class is whitespace, a dot, a slash, or dash punctuation, so a
-/// figure dash or an en dash counts the same as an ASCII hyphen.
-/// Patterns repeat it when the gap may hold more than one, as in
-/// `416 - 555 - 0123`.
+/// The class is whitespace, a dot, a slash, or a hyphen mark, so a
+/// figure dash, an en dash, a minus sign, or a soft hyphen counts the
+/// same as an ASCII hyphen. Patterns repeat it when the gap may hold
+/// more than one, as in `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
-    Regex::new(&body.replace("{sep}", r"[\s./\p{Pd}]")).expect("phone pattern")
+    Regex::new(&body.replace("{sep}", &hyphen_class(r"\s./"))).expect("phone pattern")
 }
 
 fn span(tier: u8, kind: Kind, start: usize, end: usize) -> RawHit {
