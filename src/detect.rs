@@ -115,11 +115,13 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     static NANP_TRUNK: LazyLock<Regex> =
         LazyLock::new(|| phone_pattern(r"1\(\d{3}\){sep}*\d{3}{sep}+\d{4}"));
     // Parentheses wrap one group (`+44 (20) 7946 0958`). A trunk zero
-    // may sit against the next digits (`+33 (0)1`). The NANP separator
-    // stays without parentheses, so a bare `(416)5550123` is still not
-    // a phone.
+    // may sit against the next digits (`+33 (0)1`). A later group may
+    // hold more than four digits (`+44 7700 900123`). Five or more
+    // digits glued to `)` are still a bare tail (`+44 (20)79460958`).
+    // The NANP separator stays without parentheses, so a bare
+    // `(416)5550123` is still not a phone.
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(&r"\+\d{1,3}(?:{sep}+\d{1,4}){2,6}".replace("{sep}", r"[\s./()\p{Pd}]"))
+        Regex::new(&r"\+\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", r"[\s./()\p{Pd}]"))
             .expect("international phone pattern")
     });
     static PLUS_DIGITS: LazyLock<Regex> =
@@ -131,7 +133,10 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     }
     for hit in INTERNATIONAL.find_iter(text) {
         let digits = digit_count(hit.as_str());
-        if (8..=15).contains(&digits) && digit_bounded(text, hit.start(), hit.end()) {
+        if (8..=15).contains(&digits)
+            && digit_bounded(text, hit.start(), hit.end())
+            && !glued_paren_tail(hit.as_str())
+        {
             out.push(span(TIER_PHONE, Kind::Phone, hit.start(), hit.end()));
         }
     }
@@ -403,6 +408,31 @@ fn digits_of(text: &str) -> Vec<u8> {
 
 fn digit_count(text: &str) -> usize {
     text.chars().filter(|ch| ch.is_ascii_digit()).count()
+}
+
+/// Five or more digits glued to `)` are a bare tail, not another group.
+///
+/// `+44 (20)79460958` is that tail. `+33 (0)1` still has a one-digit
+/// group against the parenthesis, and `+44 (0)7700 900123` keeps the
+/// space before the long group.
+fn glued_paren_tail(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b')' {
+            continue;
+        }
+        let mut digits = 0usize;
+        for next in &bytes[index + 1..] {
+            if !next.is_ascii_digit() {
+                break;
+            }
+            digits += 1;
+            if digits >= 5 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub(crate) fn luhn_ok(digits: &[u8]) -> bool {
