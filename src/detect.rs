@@ -352,6 +352,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // Stripe webhook signing secret. Leaving the prefix out sends it.
             r"\bwhsec_[A-Za-z0-9]{20,}\b",
             r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{10,}\b",
+            // An ephemeral key is `ek_test_` or `ek_live_`. The published
+            // secret is 71 letters, an underscore, and 10 more. The same
+            // tail follows a body of 76, 86, or 92 letters. A shorter key
+            // is letters only, at least 10, like `sk_live_`. The rule
+            // above stops at the underscore, so that secret stays in the
+            // clear. A short payload stays as written. A body of another
+            // length, once it contains an underscore, stays too.
+            r"\bek_(?:live|test)_(?:(?:[A-Za-z0-9]{71}|[A-Za-z0-9]{76}|[A-Za-z0-9]{86}|[A-Za-z0-9]{92})_[A-Za-z0-9]{10}|[A-Za-z0-9]{10,})\b",
             r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}\b",
             r"\bAIza[0-9A-Za-z_\-]{35}\b",
             r"\bnpm_[A-Za-z0-9]{36}\b",
