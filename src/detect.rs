@@ -139,7 +139,7 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // still the 3-3-4 number. Leaving the space out sends the digits
         // when there is no leading plus.
         phone_pattern(
-            r"(?:\+\s*1{sep}*|1{sep}+)?(?:\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:{plus}\s*1{sep}*|1{sep}+)?(?:\(\s*\d{3}\s*\){sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`, including spaces inside the parentheses. A bare
@@ -155,15 +155,18 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // `+` and the country code (`+ 44 20 7946 0958`). Leaving it out
     // sends the number, or leaves the country code when the tail is a
     // 3-3-4. The same space applies to a plus and a digit run
-    // (`+ 14165550123`).
+    // (`+ 14165550123`). A fullwidth plus is that same sign.
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}".replace("{sep}", &international_sep_class()),
+            &r"{plus}\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}"
+                .replace("{sep}", &international_sep_class())
+                .replace("{plus}", PLUS),
         )
         .expect("international phone pattern")
     });
-    static PLUS_DIGITS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\+\s*\d{8,15}").expect("plus digits pattern"));
+    static PLUS_DIGITS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(&r"{plus}\s*\d{8,15}".replace("{plus}", PLUS)).expect("plus digits pattern")
+    });
     for hit in NANP.find_iter(text).chain(NANP_TRUNK.find_iter(text)) {
         if digit_bounded(text, hit.start(), hit.end()) {
             out.push(span(TIER_PHONE, Kind::Phone, hit.start(), hit.end()));
@@ -454,8 +457,17 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
 /// same as an ASCII hyphen. Patterns repeat it when the gap may hold
 /// more than one, as in `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
-    Regex::new(&body.replace("{sep}", &hyphen_class(r"\s./"))).expect("phone pattern")
+    Regex::new(
+        &body
+            .replace("{sep}", &hyphen_class(r"\s./"))
+            .replace("{plus}", PLUS),
+    )
+    .expect("phone pattern")
 }
+
+/// ASCII `+` and the fullwidth plus. A wide-character keyboard writes
+/// the fullwidth sign. Leaving it out sends the number.
+const PLUS: &str = r"(?:\+|\u{FF0B})";
 
 fn international_sep_class() -> String {
     hyphen_class(r"\s./()")
@@ -469,7 +481,9 @@ fn international_sep_class() -> String {
 fn international_span(text: &str, start: usize, mut end: usize) -> Option<(usize, usize)> {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
-            &r"^\+\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}$".replace("{sep}", &international_sep_class()),
+            &r"^{plus}\s*\d{1,3}(?:{sep}+\d{1,14}){2,6}$"
+                .replace("{sep}", &international_sep_class())
+                .replace("{plus}", PLUS),
         )
         .expect("international phone span")
     });

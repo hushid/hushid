@@ -2994,6 +2994,48 @@ fn session_token_assignment_is_masked() {
 }
 
 #[test]
+fn fullwidth_plus_still_shields_the_number() {
+    let plus = "\u{FF0B}";
+    let intl = format!("call {plus}44 20 7946 0958 today");
+    let (vault, out, audit) = shield(&intl);
+    assert_eq!(audit.phone, 1, "{intl} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "7946"), "{out}");
+    assert!(hidden(&out, "0958"), "{out}");
+    assert!(!out.contains(plus), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), intl);
+
+    let spaced = format!("call {plus} 44 20 7946 0958 today");
+    let (vault, out, audit) = shield(&spaced);
+    assert_eq!(audit.phone, 1, "{spaced} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(hidden(&out, "44"), "{out}");
+    assert!(!out.contains(plus), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), spaced);
+
+    let trunk = format!("call {plus}1(416)555-0123 today");
+    let (vault, out, audit) = shield(&trunk);
+    assert_eq!(audit.phone, 1, "{trunk} -> {out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "0123"), "{out}");
+    assert!(!out.contains(plus), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), trunk);
+
+    let run = format!("call {plus}14165550123 today");
+    let (vault, out, audit) = shield(&run);
+    assert_eq!(audit.phone, 1, "{run} -> {out}");
+    assert!(hidden(&out, "14165550123"), "{out}");
+    assert!(!out.contains(plus), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), run);
+
+    let bare = format!("cost {plus} shipping");
+    let (_vault, out, audit) = shield(&bare);
+    assert_eq!(audit.phone, 0, "{bare} -> {out}");
+    assert_eq!(out, bare);
+}
+
+#[test]
 fn glossary_uses_word_boundaries_and_loses_to_email() {
     let glossary = Glossary::from_terms(["Marie", "Jean Pierre"]);
     let mut vault = Vault::new();
