@@ -93,17 +93,23 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
 
 fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     static NANP: LazyLock<Regex> = LazyLock::new(|| {
+        // `+1` may sit against a shaped number with no separator (`+1(416)`
+        // or `+1416-555-0123`). A trunk `1` still needs a separator here.
         Regex::new(
-            r"(?:\+1[\s.\-]|1[\s.\-])?(?:\(\d{3}\)[\s.\-]?\d{3}[\s.\-]\d{4}|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})",
+            r"(?:\+1[\s.\-]?|1[\s.\-])?(?:\(\d{3}\)[\s.\-]?\d{3}[\s.\-]\d{4}|\d{3}[\s.\-]\d{3}[\s.\-]\d{4})",
         )
         .expect("nanp pattern")
+    });
+    // `1(416)555-0123`. A bare `1` before more digits is not this form.
+    static NANP_TRUNK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"1\(\d{3}\)[\s.\-]?\d{3}[\s.\-]\d{4}").expect("nanp trunk pattern")
     });
     static INTERNATIONAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"\+\d{1,3}(?:[\s.\-]\d{1,4}){2,6}").expect("international pattern")
     });
     static PLUS_DIGITS: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\+\d{8,15}").expect("plus digits pattern"));
-    for hit in NANP.find_iter(text) {
+    for hit in NANP.find_iter(text).chain(NANP_TRUNK.find_iter(text)) {
         if digit_bounded(text, hit.start(), hit.end()) {
             out.push(span(TIER_PHONE, Kind::Phone, hit.start(), hit.end()));
         }
