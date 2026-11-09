@@ -3389,6 +3389,54 @@ fn stripe_organization_key_is_masked() {
 }
 
 #[test]
+fn digitalocean_personal_access_token_is_masked() {
+    // `sk_live_` plus 10 letters is already a secret. A personal access
+    // token from the DigitalOcean control panel is `dop_v1_`. The rules
+    // above do not see that prefix, so the token stays in the clear. The
+    // published bodies from that issuer are 64 letters. A short payload
+    // stays as written.
+    let body = "a".repeat(64);
+    let token = format!("dop_v1_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "dop_v1"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("dop_v1_{}", "A".repeat(56) + "y319b02b");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "dop_v1"), "{out}");
+    assert!(hidden(&out, "y319b02b"), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("dop_v1_{}", "a".repeat(63)),
+        format!("dop_v1_{}", "a".repeat(9)),
+        format!("worddop_v1_{body}"),
+        format!("dop_v2_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn secret_access_key_assignment_is_masked() {
     let secret = "a".repeat(16);
     for text in [
