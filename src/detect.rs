@@ -337,7 +337,9 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // Leaving one of these out sends the token. Longer prefixes
             // come first so `glrtr-` is not cut down to `glrt-`.
             r"\b(?:glagent|glffct|glsoat|glrtr|glcbt|glptt|glimt|gloas|gldt|glft|glrt|glwt)-[A-Za-z0-9_\-]{20,}\b",
-            r"\bxox[baprs]-[0-9A-Za-z-]{10,}",
+            // Session tokens are `xoxc-` and `xoxd-`. Leaving `c` or `d`
+            // out sends the token. A short payload stays as written.
+            r"\bxox[abcdprs]-[0-9A-Za-z-]{10,}",
             // App-level tokens are `xapp-`, not `xoxb-`. Rotating tokens are
             // `xoxe.xapp-` or `xoxe.xoxb-`, and the refresh token is `xoxe-`.
             // Leaving the prefix out sends the token.
