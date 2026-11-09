@@ -104,6 +104,12 @@ fn resolve(mut raw: Vec<RawHit>) -> Vec<Hit> {
     chosen.into_iter().map(|hit| hit.hit).collect()
 }
 
+/// ASCII `@` and the fullwidth commercial at, U+FF20.
+///
+/// A wide-character keyboard writes that sign. Leaving it out sends
+/// the address. The local part still does not start on the sign.
+const AT: &str = r"[@\u{FF20}]";
+
 fn push_emails(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         // `'` , U+2019, and U+2018 belong in the local part (`o'brien@`).
@@ -117,9 +123,12 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // address when the mark sits in the domain. The local part does
         // not start on that mark, so a mark between two addresses is not
         // swallowed by the second one.
+        // The at-sign may be ASCII `@` or the fullwidth sign. A wide
+        // keyboard writes U+FF20. Leaving it out sends the address.
         Regex::new(
-            &r"\b[\p{L}\p{M}0-9._%+'\u{2018}\u{2019}][\p{L}\p{M}0-9._%+{hyphen}'\u{2018}\u{2019}]*@[\p{L}\p{M}0-9][\p{L}\p{M}0-9.{hyphen}]*\.(?:\p{L}\p{M}*){2,}\b"
-                .replace("{hyphen}", HYPHEN),
+            &r"\b[\p{L}\p{M}0-9._%+'\u{2018}\u{2019}][\p{L}\p{M}0-9._%+{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}0-9][\p{L}\p{M}0-9.{hyphen}]*\.(?:\p{L}\p{M}*){2,}\b"
+                .replace("{hyphen}", HYPHEN)
+                .replace("{at}", AT),
         )
         .expect("email pattern")
     });
