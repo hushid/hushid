@@ -9813,3 +9813,40 @@ fn fullwidth_birth_marks_follow_the_ascii_ones() {
         assert_eq!(out, crossed, "{crossed} -> {out}");
     }
 }
+
+#[test]
+fn wide_postal_street_and_health_digits_follow_ascii() {
+    let postal = "postal code H\u{FF12}X \u{FF11}Y4";
+    let (vault, out, audit) = shield(postal);
+    assert_eq!(audit.postal, 1, "{out}");
+    assert!(hidden(&out, "\u{FF12}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), postal);
+
+    let bare = "H\u{FF12}X \u{FF11}Y4";
+    let (_vault, out, audit) = shield(bare);
+    assert_eq!(audit.postal, 0, "{out}");
+    assert_eq!(out, bare, "{out}");
+
+    let range = "120\u{FF0D}124 rue Saint-Denis";
+    let (vault, out, audit) = shield(range);
+    assert_eq!(audit.address, 1, "{out}");
+    assert!(hidden(&out, "Saint-Denis"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), range);
+
+    let civic = "\u{FF11}\u{FF12}\u{FF13} rue Saint-Denis";
+    let (vault, out, audit) = shield(civic);
+    assert_eq!(audit.address, 1, "{out}");
+    assert!(hidden(&out, "\u{FF11}\u{FF12}\u{FF13}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), civic);
+
+    let health = "BOUF \u{FF19}\u{FF14}\u{FF15}\u{FF11} \u{FF11}\u{FF14}\u{FF11}\u{FF19}";
+    let (vault, out, audit) = shield(health);
+    assert_eq!(audit.ramq, 1, "{out}");
+    assert!(hidden(&out, "\u{FF19}\u{FF14}\u{FF15}\u{FF11}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), health);
+
+    let extra = "BOUF 9451 1419\u{FF0D}1111";
+    let (_vault, out, audit) = shield(extra);
+    assert_eq!(audit.ramq, 0, "{out}");
+    assert_eq!(out, extra, "{out}");
+}
