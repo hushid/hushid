@@ -8629,3 +8629,53 @@ fn authress_service_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn facebook_page_token_is_masked() {
+    // A Facebook page token is `EAAC` or `EAAM` plus at least 100
+    // letters or digits. The value is not stored. A shorter body
+    // stays as written. A lowercase prefix stays as written. The
+    // Square `EAAA` rule does not see this prefix.
+    let body = format!("{}0123456789", "a".repeat(90));
+    let token = format!("EAAC{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "0123456789"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("EAAM{}0123456789", "Ab".repeat(45));
+    let (vault, out, audit) = shield(&mixed);
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "h1_secret", "{mixed} -> {out}");
+    assert!(hidden(&out, "0123456789"), "{mixed} -> {out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()), "{mixed}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "0123456789"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#, "{out}");
+    assert!(hidden(&out, "0123456789"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("EAAC{}0123456789", "a".repeat(89)),
+        format!("eaac{body}"),
+        format!("EAAc{body}"),
+        format!("EAAB{body}"),
+        format!("xEAAC{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

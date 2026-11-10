@@ -706,6 +706,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // body stays as written. A final hyphen stays inside
             // the mark.
             r"\bEAAA(?:[A-Za-z0-9_-]{21,59}[A-Za-z0-9]\b|[A-Za-z0-9_-]{21,59}-)",
+            // A Facebook page token is `EAAC` or `EAAM` plus at least
+            // 100 letters or digits. gitleaks facebook-page-access-token.
+            // The prefix stays uppercase. The body may be any case. The
+            // Square `EAAA` rule does not see this prefix. A shorter
+            // body stays as written. The value is not stored.
+            r"\bEAA[CM](?i:[a-z0-9]{100,})\b",
             // A Clojars token is `CLOJARS_` plus 60 letters or digits.
             // The prefix may be any case. The value is not stored. A
             // shorter body and a longer body stay as written.
