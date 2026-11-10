@@ -678,6 +678,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // base64 characters, with optional `=` padding. The value
             // is not stored. A shorter body stays as written.
             r"\bABSK[A-Za-z0-9+/]{109,269}={0,2}",
+            // A 1Password secret key starts with `A3-` and then the
+            // published groups of uppercase letters and digits. The
+            // value is not stored. A shorter group stays as written.
+            r"\bA3-[A-Z0-9]{6}-(?:(?:[A-Z0-9]{11})|(?:[A-Z0-9]{6}-[A-Z0-9]{5}))-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
