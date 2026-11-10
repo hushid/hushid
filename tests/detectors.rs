@@ -7970,3 +7970,41 @@ fn openshift_user_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn other_aws_access_key_prefixes_are_masked() {
+    // ABIA, ACCA, and A3T are access key ids the AKIA/ASIA rule does
+    // not see. The value is not stored. A shorter id stays as written.
+    for key in [
+        "ABIAIOSFODNN7EXAMPLE",
+        "ACCAIOSFODNN7EXAMPLE",
+        "A3TAIOSFODNN7EXAMPLE",
+    ] {
+        let (vault, out, audit) = shield(key);
+        assert_eq!(audit.secret, 1, "{key} -> {out}");
+        assert_eq!(out, "h1_secret", "{key} -> {out}");
+        assert!(hidden(&out, key), "{key} -> {out}");
+        assert!(!vault.holds_surface(key.as_bytes()), "{key}");
+        assert!(vault.restore_write(&out).is_err(), "{key}");
+    }
+
+    let key = "ABIAIOSFODNN7EXAMPLE";
+    let sentence = format!("export AWS_ACCESS_KEY_ID={key} please");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "export AWS_ACCESS_KEY_ID=h1_secret please");
+    assert!(hidden(&out, key), "{out}");
+    assert!(!vault.holds_surface(key.as_bytes()));
+
+    for bare in [
+        "ABIAIOSFODNN7EXAMPL",
+        "abiaIOSFODNN7EXAMPLE",
+        "ABIAIOSFODNN7EXAMPLEX",
+        "A3TAIOSFODNN0EXAMPLE",
+        "A3TAIOSFODNN7EXAMPL",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
