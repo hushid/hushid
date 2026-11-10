@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5c463c"/>
+      <stop offset="0.42" stop-color="#3a2c26"/>
+      <stop offset="1" stop-color="#1c1613"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="wall">
+      <rect x="228" y="70" width="284" height="372"/>
+    </clipPath>
+  </defs>
+  <rect width="512" height="512" fill="url(#card)"/>
+  <rect width="512" height="160" fill="url(#sheen)"/>
+  <g fill="#f8f1e8" transform="translate(88 70) scale(1.6) translate(-40.6 -139.8)">
+    <rect x="40.6" y="139.8" width="48.4" height="232.3"/>
+    <path fill-rule="evenodd" d="M 125.3 139.8 h 53.2 a 116.2 116.2 0 0 1 0 232.3 h -53.2 z M 178.6 183.4 a 72.6 72.6 0 0 1 0 145.2 z"/>
+  </g>
+  <g opacity="0.72" clip-path="url(#wall)">
+    <rect x="236" y="70" width="132" height="84" rx="3" fill="#f0c9a4"/>
+    <rect x="380" y="70" width="132" height="84" rx="3" fill="#8e3e28"/>
+    <rect x="164" y="166" width="132" height="84" rx="3" fill="#e09468"/>
+    <rect x="308" y="166" width="132" height="84" rx="3" fill="#f0c9a4"/>
+    <rect x="452" y="166" width="132" height="84" rx="3" fill="#c4623c"/>
+    <rect x="236" y="262" width="132" height="84" rx="3" fill="#c4623c"/>
+    <rect x="380" y="262" width="132" height="84" rx="3" fill="#e09468"/>
+    <rect x="164" y="358" width="132" height="84" rx="3" fill="#8e3e28"/>
+    <rect x="308" y="358" width="132" height="84" rx="3" fill="#c4623c"/>
+    <rect x="452" y="358" width="132" height="84" rx="3" fill="#f0c9a4"/>
+  </g>
+</svg>
