@@ -8795,3 +8795,54 @@ fn sidekiq_sensitive_url_is_masked() {
         assert!(!out.contains('@'), "{bare} -> {out}");
     }
 }
+
+#[test]
+fn typeform_access_token_is_masked() {
+    // A Typeform personal access token is `tfp_` plus 40 to 59
+    // letters, digits, or underscores. The personal access token
+    // page shows a 40-character body. A body of 59 characters is
+    // the same token. The value is not stored. A shorter body and
+    // a longer body stay as written. A sentence dot stays outside
+    // the mark. An uppercase prefix stays as written.
+    let documented = "tfp_943af478d3ff3d4d760020c11af102b79c440513";
+    let (vault, out, audit) = shield(documented);
+    assert_eq!(audit.secret, 1, "{documented} -> {out}");
+    assert_eq!(out, "h1_secret", "{documented} -> {out}");
+    assert!(
+        hidden(&out, "943af478d3ff3d4d760020c11af102b79c440513"),
+        "{out}"
+    );
+    assert!(!vault.holds_surface(documented.as_bytes()), "{documented}");
+    assert!(vault.restore_write(&out).is_err(), "{documented}");
+
+    let long = format!("tfp_{}", "a".repeat(59));
+    let (vault, out, audit) = shield(&long);
+    assert_eq!(audit.secret, 1, "{long} -> {out}");
+    assert_eq!(out, "h1_secret", "{long} -> {out}");
+    assert!(hidden(&out, "tfp_"), "{long} -> {out}");
+    assert!(!vault.holds_surface(long.as_bytes()), "{long}");
+
+    let mixed = format!("tfp_{}", "Ab9_".repeat(10));
+    let (vault, out, audit) = shield(&mixed);
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "h1_secret", "{mixed} -> {out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()), "{mixed}");
+
+    let sentence = format!("see {documented}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "943af478"), "{out}");
+    assert!(!vault.holds_surface(documented.as_bytes()));
+
+    for bare in [
+        format!("tfp_{}", "a".repeat(39)),
+        format!("tfp_{}", "a".repeat(60)),
+        format!("TFP_{}", "a".repeat(40)),
+        format!("xtfp_{}", "a".repeat(40)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
