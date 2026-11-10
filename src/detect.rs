@@ -776,6 +776,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // Uppercase hex stays as written.
             r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
+            // A Mapbox token is `pk.`, 60 letters or digits, a dot,
+            // and 22 more. gitleaks mapbox-api-token. The prefix may
+            // be any case. The word is not required. A shorter
+            // segment stays as written. The value is not stored.
+            r"(?i)\bpk\.[a-z0-9]{60}\.[a-z0-9]{22}\b",
             // A Yandex IAM token is `t1.`, a token segment, optional
             // `=` padding, a dot, and 86 more token characters.
             // gitleaks yandex-access-token. The prefix may be any
