@@ -6709,3 +6709,40 @@ fn artifactory_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn age_secret_key_is_masked() {
+    // An age identity file secret is `AGE-SECRET-KEY-1` plus 58
+    // Bech32 characters. The value is not stored. A shorter body
+    // stays as written. A character outside that alphabet stays
+    // outside the key.
+    let body = "Q".repeat(58);
+    assert_eq!(body.len(), 58);
+    let token = format!("AGE-SECRET-KEY-1{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "AGE-SECRET-KEY"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "AGE"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let with_q = format!("{}q{}", "Q".repeat(28), "Q".repeat(29));
+    for bare in [
+        format!("AGE-SECRET-KEY-1{}", "Q".repeat(57)),
+        format!("AGE-SECRET-KEY-1{with_q}"),
+        format!("wordAGE-SECRET-KEY-1{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
