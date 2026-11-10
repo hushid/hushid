@@ -103,6 +103,97 @@ fn deeply_nested_json_string_stays_plain_text() {
 }
 
 #[test]
+fn json_nest_cap_keeps_a_unicode_email_plain_past_the_cap() {
+    // The probe accepts containers at depth 0 through 7. A unicode
+    // escape is an address only after that nested parse, so one more
+    // array stays plain text instead of matching on the raw backslash.
+    fn document(arrays: usize) -> String {
+        let mut inner = "\"a\\u0040b.co\"".to_string();
+        for _ in 0..arrays {
+            inner = format!("[{inner}]");
+        }
+        let mut escaped = String::new();
+        for ch in inner.chars() {
+            match ch {
+                '\\' => escaped.push_str("\\\\"),
+                '"' => escaped.push_str("\\\""),
+                _ => escaped.push(ch),
+            }
+        }
+        format!(r#"{{"doc":"{escaped}"}}"#)
+    }
+
+    let within = document(8);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &within).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains("a@b.co"), "{out}");
+    assert!(!out.contains("\\u0040"), "{out}");
+    let restored = restore_json_write(&vault, &out).unwrap();
+    assert!(restored.contains("a@b.co"), "{restored}");
+
+    let past = document(9);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &past).unwrap();
+    assert_eq!(audit.email, 0, "{out}");
+    assert_eq!(out, past);
+    assert!(out.contains("\\u0040"), "{out}");
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_vault_save_leaves_the_first_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct ResetMode(std::path::PathBuf);
+    impl Drop for ResetMode {
+        fn drop(&mut self) {
+            let Ok(meta) = fs::metadata(&self.0) else {
+                return;
+            };
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&self.0, perms);
+        }
+    }
+
+    fn set_mode(path: &Path, mode: u32) {
+        let mut perms = fs::metadata(path).unwrap().permissions();
+        perms.set_mode(mode);
+        fs::set_permissions(path, perms).unwrap();
+    }
+
+    let dir = std::env::temp_dir().join(format!("hushid-vault-ro-{}", std::process::id()));
+    if dir.exists() {
+        set_mode(&dir, 0o755);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+    fs::create_dir(&dir).unwrap();
+    set_mode(&dir, 0o755);
+    let _guard = ResetMode(dir.clone());
+
+    let path = dir.join("vault");
+    let mut vault = Vault::new();
+    let (projection, _) = shield_text(&mut vault, &Glossary::empty(), "a@b.co").unwrap();
+    vault.save(&path).unwrap();
+
+    set_mode(&dir, 0o555);
+    let mut second = Vault::new();
+    shield_text(&mut second, &Glossary::empty(), "b@b.co").unwrap();
+    assert!(second.save(&path).is_err());
+
+    let loaded = Vault::load(&path).unwrap();
+    assert_eq!(loaded.restore_write(&projection).unwrap(), "a@b.co");
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    assert!(!tmp.exists(), "{}", tmp.display());
+
+    set_mode(&dir, 0o755);
+    fs::remove_file(&path).unwrap();
+    fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
 fn json_restore_keeps_an_email_that_starts_with_h1() {
     let input = r#"{"to":"h1_ops@example.com"}"#;
     let mut vault = Vault::new();
