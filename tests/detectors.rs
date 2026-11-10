@@ -6452,3 +6452,83 @@ fn resend_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn grafana_token_is_masked() {
+    // gitleaks grafana-service-account-token is `glsa_`, 32 letters
+    // or digits, an underscore, and 8 hex characters.
+    // grafana-cloud-api-token is `glc_` plus at least 32 base64
+    // characters. A trailing `+` or `/` is part of the body, and `=`
+    // padding is part of the token. The rules above do not see those
+    // prefixes, so the token stays in the clear. A shorter body stays
+    // as written. The value is not stored.
+    let body = "a".repeat(32);
+    let tail = "abcdef12";
+    let token = format!("glsa_{body}_{tail}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "glsa"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(hidden(&out, tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let cloud_body = "b".repeat(32);
+    let cloud = format!("glc_{cloud_body}");
+    let (vault, out, audit) = shield(&cloud);
+    assert_eq!(audit.secret, 1, "{cloud} -> {out}");
+    assert_eq!(out, "h1_secret", "{cloud} -> {out}");
+    assert!(hidden(&out, "glc"), "{cloud} -> {out}");
+    assert!(hidden(&out, &cloud_body), "{cloud} -> {out}");
+    assert!(!vault.holds_surface(cloud.as_bytes()), "{cloud}");
+    assert!(vault.restore_write(&out).is_err(), "{cloud}");
+
+    let plus_body = format!("{}+", "c".repeat(31));
+    let plus_tail = format!("glc_{plus_body}");
+    let (vault, out, audit) = shield(&plus_tail);
+    assert_eq!(audit.secret, 1, "{plus_tail} -> {out}");
+    assert_eq!(out, "h1_secret", "{plus_tail} -> {out}");
+    assert!(hidden(&out, &"c".repeat(31)), "{out}");
+    assert!(!vault.holds_surface(plus_tail.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let slash_body = format!("{}/", "d".repeat(31));
+    let slash_tail = format!("glc_{slash_body}");
+    let (vault, out, audit) = shield(&format!("see {slash_tail} next"));
+    assert_eq!(audit.secret, 1, "{slash_tail} -> {out}");
+    assert_eq!(out, "see h1_secret next", "{slash_tail} -> {out}");
+    assert!(hidden(&out, "glc"), "{out}");
+    assert!(hidden(&out, &"d".repeat(31)), "{out}");
+    assert!(!vault.holds_surface(slash_tail.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let padded = format!("glc_{cloud_body}==");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, &cloud_body), "{out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(hidden(&out, tail), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("glsa_{}_{tail}", "a".repeat(31)),
+        format!("wordglsa_{body}_{tail}"),
+        format!("glc_{}", "b".repeat(31)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
