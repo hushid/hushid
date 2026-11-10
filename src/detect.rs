@@ -714,6 +714,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // shorter `sgp_` body stays as written.
             r"\bsgp_(?:[a-fA-F0-9]{16}_|local_)[a-fA-F0-9]{40}\b",
             r"\bsgp_[a-fA-F0-9]{40}\b",
+            // A Terraform API token is 14 letters or digits,
+            // `.atlasv1.`, and 60 to 70 token characters. `atlasv1`
+            // stays lowercase. The value is not stored. A shorter
+            // tail stays as written.
+            r"(?i)[a-z0-9]{14}\.(?-i:atlasv1)\.[a-z0-9_=-]{60,70}",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
