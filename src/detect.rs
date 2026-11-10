@@ -866,6 +866,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // `IncomingWebhook`. gitleaks microsoft-teams-webhook.
             // A shorter URL stays as written. The value is not stored.
             r"\bhttps://[a-z0-9]+\.webhook\.office\.com/webhookb2/[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}@[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}/IncomingWebhook/[a-z0-9]{32}/[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}\b",
+            // A Discord incoming webhook is discord.com or discordapp.com,
+            // then /api/webhooks/, an 18 or 19 digit id, and a token.
+            // TruffleHog's discordwebhook detector uses 68 letters, digits,
+            // or hyphens. The webhook resource example is 100 hex
+            // characters. An optional /v10 path is the same webhook. The
+            // Teams rule does not see this host. A final hyphen stays
+            // inside the mark. A shorter token and a longer token stay
+            // as written. The value is not stored.
+            r"\b(?:https://)?discord(?:app)?\.com/api(?:/v[0-9]{1,2})?/webhooks/[0-9]{18,19}/(?:[0-9A-Za-z-]{99}[0-9A-Za-z]\b|[0-9A-Za-z-]{99}-|[0-9A-Za-z-]{67}[0-9A-Za-z]\b|[0-9A-Za-z-]{67}-)",
             // A Sonar token is `squ_`, `sqp_`, or `sqa_` plus 40
             // token characters. gitleaks sonar-api-token. The
             // prefix may be any case. A bare 40-character string
