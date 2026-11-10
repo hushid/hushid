@@ -9776,3 +9776,31 @@ fn fullwidth_birth_digits_are_shielded() {
     assert!(hidden(&out, "\u{FF11}\u{FF19}\u{FF19}\u{FF14}"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), year);
 }
+
+#[test]
+fn fullwidth_birth_marks_follow_the_ascii_ones() {
+    let samples = [
+        "DOB 1994\u{FF0D}03\u{FF0D}15",
+        "DOB 1994\u{FF0F}03\u{FF0F}15",
+        "DOB 15\u{FF0E}03\u{FF0E}1994",
+        "née le 15 mars\u{FF0E} 1994",
+        "born March 3\u{FF0C} 1994",
+    ];
+    for sample in samples {
+        let (vault, out, audit) = shield(sample);
+        assert_eq!(audit.birth, 1, "{sample} -> {out}");
+        assert!(out.contains("h1_birth_"), "{sample} -> {out}");
+        assert!(hidden(&out, "1994"), "{sample} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sample);
+    }
+
+    let bad = "DOB 1994\u{FF0D}02\u{FF0D}31";
+    let (_vault, out, audit) = shield(bad);
+    assert_eq!(audit.birth, 0, "{out}");
+    assert_eq!(out, bad, "{out}");
+
+    let crossed = "I was born\u{FF0E} The build is 1994-03-15.";
+    let (_vault, out, audit) = shield(crossed);
+    assert_eq!(audit.birth, 0, "{out}");
+    assert_eq!(out, crossed, "{out}");
+}
