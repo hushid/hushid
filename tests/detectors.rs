@@ -8376,3 +8376,43 @@ fn teams_webhook_url_is_masked() {
     assert_eq!(audit.secret, 0, "{short} -> {out}");
     assert_eq!(out, short, "{short} -> {out}");
 }
+
+#[test]
+fn sonar_api_token_is_masked() {
+    // `squ_`, `sqp_`, and `sqa_` are Sonar tokens. The value is not
+    // stored. A shorter body stays as written.
+    for prefix in ["squ_", "sqp_", "sqa_", "SQU_"] {
+        let token = format!("{prefix}{}", "a".repeat(40));
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, prefix), "{token} -> {out}");
+        assert!(hidden(&out, &"a".repeat(40)), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let dashed = format!("sqp_{}=", "b".repeat(39));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, &"b".repeat(39)), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    let sentence = format!("see squ_{}.next", "c".repeat(40));
+    let (_vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "squ_"), "{out}");
+
+    for bare in [
+        format!("squ_{}", "a".repeat(39)),
+        format!("squ_{}", "a".repeat(41)),
+        format!("xsqu_{}", "a".repeat(40)),
+        "a".repeat(40),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
