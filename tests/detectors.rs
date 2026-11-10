@@ -5768,3 +5768,56 @@ fn comma_between_groups_still_shields_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn square_access_token_is_masked() {
+    // Square's access tokens page is where these credentials are
+    // issued. An older access token is `sq0atp-` plus 22 characters.
+    // An older application secret is `sq0csp-` plus 43. The `sk-`
+    // rule does not see those prefixes, so the token stays in the
+    // clear. A shorter body stays as written. A longer body stays
+    // too. The value is not stored.
+    let atp_body = "a".repeat(22);
+    let atp = format!("sq0atp-{atp_body}");
+    let (vault, out, audit) = shield(&atp);
+    assert_eq!(audit.secret, 1, "{atp} -> {out}");
+    assert_eq!(out, "h1_secret", "{atp} -> {out}");
+    assert!(hidden(&out, "sq0atp"), "{atp} -> {out}");
+    assert!(hidden(&out, &atp_body), "{atp} -> {out}");
+    assert!(!vault.holds_surface(atp.as_bytes()), "{atp}");
+    assert!(vault.restore_write(&out).is_err(), "{atp}");
+
+    let csp_body = "b".repeat(43);
+    let csp = format!("sq0csp-{csp_body}");
+    let (vault, out, audit) = shield(&csp);
+    assert_eq!(audit.secret, 1, "{csp} -> {out}");
+    assert_eq!(out, "h1_secret", "{csp} -> {out}");
+    assert!(hidden(&out, "sq0csp"), "{csp} -> {out}");
+    assert!(hidden(&out, &csp_body), "{csp} -> {out}");
+    assert!(!vault.holds_surface(csp.as_bytes()), "{csp}");
+    assert!(vault.restore_write(&out).is_err(), "{csp}");
+
+    let mixed = format!("sq0atp-a1_{}-{}", "c".repeat(8), "d".repeat(10));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "sq0atp"), "{out}");
+    assert!(hidden(&out, "a1"), "{out}");
+    assert!(hidden(&out, &"c".repeat(8)), "{out}");
+    assert!(hidden(&out, &"d".repeat(10)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("sq0atp-{}", "a".repeat(21)),
+        format!("sq0csp-{}", "b".repeat(42)),
+        format!("sq0atp-{}", "a".repeat(23)),
+        format!("sq0csp-{}", "b".repeat(44)),
+        format!("wordsq0atp-{atp_body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
