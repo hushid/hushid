@@ -8048,3 +8048,44 @@ fn new_relic_api_keys_are_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn gitlab_runner_registration_token_is_masked() {
+    // A GitLab runner registration token is `GR1348941` plus 20
+    // characters. The value is not stored. A shorter body stays
+    // as written.
+    let body = "a".repeat(20);
+    let token = format!("GR1348941{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "GR1348941"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let dashed = format!("GR1348941{}-", "b".repeat(19));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, "GR1348941"), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next");
+    assert!(hidden(&out, "GR1348941"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("GR1348941{}", "a".repeat(19)),
+        format!("GR1348941{}", "a".repeat(21)),
+        format!("gr1348941{body}"),
+        format!("xGR1348941{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
