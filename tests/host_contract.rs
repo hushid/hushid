@@ -85,6 +85,36 @@ fn json_number_sin_and_nested_document_round_trip() {
 }
 
 #[test]
+fn deeply_nested_json_string_stays_plain_text() {
+    // Far past the nest cap of 8. The probe must stop and the email
+    // inside the string is still shielded as plain text.
+    let mut inner = "\"a@b.co\"".to_string();
+    for _ in 0..64 {
+        inner = format!("[{inner}]");
+    }
+    let escaped = inner.replace('"', "\\\"");
+    let input = format!(r#"{{"doc":"{escaped}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains("a@b.co"), "{out}");
+    let restored = restore_json_write(&vault, &out).unwrap();
+    assert!(restored.contains("a@b.co"), "{restored}");
+}
+
+#[test]
+fn json_restore_keeps_an_email_that_starts_with_h1() {
+    let input = r#"{"to":"h1_ops@example.com"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(!out.contains("h1_ops@example.com"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
+    assert!(restore_json_write(&Vault::new(), r#"{"n":"h1_email_AAAAAAAAR"}"#).is_err());
+    assert!(restore_json_write(&Vault::new(), r#"{"n":"h1_secret"}"#).is_err());
+}
+
+#[test]
 fn json_string_beside_a_cue_is_shielded() {
     let sin = luhn_sin("13069254");
     let spaced = format!("{} {} {}", &sin[..3], &sin[3..6], &sin[6..9]);
@@ -249,6 +279,22 @@ fn luhn_sin(body: &str) -> String {
 }
 
 #[test]
+fn stream_emits_a_long_chunk_and_holds_only_the_tail() {
+    let mut text = "a".repeat(20_000);
+    text.push('h');
+    let mut stream = HeldStream::new();
+    let started = std::time::Instant::now();
+    let out = stream.push(&text);
+    assert!(
+        started.elapsed().as_millis() < 500,
+        "long chunk took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(out, "a".repeat(20_000));
+    assert_eq!(stream.finish(), "h");
+}
+
+#[test]
 fn stream_holds_a_split_token_until_it_is_complete() {
     let mut vault = Vault::new();
     let (projection, _) = shield_text(&mut vault, &Glossary::empty(), "a@b.co").unwrap();
@@ -369,6 +415,16 @@ fn vault_file_is_mode_0600_and_round_trips() {
     }
     let loaded = Vault::load(&path).unwrap();
     assert_eq!(loaded.restore_write(&projection).unwrap(), "a@b.co");
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    assert!(!tmp.exists(), "{}", tmp.display());
+    let _ = fs::remove_file(&path);
+
+    fs::write(&path, "hushid-vault 1").unwrap();
+    assert!(matches!(
+        Vault::load(&path),
+        Err(hushid::VaultError::Corrupt)
+    ));
     let _ = fs::remove_file(&path);
 }
 

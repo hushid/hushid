@@ -2,7 +2,7 @@ use crate::audit::AuditRecord;
 use crate::detect::{assignment_secret_prefix, find_hits, Hit};
 use crate::glossary::Glossary;
 use crate::shield::shield_in_context;
-use crate::token::{find_h1, TokenError, SECRET_MARK};
+use crate::token::{find_h1, parse_token_at, secret_mark_at, TokenError, SECRET_MARK};
 use crate::vault::{RestoreError, Vault};
 use std::fmt;
 
@@ -52,10 +52,23 @@ pub fn shield_json_strings(
 /// Restore JSON keys, string values, and numbers. An unresolved `h1_` span fails.
 pub fn restore_json_write(vault: &Vault, input: &str) -> Result<String, JsonError> {
     let text = restore_document(vault, input, 0)?;
-    if let Some(at) = find_h1(&text, 0) {
+    // A restored email can itself start with `h1_`. That text is not a
+    // token. A real token shape, or `h1_secret`, still fails the write.
+    if let Some(at) = unresolved_mark(&text) {
         return Err(JsonError::Restore(RestoreError::Unresolved { at }));
     }
     Ok(text)
+}
+
+fn unresolved_mark(text: &str) -> Option<usize> {
+    let mut index = 0;
+    while let Some(at) = find_h1(text, index) {
+        if secret_mark_at(text, at).is_some() || parse_token_at(text, at).is_some() {
+            return Some(at);
+        }
+        index = at + 3;
+    }
+    None
 }
 
 fn shield_document(
@@ -346,19 +359,19 @@ fn is_json_document(input: &str) -> bool {
     if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
         return false;
     }
-    match skip_value(trimmed, 0) {
+    match skip_value(trimmed, 0, 0) {
         Some(end) => trimmed[end..].trim().is_empty(),
         None => false,
     }
 }
 
-fn skip_value(input: &str, start: usize) -> Option<usize> {
+fn skip_value(input: &str, start: usize, depth: u8) -> Option<usize> {
     let index = skip_ws(input, start);
     let bytes = input.as_bytes();
     match bytes.get(index)? {
         b'"' => parse_string(input, index).ok().map(|(end, _)| end),
-        b'{' => skip_container(input, index, b'{', b'}'),
-        b'[' => skip_container(input, index, b'[', b']'),
+        b'{' => skip_container(input, index, b'{', b'}', depth),
+        b'[' => skip_container(input, index, b'[', b']', depth),
         b't' => skip_literal(input, index, "true"),
         b'f' => skip_literal(input, index, "false"),
         b'n' => skip_literal(input, index, "null"),
@@ -367,7 +380,13 @@ fn skip_value(input: &str, start: usize) -> Option<usize> {
     }
 }
 
-fn skip_container(input: &str, start: usize, open: u8, close: u8) -> Option<usize> {
+fn skip_container(input: &str, start: usize, open: u8, close: u8, depth: u8) -> Option<usize> {
+    // The shield walk stops at `MAX_JSON_DEPTH`. This probe has to stop
+    // there too. A deeper string is not a nested document, so the caller
+    // shields it as plain text instead of overflowing the stack.
+    if depth >= MAX_JSON_DEPTH {
+        return None;
+    }
     let bytes = input.as_bytes();
     if bytes.get(start) != Some(&open) {
         return None;
@@ -388,7 +407,7 @@ fn skip_container(input: &str, start: usize, open: u8, close: u8) -> Option<usiz
             }
             index += 1;
         }
-        index = skip_value(input, index)?;
+        index = skip_value(input, index, depth + 1)?;
         index = skip_ws(input, index);
         match bytes.get(index)? {
             byte if *byte == close => return Some(index + 1),
