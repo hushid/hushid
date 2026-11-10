@@ -8350,3 +8350,29 @@ fn slack_webhook_url_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn teams_webhook_url_is_masked() {
+    // A Teams incoming webhook posts to webhook.office.com. The value
+    // is not stored. A shorter URL stays as written.
+    let url = "https://contoso.webhook.office.com/webhookb2/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee@11111111-2222-3333-4444-555555555555/IncomingWebhook/abcdefghijklmnopqrstuvwxyz012345/66666666-7777-8888-9999-000000000000";
+    let (vault, out, audit) = shield(url);
+    assert_eq!(audit.secret, 1, "{url} -> {out}");
+    assert_eq!(out, "h1_secret", "{url} -> {out}");
+    assert!(hidden(&out, "webhook.office.com"), "{url} -> {out}");
+    assert!(hidden(&out, "IncomingWebhook"), "{url} -> {out}");
+    assert!(!vault.holds_surface(url.as_bytes()), "{url}");
+    assert!(vault.restore_write(&out).is_err(), "{url}");
+
+    let sentence = format!("see {url}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "webhook.office.com"), "{out}");
+    assert!(!vault.holds_surface(url.as_bytes()));
+
+    let short = "https://contoso.webhook.office.com/webhookb2/not-a-webhook";
+    let (_vault, out, audit) = shield(short);
+    assert_eq!(audit.secret, 0, "{short} -> {out}");
+    assert_eq!(out, short, "{short} -> {out}");
+}
