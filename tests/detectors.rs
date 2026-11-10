@@ -6208,3 +6208,101 @@ fn doppler_cli_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn doppler_service_account_scim_and_audit_token_is_masked() {
+    // A Doppler service account token is `dp.sa.`. A service account
+    // identity token is `dp.said.`. A SCIM token is `dp.scim.`. An
+    // audit token is `dp.audit.`. The auth token formats page
+    // publishes a body of 40 to 44 letters or digits. Those formats
+    // have no config name. The service and CLI rules do not see these
+    // prefixes, so the token stays in the clear. A shorter body stays
+    // as written. A longer body stays too. The value is not stored.
+    let body = "bAqhcVzrhy5cRHkOlNTc0Ve6w5NUDCpcutm8vGE9myi";
+    assert_eq!(body.len(), 43);
+    for prefix in ["dp.sa.", "dp.said.", "dp.scim.", "dp.audit."] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(
+            hidden(&out, prefix.trim_end_matches('.')),
+            "{token} -> {out}"
+        );
+        assert!(hidden(&out, body), "{token} -> {out}");
+        assert!(hidden(&out, "0Ve6w5"), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    for prefix in ["dp.sa.", "dp.said.", "dp.scim.", "dp.audit."] {
+        for n in [40usize, 44] {
+            let payload = "c".repeat(n);
+            let token = format!("{prefix}{payload}");
+            let (vault, out, audit) = shield(&token);
+            assert_eq!(audit.secret, 1, "{token} -> {out}");
+            assert_eq!(out, "h1_secret", "{token} -> {out}");
+            assert!(
+                hidden(&out, prefix.trim_end_matches('.')),
+                "{token} -> {out}"
+            );
+            assert!(hidden(&out, &payload), "{token} -> {out}");
+            assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+            assert!(vault.restore_write(&out).is_err(), "{token}");
+        }
+    }
+
+    let digits = format!("0123456789{}", "a".repeat(30));
+    assert_eq!(digits.len(), 40);
+    let numbered = format!("dp.scim.{digits}");
+    let (vault, out, audit) = shield(&format!("see {numbered}.next"));
+    assert_eq!(audit.secret, 1, "{numbered} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{numbered} -> {out}");
+    assert!(hidden(&out, "dp.scim"), "{out}");
+    assert!(hidden(&out, "0123456789"), "{out}");
+    assert!(hidden(&out, &"a".repeat(30)), "{out}");
+    assert!(!vault.holds_surface(numbered.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let configured = format!("dp.st.sa.{body}");
+    let (vault, out, audit) = shield(&configured);
+    assert_eq!(audit.secret, 1, "{configured} -> {out}");
+    assert_eq!(out, "h1_secret", "{configured} -> {out}");
+    assert!(hidden(&out, "dp.st"), "{configured} -> {out}");
+    assert!(hidden(&out, "sa"), "{configured} -> {out}");
+    assert!(hidden(&out, body), "{configured} -> {out}");
+    assert!(!vault.holds_surface(configured.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let audit_token = format!("dp.audit.{body}");
+    let raw = format!(r#"{{"token":"{audit_token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "dp.audit"), "{out}");
+    assert!(hidden(&out, body), "{out}");
+    assert!(hidden(&out, "0Ve6w5"), "{out}");
+    assert!(!vault.holds_surface(audit_token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let mut stays = Vec::new();
+    for prefix in ["dp.sa.", "dp.said.", "dp.scim.", "dp.audit."] {
+        stays.push(format!("{prefix}{}", "a".repeat(39)));
+        stays.push(format!("{prefix}{}", "a".repeat(45)));
+        stays.push(format!("{prefix}dev.{}", "a".repeat(40)));
+        stays.push(format!("word{prefix}{}", "a".repeat(40)));
+        stays.push(format!("{}{}", prefix.to_ascii_uppercase(), "a".repeat(40)));
+        stays.push(format!(
+            "{}{}",
+            prefix.trim_end_matches('.'),
+            "a".repeat(40)
+        ));
+    }
+    stays.push("not a token".to_string());
+    for bare in stays {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
