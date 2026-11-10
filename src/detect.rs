@@ -528,6 +528,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // A shorter body stays as written. A longer body stays
             // too. The value is not stored.
             r"\bHRKU-AA[0-9a-zA-Z_-]{58}\b",
+            // A PlanetScale service token is `pscale_tkn_` plus 32
+            // to 64 token characters. gitleaks planetscale-api-token.
+            // The body may end in `=`, `.`, or `-`, so a word boundary
+            // would leave that character in the clear. A shorter body
+            // stays as written. A longer body stays too. The value is
+            // not stored.
+            r"\bpscale_tkn_[A-Za-z0-9=._\-]{32,64}",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
