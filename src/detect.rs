@@ -690,6 +690,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             r"\bFLWSECK_TEST-(?i:[a-h0-9]{32})-X\b",
             r"\bFLWPUBK_TEST-(?i:[a-h0-9]{32})-X\b",
             r"\bFLWSECK_TEST-(?i:[a-h0-9]{12})\b",
+            // A Grafana API key starts with `eyJrIjoi` and then 70 to
+            // 400 letters or digits, with optional `=` padding. The
+            // value is not stored. A shorter body stays as written.
+            // This is not the `glsa_` or `glc_` token.
+            r"(?i)\beyJrIjoi[A-Za-z0-9]{70,400}={0,2}",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
