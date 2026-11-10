@@ -6,10 +6,11 @@ use std::sync::LazyLock;
 /// Higher tiers win. Inside one tier the longer span wins.
 const TIER_SECRET: u8 = 0;
 const TIER_SIN: u8 = 1;
-const TIER_CARD: u8 = 2;
-const TIER_EMAIL: u8 = 3;
-const TIER_PHONE: u8 = 4;
-const TIER_GLOSSARY: u8 = 5;
+const TIER_RAMQ: u8 = 2;
+const TIER_CARD: u8 = 3;
+const TIER_EMAIL: u8 = 4;
+const TIER_PHONE: u8 = 5;
+const TIER_GLOSSARY: u8 = 6;
 
 const CUE_WINDOW: usize = 40;
 
@@ -68,6 +69,7 @@ pub fn find_hits(text: &str, glossary: &Glossary) -> Vec<Hit> {
     let mut raw = Vec::new();
     push_secrets(text, &mut raw);
     push_sins(text, &mut raw);
+    push_ramq(text, &mut raw);
     push_cards(text, &mut raw);
     push_emails(text, &mut raw);
     push_phones(text, &mut raw);
@@ -412,6 +414,41 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
             out.push(span(TIER_SIN, Kind::Sin, hit.start(), hit.end()));
         }
     }
+}
+
+fn push_ramq(text: &str, out: &mut Vec<RawHit>) {
+    // A Québec health insurance number is 4 letters and 8 digits.
+    // The printed form is `AAAA 9999 9999`. A hyphen between those
+    // groups is the same number. The 8 digits are year, month, day,
+    // and an administrative code. The month is 01 through 12, or 51
+    // through 62. The day is 01 through 31. A month or a day outside
+    // that range stays as written. These checks are the published
+    // layout. They do not ask RAMQ whether the number was issued.
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b[A-Z]{4}(?:[ \t-]+[0-9]{4}){2}\b|\b[A-Z]{4}[0-9]{8}\b")
+            .expect("ramq pattern")
+    });
+    for hit in RE.find_iter(text) {
+        if !digit_bounded(text, hit.start(), hit.end()) {
+            continue;
+        }
+        if ramq_layout_ok(hit.as_str()) {
+            out.push(span(TIER_RAMQ, Kind::Ramq, hit.start(), hit.end()));
+        }
+    }
+}
+
+fn ramq_layout_ok(text: &str) -> bool {
+    let letters = text.chars().filter(|ch| ch.is_ascii_uppercase()).count();
+    let digits = digits_of(text);
+    if letters != 4 || digits.len() != 8 {
+        return false;
+    }
+    let month = (digits[2] - b'0') * 10 + (digits[3] - b'0');
+    let day = (digits[4] - b'0') * 10 + (digits[5] - b'0');
+    let month_ok = (1u8..=12).contains(&month) || (51u8..=62).contains(&month);
+    let day_ok = (1u8..=31).contains(&day);
+    month_ok && day_ok
 }
 
 fn push_secrets(text: &str, out: &mut Vec<RawHit>) {

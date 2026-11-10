@@ -22,6 +22,7 @@ pub enum Kind {
     Phone,
     Card,
     Sin,
+    Ramq,
     Glossary,
 }
 
@@ -32,6 +33,7 @@ impl Kind {
             Kind::Phone => "phone",
             Kind::Card => "card",
             Kind::Sin => "sin",
+            Kind::Ramq => "ramq",
             Kind::Glossary => "glossary",
         }
     }
@@ -45,6 +47,8 @@ impl Kind {
             Some(Kind::Card)
         } else if name.eq_ignore_ascii_case("sin") {
             Some(Kind::Sin)
+        } else if name.eq_ignore_ascii_case("ramq") {
+            Some(Kind::Ramq)
         } else if name.eq_ignore_ascii_case("glossary") {
             Some(Kind::Glossary)
         } else {

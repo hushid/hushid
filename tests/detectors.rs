@@ -36,6 +36,64 @@ fn luhn_check_digit(body: &str) -> char {
     char::from_digit(digit, 10).unwrap()
 }
 
+#[test]
+fn ramq_number_is_shielded_and_restored() {
+    // Fictional numbers in the published 4-letter, 8-digit layout.
+    // They are not issued RAMQ numbers. Month 51 and 52 are January
+    // and February with 50 added. A bad month, a bad day, a lowercase
+    // number, and a glued extra digit stay as written.
+    let samples = [
+        "BOUF 9451 1419",
+        "DUPA 9503 1512",
+        "MART 8807 2345",
+        "TREJ 0209 1018",
+        "GAGL 7552 2816",
+        "BELA 9911 0507",
+        "ROBE 0612 1719",
+        "BOUF94511419",
+        "BOUF-9451-1419",
+    ];
+    for sample in samples {
+        let (vault, out, audit) = shield(sample);
+        assert_eq!(audit.ramq, 1, "{sample} -> {out}");
+        assert!(out.starts_with("h1_ramq_"), "{sample} -> {out}");
+        let digits: String = sample.chars().filter(|ch| ch.is_ascii_digit()).collect();
+        assert!(hidden(&out, &digits), "{sample} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sample);
+    }
+
+    let (vault, out, audit) = shield("see BOUF 9451 1419 next");
+    assert_eq!(audit.ramq, 1, "{out}");
+    assert!(out.starts_with("see h1_ramq_"), "{out}");
+    assert!(out.ends_with(" next"), "{out}");
+    assert!(hidden(&out, "94511419"), "{out}");
+    assert_eq!(
+        vault.restore_write(&out).unwrap(),
+        "see BOUF 9451 1419 next"
+    );
+
+    let raw = r#"{"nam":"BOUF 9451 1419"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.ramq, 1, "{out}");
+    assert!(hidden(&out, "9451"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in [
+        "BOUF 9413 1419",
+        "BOUF 9400 1419",
+        "BOUF 9401 0019",
+        "bouf 9451 1419",
+        "BOU 9451 1419",
+        "BOUF945114199",
+        "BOUF 9451 14199",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.ramq, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
 fn valid_sin() -> String {
     let body = "13069254";
     let mut sin = body.to_string();

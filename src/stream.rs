@@ -107,6 +107,7 @@ fn is_incomplete_prefix(suffix: &str) -> bool {
         Kind::Phone,
         Kind::Card,
         Kind::Sin,
+        Kind::Ramq,
         Kind::Glossary,
     ] {
         let head = format!("h1_{}_", kind.as_str());

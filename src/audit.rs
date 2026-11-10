@@ -11,6 +11,7 @@ pub struct AuditRecord {
     pub phone: u32,
     pub card: u32,
     pub sin: u32,
+    pub ramq: u32,
     pub secret: u32,
     pub glossary: u32,
 }
@@ -23,6 +24,7 @@ impl Default for AuditRecord {
             phone: 0,
             card: 0,
             sin: 0,
+            ramq: 0,
             secret: 0,
             glossary: 0,
         }
@@ -36,6 +38,7 @@ impl AuditRecord {
             Kind::Phone => self.phone += 1,
             Kind::Card => self.card += 1,
             Kind::Sin => self.sin += 1,
+            Kind::Ramq => self.ramq += 1,
             Kind::Glossary => self.glossary += 1,
         }
     }
@@ -45,6 +48,7 @@ impl AuditRecord {
         self.phone += other.phone;
         self.card += other.card;
         self.sin += other.sin;
+        self.ramq += other.ramq;
         self.secret += other.secret;
         self.glossary += other.glossary;
     }
@@ -58,6 +62,7 @@ impl fmt::Debug for AuditRecord {
             .field("phone", &self.phone)
             .field("card", &self.card)
             .field("sin", &self.sin)
+            .field("ramq", &self.ramq)
             .field("secret", &self.secret)
             .field("glossary", &self.glossary)
             .finish()
