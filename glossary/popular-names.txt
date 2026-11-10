@@ -12,6 +12,9 @@
 # plus the top-100 names that gained the most rank from 2023 to 2024.
 # https://www150.statcan.gc.ca/n1/pub/11-627-m/11-627-m2025045-eng.htm
 # https://www150.statcan.gc.ca/n1/daily-quotidien/260923/g-e001-fra.htm
+# Canada 2025 top 100 given names: table 17-10-0147, rank 100 or better.
+# That table stores an accented letter as the unaccented letter.
+# https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710014701
 # Quebec given names: Retraite Quebec, top 100 boys and top 100 girls
 # by count in 2025. The downloadable bank stores LEO and EDOUARD
 # with no accents, so those spellings are listed as stored.
@@ -343,6 +346,73 @@ Asees
 Fatima
 Adeline
 Lydia
+
+# Canada 2025 top 100, names not already listed above
+Muhammad
+Hudson
+Miles
+Wesley
+Rowan
+Wyatt
+Myles
+Ezra
+Asher
+Kai
+Beau
+Sebastian
+Grayson
+Aiden
+Lincoln
+Luka
+Everett
+Callum
+Atlas
+Ibrahim
+Arjan
+Jasper
+Max
+Isaiah
+Julian
+Violet
+Isla
+Hazel
+Aria
+Eleanor
+Aurora
+Lucy
+Harper
+Avery
+Georgia
+Maeve
+Luna
+Scarlett
+Penelope
+Sadie
+Audrey
+Willow
+Naomi
+Isabelle
+Leah
+Hailey
+Iris
+Rehmat
+Millie
+Anaya
+Summer
+Amara
+Maryam
+Nova
+Ruby
+Freya
+Jind
+Daisy
+Quinn
+Josephine
+Kaia
+Riley
+Sienna
+Everly
+Celine
 
 # Quebec given names
 Louis
