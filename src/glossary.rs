@@ -42,6 +42,16 @@ impl Glossary {
     /// One entry per line. Blank lines and `#` comments are skipped.
     pub fn load(path: &Path) -> io::Result<Self> {
         let text = fs::read_to_string(path)?;
+        Ok(Self::parse(&text))
+    }
+
+    /// The published USA, Canada, and Quebec name list, compiled into this crate.
+    /// Shielding does not use it unless the host calls this function.
+    pub fn popular_names() -> Self {
+        Self::parse(include_str!("../glossary/popular-names.txt"))
+    }
+
+    fn parse(text: &str) -> Self {
         let mut terms = Vec::new();
         for line in text.lines() {
             let line = line.trim();
@@ -50,7 +60,7 @@ impl Glossary {
             }
             terms.push(line.to_string());
         }
-        Ok(Self::from_vec(terms))
+        Self::from_vec(terms)
     }
 
     pub fn terms(&self) -> &[String] {
