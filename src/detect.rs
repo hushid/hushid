@@ -570,6 +570,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // as written.
             r"\bEZAK(?i:[a-z0-9]{54})\b",
             r"\bEZTK(?i:[a-z0-9]{54})\b",
+            // A RubyGems API token is `rubygems_` plus 48 lowercase
+            // hex characters. The value is not stored. A shorter body,
+            // a longer body, and an uppercase hex body stay as written.
+            r"\brubygems_[a-f0-9]{48}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
