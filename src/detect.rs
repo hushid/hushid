@@ -535,6 +535,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stays as written. A longer body stays too. The value is
             // not stored.
             r"\bpscale_tkn_[A-Za-z0-9=._\-]{32,64}",
+            // A Perplexity API key is `pplx-` plus 48 letters or
+            // digits. The value is not stored. A shorter body and a
+            // longer body stay as written.
+            r"\bpplx-[a-zA-Z0-9]{48}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
