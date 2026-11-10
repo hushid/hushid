@@ -644,6 +644,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // The value is not stored. A shorter body and a longer
             // body stay as written.
             r"\bfio-u-(?i:[a-z0-9_=-]{63}[a-z0-9_]\b|[a-z0-9_=-]{63}[-=])",
+            // A Duffel token is `duffel_test_` or `duffel_live_` plus
+            // 43 token characters. The value is not stored. A shorter
+            // body stays as written. `duffel_prod_` stays as written.
+            r"\bduffel_(?:test|live)_(?i:[a-z0-9_-]{42}[a-z0-9_]\b|[a-z0-9_-]{42}[-=])",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

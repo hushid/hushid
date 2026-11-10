@@ -7278,3 +7278,40 @@ fn frameio_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn duffel_api_token_is_masked() {
+    // A Duffel token is `duffel_test_` or `duffel_live_` plus 43 token
+    // characters. The value is not stored. A shorter body stays as
+    // written. `duffel_prod_` stays as written.
+    let body = "a".repeat(43);
+    assert_eq!(body.len(), 43);
+    let token = format!("duffel_test_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "duffel"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let live = format!("duffel_live_{}", "b".repeat(43));
+    let (vault, out, audit) = shield(&format!("see {live}.next"));
+    assert_eq!(audit.secret, 1, "{live} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{live} -> {out}");
+    assert!(hidden(&out, "duffel"), "{out}");
+    assert!(hidden(&out, "live"), "{out}");
+    assert!(hidden(&out, &"b".repeat(43)), "{out}");
+    assert!(!vault.holds_surface(live.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("duffel_test_{}", "a".repeat(42)),
+        format!("duffel_prod_{body}"),
+        format!("wordduffel_test_{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
