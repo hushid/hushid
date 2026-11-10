@@ -275,9 +275,12 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
             // A halfwidth middle dot is that separator. Leaving it out
             // sends the number.
             // A comma is that separator. Leaving it out sends the number.
+            // An ideographic comma is that separator. Leaving it out sends the number.
             Regex::new(&pattern.replace(
                 "{sep}",
-                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}\u{FF65},\u{FF0C}"),
+                &hyphen_class(
+                    r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}\u{FF65},\u{FF0C}\u{3001}\u{FF64}",
+                ),
             ))
             .expect("grouped card pattern")
         })
@@ -698,9 +701,12 @@ fn phone_pattern(body: &str) -> Regex {
             // A halfwidth middle dot is that separator. Leaving it out
             // sends the number.
             // A comma is that separator. Leaving it out sends the number.
+            // An ideographic comma is that separator. Leaving it out sends the number.
             .replace(
                 "{sep}",
-                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}\u{FF65},\u{FF0C}"),
+                &hyphen_class(
+                    r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}\u{FF65},\u{FF0C}\u{3001}\u{FF64}",
+                ),
             )
             .replace("{plus}", PLUS)
             .replace("{idd}", IDD)
@@ -737,8 +743,9 @@ fn international_sep_class() -> String {
     // sends the number.
     // A small parenthesis is that mark. Leaving it out sends the number.
     // A comma is that separator. Leaving it out sends the number.
+    // An ideographic comma is that separator. Leaving it out sends the number.
     hyphen_class(
-        r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FE59}\u{FE5A}\u{FF0E}\u{30FB}\u{00B7}\u{FF65},\u{FF0C}",
+        r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FE59}\u{FE5A}\u{FF0E}\u{30FB}\u{00B7}\u{FF65},\u{FF0C}\u{3001}\u{FF64}",
     )
 }
 

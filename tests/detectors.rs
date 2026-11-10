@@ -6306,3 +6306,45 @@ fn doppler_service_account_scim_and_audit_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn ideographic_comma_between_groups_still_shields_the_number() {
+    // An ideographic comma is that separator. Leaving it out sends the number.
+    let phone = "416\u{3001}555\u{3001}0123";
+    round_trip(phone, |audit| audit.phone);
+    let (vault, out, audit) = shield(phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert!(hidden(&out, "416"), "{phone} -> {out}");
+    assert!(hidden(&out, "555"), "{phone} -> {out}");
+    assert!(hidden(&out, "0123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let halfwidth = "416\u{FF64}555\u{FF64}0123";
+    round_trip(halfwidth, |audit| audit.phone);
+    let (vault, out, audit) = shield(halfwidth);
+    assert_eq!(audit.phone, 1, "{halfwidth} -> {out}");
+    assert!(hidden(&out, "416"), "{halfwidth} -> {out}");
+    assert!(hidden(&out, "555"), "{halfwidth} -> {out}");
+    assert!(hidden(&out, "0123"), "{halfwidth} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), halfwidth);
+
+    let card = "4111\u{3001}1111\u{3001}1111\u{3001}1111";
+    round_trip(card, |audit| audit.card);
+    let (vault, out, audit) = shield(card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(hidden(&out, "4111"), "{card} -> {out}");
+    assert!(hidden(&out, "1111"), "{card} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    for bare in [
+        "not\u{3001}a\u{3001}phone",
+        "4111\u{3001}1111\u{3001}1111\u{3001}1112",
+        "SIN 130\u{3001}692\u{3001}544",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
