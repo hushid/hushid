@@ -8880,3 +8880,48 @@ fn gitlab_session_cookie_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn yandex_aqvn_api_key_is_masked() {
+    // A Yandex API key is `AQVN` plus 35 to 38 characters. The value
+    // is not stored. A shorter body stays as written.
+    let token = format!("AQVN{}", "a".repeat(35));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "AQVN"), "{token} -> {out}");
+    assert!(hidden(&out, &"a".repeat(35)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let wide = format!("AQVN{}", "b".repeat(38));
+    let (vault, out, audit) = shield(&wide);
+    assert_eq!(audit.secret, 1, "{wide} -> {out}");
+    assert_eq!(out, "h1_secret", "{wide} -> {out}");
+    assert!(!vault.holds_surface(wide.as_bytes()), "{wide}");
+
+    let dashed = format!("AQVN{}-", "c".repeat(34));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, &"c".repeat(34)), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "AQVN"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("AQVN{}", "a".repeat(34)),
+        format!("AQVN{}", "a".repeat(39)),
+        format!("aqvn{}", "a".repeat(35)),
+        format!("xAQVN{}", "a".repeat(35)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
