@@ -5630,3 +5630,43 @@ fn small_commercial_at_still_shields_the_address() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn small_parentheses_still_shield_the_number() {
+    // `(416) 555-0123` is already a phone, and so is `+44 (20) 7946 0958`.
+    // A small parenthesis is that mark. Leaving it out sends the number.
+    // Five digits glued to the closing mark stay as written.
+    let open = "\u{FE59}";
+    let close = "\u{FE5A}";
+    let local = format!("{open}416{close} 555-0123");
+    let (vault, out, audit) = shield(&local);
+    assert_eq!(audit.phone, 1, "{local} -> {out}");
+    assert!(hidden(&out, "416"), "{local} -> {out}");
+    assert!(hidden(&out, "555"), "{local} -> {out}");
+    assert!(hidden(&out, "0123"), "{local} -> {out}");
+    assert!(!out.contains(open), "{local} -> {out}");
+    assert!(!out.contains(close), "{local} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), local);
+
+    let intl = format!("+44 {open}20{close} 7946 0958");
+    let (vault, out, audit) = shield(&intl);
+    assert_eq!(audit.phone, 1, "{intl} -> {out}");
+    assert!(hidden(&out, "44"), "{intl} -> {out}");
+    assert!(hidden(&out, "20"), "{intl} -> {out}");
+    assert!(hidden(&out, "7946"), "{intl} -> {out}");
+    assert!(hidden(&out, "0958"), "{intl} -> {out}");
+    assert!(!out.contains(open), "{intl} -> {out}");
+    assert!(!out.contains(close), "{intl} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), intl);
+
+    for bare in [
+        format!("{open}416{close}55501234"),
+        format!("+44{open}20{close}79460958"),
+        "not a phone".to_string(),
+        "555-0123".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
