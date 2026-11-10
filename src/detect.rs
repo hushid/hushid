@@ -944,6 +944,18 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stored.
             r"\bdckr_pat_(?:[A-Za-z0-9_-]{26}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{26}-)",
             r"\bdckr_oat_(?:[A-Za-z0-9_-]{31}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{31}-)",
+            // A Dropbox short-lived access token is `sl.` plus at
+            // least 130 letters, digits, underscores, or hyphens. A
+            // scoped token is `sl.u.` plus that same body.
+            // TruffleHog's dropbox detector publishes that shape. The
+            // OAuth guide sample starts with `sl.` and is longer than
+            // 130. The rules above do not see that prefix, so the
+            // token stays in the clear. A dot is not part of the
+            // body, so a sentence dot stays outside. A hyphen is part
+            // of the body, including a final one. A shorter body stays
+            // as written. An uppercase prefix stays as written. The
+            // value is not stored.
+            r"\bsl\.(?:u\.)?[A-Za-z0-9_-]{130,}",
             // A Linear personal API key is `lin_api_` plus 40
             // characters. Working with the GraphQL API is the page
             // that sends that key. The rules above do not see that
