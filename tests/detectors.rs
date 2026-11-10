@@ -8679,3 +8679,73 @@ fn facebook_page_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn harness_api_key_is_masked() {
+    // A Harness key is `pat.` or `sat.`, 22 characters, a dot, 24
+    // letters or digits, a dot, and 20 more. The value is not stored.
+    // A shorter segment stays as written. This is not the Airtable
+    // `pat` plus 14 characters.
+    let token = format!(
+        "pat.{}.{}.{}",
+        "a".repeat(22),
+        "b".repeat(24),
+        "c".repeat(20)
+    );
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pat."), "{token} -> {out}");
+    assert!(hidden(&out, &"c".repeat(20)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let sat = format!(
+        "sat.{}.{}.{}",
+        "d".repeat(22),
+        "e".repeat(24),
+        "f".repeat(20)
+    );
+    let (vault, out, audit) = shield(&sat);
+    assert_eq!(audit.secret, 1, "{sat} -> {out}");
+    assert_eq!(out, "h1_secret", "{sat} -> {out}");
+    assert!(!vault.holds_surface(sat.as_bytes()), "{sat}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "pat."), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!(
+            "pat.{}.{}.{}",
+            "a".repeat(21),
+            "b".repeat(24),
+            "c".repeat(20)
+        ),
+        format!(
+            "pat.{}.{}.{}",
+            "a".repeat(22),
+            "b".repeat(24),
+            "c".repeat(19)
+        ),
+        format!(
+            "PAT.{}.{}.{}",
+            "a".repeat(22),
+            "b".repeat(24),
+            "c".repeat(20)
+        ),
+        format!(
+            "xpat.{}.{}.{}",
+            "a".repeat(22),
+            "b".repeat(24),
+            "c".repeat(20)
+        ),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
