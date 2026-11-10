@@ -662,6 +662,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // The value is not stored. A shorter body and a longer
             // body stay as written.
             r"\bico-[A-Za-z0-9]{32}\b",
+            // A Settlemint token is `sm_aat_`, `sm_pat_`, or `sm_sat_`
+            // plus 16 letters or digits. The value is not stored. A
+            // shorter body stays as written.
+            r"\bsm_(?:aat|pat|sat)_[A-Za-z0-9]{16}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
