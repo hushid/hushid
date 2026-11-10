@@ -545,6 +545,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // longer body stay as written.
             r"\bAKCp[A-Za-z0-9]{69}\b",
             r"\bcmVmd[A-Za-z0-9]{59}\b",
+            // An age identity file secret is `AGE-SECRET-KEY-1` plus
+            // 58 Bech32 characters. The value is not stored. A shorter
+            // body stays as written. A character outside that alphabet
+            // stays outside the key.
+            r"\bAGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
