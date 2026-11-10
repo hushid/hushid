@@ -828,6 +828,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // inside the mark. A shorter second segment stays as
             // written. The value is not stored.
             r"(?i)\bt1\.[A-Za-z0-9_-]+={0,2}\.[A-Za-z0-9_-]{86}={0,2}",
+            // A Yandex IAM cookie is `c1.` with that same body.
+            // Yandex Cloud secret search publishes this shape.
+            // The `t1.` rule does not see this prefix. The prefix
+            // may be any case. The word is not required. A final
+            // `=` stays inside the mark. A shorter second segment
+            // stays as written. The value is not stored.
+            r"(?i)\bc1\.[A-Za-z0-9_-]+={0,2}\.[A-Za-z0-9_-]{86}={0,2}",
             // A Yandex API key is `AQVN` plus 35 to 38 token
             // characters. gitleaks yandex-api-key. The `t1.` rule
             // does not see this prefix. The word is not required. A

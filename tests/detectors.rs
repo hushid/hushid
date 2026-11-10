@@ -8473,6 +8473,50 @@ fn yandex_iam_token_is_masked() {
 }
 
 #[test]
+fn yandex_iam_cookie_is_masked() {
+    // A Yandex IAM cookie starts with `c1.`. The `t1.` rule does
+    // not see this prefix. The value is not stored. A shorter
+    // second segment stays as written.
+    let token = format!("c1.{}.{}", "a".repeat(8), "b".repeat(86));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "c1."), "{token} -> {out}");
+    assert!(hidden(&out, &"b".repeat(86)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let upper = format!("C1.{}.{}", "c".repeat(8), "d".repeat(86));
+    let (vault, out, audit) = shield(&upper);
+    assert_eq!(audit.secret, 1, "{upper} -> {out}");
+    assert_eq!(out, "h1_secret", "{upper} -> {out}");
+    assert!(!vault.holds_surface(upper.as_bytes()), "{upper}");
+
+    let padded = format!("c1.{}=.{}==", "e".repeat(8), "f".repeat(86));
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, "="), "{padded} -> {out}");
+    assert!(!vault.holds_surface(padded.as_bytes()), "{padded}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "c1."), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("c1.{}.{}", "a".repeat(8), "b".repeat(85)),
+        format!("xc1.{}.{}", "a".repeat(8), "b".repeat(86)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn airtable_access_token_is_masked() {
     // An Airtable token is `pat`, 14 characters, a dot, and 64 hex
     // characters. The value is not stored. A shorter group stays
