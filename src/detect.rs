@@ -774,6 +774,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // case. A final `=` or hyphen stays inside the mark.
             // A shorter group stays as written. The value is not stored.
             r"(?i)\bdnkey-(?:[a-z0-9=_-]{26}-[a-z0-9=_-]{51}[a-z0-9_]\b|[a-z0-9=_-]{26}-[a-z0-9=_-]{51}[-=])",
+            // An Atlassian API token is `ATATT3` plus 186 letters,
+            // digits, underscores, hyphens, or equals signs. gitleaks
+            // atlassian-api-token. The word-gated alternative is not
+            // used. A final hyphen or `=` stays inside the mark. A
+            // shorter body stays as written. The value is not stored.
+            r"\bATATT3(?:[A-Za-z0-9_\-=]{185}[A-Za-z0-9_]\b|[A-Za-z0-9_\-=]{185}[-=])",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
