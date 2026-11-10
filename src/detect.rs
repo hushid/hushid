@@ -505,6 +505,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // the token. The payload alphabet and the 10-character minimum
             // match `xoxb-`. A short payload stays as written.
             r"\bxwfp-[0-9A-Za-z-]{10,}",
+            // A Slack webhook is hooks.slack.com, then services,
+            // workflows, or triggers, then 43 to 56 token characters.
+            // gitleaks slack-webhook-url. The xox rules above do not
+            // see that host. A final `+` or `/` is not a word
+            // boundary. A shorter path stays as written. A longer
+            // path of only letters stays too. The value is not stored.
+            r"https?://hooks\.slack\.com/(?:services|workflows|triggers)/(?:[A-Za-z0-9+/]{42,55}[A-Za-z0-9]\b|[A-Za-z0-9+/]{42,55}[+/])",
+            r"hooks\.slack\.com/(?:services|workflows|triggers)/(?:[A-Za-z0-9+/]{42,55}[A-Za-z0-9]\b|[A-Za-z0-9+/]{42,55}[+/])",
             // Stripe webhook signing secret. Leaving the prefix out sends it.
             r"\bwhsec_[A-Za-z0-9]{20,}\b",
             r"\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{10,}\b",

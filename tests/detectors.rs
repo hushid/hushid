@@ -8295,3 +8295,58 @@ fn azure_ad_client_secret_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn slack_webhook_url_is_masked() {
+    // A Slack webhook is hooks.slack.com, then services, workflows,
+    // or triggers, then 43 to 56 token characters. The value is not
+    // stored. A shorter path stays as written.
+    let body = "A".repeat(43);
+    let token = format!("https://hooks.slack.com/services/{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "hooks.slack.com"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let wide = "B".repeat(56);
+    let workflow = format!("hooks.slack.com/workflows/{wide}");
+    let (vault, out, audit) = shield(&workflow);
+    assert_eq!(audit.secret, 1, "{workflow} -> {out}");
+    assert_eq!(out, "h1_secret", "{workflow} -> {out}");
+    assert!(hidden(&out, &wide), "{workflow} -> {out}");
+    assert!(!vault.holds_surface(workflow.as_bytes()), "{workflow}");
+
+    let trigger = format!("hooks.slack.com/triggers/{}", "C".repeat(43));
+    let (vault, out, audit) = shield(&trigger);
+    assert_eq!(audit.secret, 1, "{trigger} -> {out}");
+    assert_eq!(out, "h1_secret", "{trigger} -> {out}");
+    assert!(!vault.holds_surface(trigger.as_bytes()), "{trigger}");
+
+    let plus = format!("hooks.slack.com/services/{}+", "D".repeat(42));
+    let (vault, out, audit) = shield(&plus);
+    assert_eq!(audit.secret, 1, "{plus} -> {out}");
+    assert_eq!(out, "h1_secret", "{plus} -> {out}");
+    assert!(hidden(&out, "+"), "{plus} -> {out}");
+    assert!(!vault.holds_surface(plus.as_bytes()), "{plus}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "hooks.slack.com"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("https://hooks.slack.com/services/{}", "A".repeat(42)),
+        format!("https://hooks.slack.com/services/{}", "A".repeat(57)),
+        format!("https://hooks.slack.com/files/{body}"),
+        format!("https://example.com/services/{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
