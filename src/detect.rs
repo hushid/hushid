@@ -505,6 +505,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // `/`, so that alternative has no trailing word
             // boundary. The value is not stored.
             r"\bsntry(?:u_[a-f0-9]{64}\b|s_[A-Za-z0-9+/=]+_[A-Za-z0-9+/]{43})",
+            // A Resend API key is `re_`, 8 letters or digits, an
+            // underscore, and 24 more. Manage API keys is the page
+            // for these keys. The create API key response shows that
+            // body. The rules above do not see that prefix, so the
+            // key stays in the clear. A shorter body stays as
+            // written. A longer body stays too. The value is not
+            // stored.
+            r"\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

@@ -6414,3 +6414,41 @@ fn sentry_auth_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn resend_api_key_is_masked() {
+    // A Resend API key is `re_` plus a body. Manage API keys is the
+    // page for these keys. The create API key response is 8 letters
+    // or digits, an underscore, and 24 more. A shorter body stays as
+    // written. The value is not stored.
+    let body = format!("{}_{}", "a".repeat(8), "b".repeat(24));
+    assert_eq!(body.len(), 33);
+    let token = format!("re_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "re"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("re_a1BcDeF2_{}", "c".repeat(24));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "re"), "{out}");
+    assert!(hidden(&out, "a1"), "{out}");
+    assert!(hidden(&out, &"c".repeat(24)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("re_{}_{}", "a".repeat(8), "b".repeat(23)),
+        format!("wordre_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
