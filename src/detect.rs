@@ -269,9 +269,11 @@ fn push_cards(text: &str, out: &mut Vec<RawHit>) {
         .map(|pattern| {
             // A middle dot is that separator. A fullwidth solidus is the
             // slash above. Leaving either mark out sends the number.
+            // A halfwidth middle dot is that separator. Leaving it out
+            // sends the number.
             Regex::new(&pattern.replace(
                 "{sep}",
-                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}"),
+                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}\u{FF65}"),
             ))
             .expect("grouped card pattern")
         })
@@ -342,7 +344,9 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
     // A slash is not this separator. A fullwidth solidus is not one either.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         // A middle dot is that separator. Leaving it out sends the number.
-        let sep = hyphen_class(r"\s.\u{FF0E}\u{30FB}\u{00B7}");
+        // A halfwidth middle dot is that separator. Leaving it out
+        // sends the number.
+        let sep = hyphen_class(r"\s.\u{FF0E}\u{30FB}\u{00B7}\u{FF65}");
         Regex::new(&format!(r"\d{{3}}{sep}+\d{{3}}{sep}+\d{{3}}|\d{{9}}")).expect("sin pattern")
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -632,9 +636,11 @@ fn phone_pattern(body: &str) -> Regex {
         &body
             // A middle dot is that separator. A fullwidth solidus is that
             // slash. Leaving either mark out sends the number.
+            // A halfwidth middle dot is that separator. Leaving it out
+            // sends the number.
             .replace(
                 "{sep}",
-                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}"),
+                &hyphen_class(r"\s./\u{FF0F}\u{FF0E}\u{30FB}\u{00B7}\u{FF65}"),
             )
             .replace("{plus}", PLUS)
             .replace("{idd}", IDD)
@@ -666,7 +672,9 @@ const CLOSE_PAREN: &str = r"(?:\)|\u{FF09})";
 fn international_sep_class() -> String {
     // A middle dot is that separator. A fullwidth solidus is that
     // slash. Leaving either mark out sends the number.
-    hyphen_class(r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FF0E}\u{30FB}\u{00B7}")
+    // A halfwidth middle dot is that separator. Leaving it out
+    // sends the number.
+    hyphen_class(r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FF0E}\u{30FB}\u{00B7}\u{FF65}")
 }
 
 /// Longest prefix of `text[start..end]` that is one international number.
