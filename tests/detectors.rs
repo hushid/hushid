@@ -6255,6 +6255,93 @@ fn supabase_access_token_is_masked() {
 }
 
 #[test]
+fn docker_hub_access_token_is_masked() {
+    // TruffleHog's dockerhub detector matches `dckr_pat_` plus 27
+    // letters, digits, underscores, or hyphens, and `dckr_oat_` plus
+    // 32 of those characters. A shorter body and a longer body stay
+    // as written. The value is not stored.
+    let pat_body = "a90B2c3D4e5F6g7H8i9J0k1L2mN";
+    let oat_body = "b90C8d7E6f5G4h3I2j1K0l9M8n7O6pQ4";
+    assert_eq!(pat_body.len(), 27);
+    assert_eq!(oat_body.len(), 32);
+    for (prefix, body) in [("dckr_pat_", pat_body), ("dckr_oat_", oat_body)] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, prefix), "{token} -> {out}");
+        assert!(hidden(&out, "90"), "{token} -> {out}");
+        assert!(hidden(&out, &body[..8]), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let pat = format!("dckr_pat_{pat_body}");
+    let (vault, out, audit) = shield(&format!("see {pat}.next"));
+    assert_eq!(audit.secret, 1, "{pat} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{pat} -> {out}");
+    assert!(hidden(&out, "dckr_pat"), "{out}");
+    assert!(hidden(&out, "90"), "{out}");
+    assert!(!vault.holds_surface(pat.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let underscored_body = "a90B2c3D4e5F6g7H8i9J0k1L2_N";
+    assert_eq!(underscored_body.len(), 27);
+    let underscored = format!("dckr_pat_{underscored_body}");
+    let (vault, out, audit) = shield(&format!("{underscored}-next"));
+    assert_eq!(audit.secret, 1, "{underscored} -> {out}");
+    assert_eq!(out, "h1_secret-next", "{underscored} -> {out}");
+    assert!(hidden(&out, "90"), "{out}");
+    assert!(!vault.holds_surface(underscored.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let hyphen_tail = format!("dckr_pat_{}-", &pat_body[..26]);
+    assert_eq!(pat_body[..26].len() + 1, 27);
+    let (vault, out, audit) = shield(&format!("{hyphen_tail}.next"));
+    assert_eq!(audit.secret, 1, "{hyphen_tail} -> {out}");
+    assert_eq!(out, "h1_secret.next", "{hyphen_tail} -> {out}");
+    assert!(hidden(&out, "90"), "{out}");
+    assert!(!vault.holds_surface(hyphen_tail.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let oat_hyphen = format!("dckr_oat_{}-", &oat_body[..31]);
+    assert_eq!(oat_body[..31].len() + 1, 32);
+    let (vault, out, audit) = shield(&format!("{oat_hyphen}.next"));
+    assert_eq!(audit.secret, 1, "{oat_hyphen} -> {out}");
+    assert_eq!(out, "h1_secret.next", "{oat_hyphen} -> {out}");
+    assert!(hidden(&out, "90"), "{out}");
+    assert!(!vault.holds_surface(oat_hyphen.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let oat = format!("dckr_oat_{oat_body}");
+    let raw = format!(r#"{{"token":"{oat}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "90"), "{out}");
+    assert!(!vault.holds_surface(oat.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("dckr_pat_{}", &pat_body[..26]),
+        format!("dckr_pat_{pat_body}a"),
+        format!("dckr_oat_{}", &oat_body[..31]),
+        format!("dckr_oat_{oat_body}a"),
+        format!("dckr_pat_{oat_body}"),
+        format!("dckr_oat_{pat_body}"),
+        format!("DCKR_PAT_{pat_body}"),
+        format!("worddckr_pat_{pat_body}"),
+        "dckr_pat_124509ugsdjga93".to_string(),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn linear_api_key_is_masked() {
     // Working with the GraphQL API sends a personal API key. The key
     // is `lin_api_` plus 40 characters. A shorter body stays as
