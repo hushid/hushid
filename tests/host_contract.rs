@@ -511,6 +511,20 @@ fn published_name_glossary_shields_listed_names() {
 }
 
 #[test]
+fn canada_top_100_names_are_shielded() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("glossary/popular-names.txt");
+    let glossary = Glossary::load(&path).expect("published glossary");
+    let sample = "Muhammad met Violet and Isla";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, sample).unwrap();
+    assert_eq!(audit.glossary, 3, "{out}");
+    assert!(!out.contains("Muhammad"), "{out}");
+    assert!(!out.contains("Violet"), "{out}");
+    assert!(!out.contains("Isla"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sample);
+}
+
+#[test]
 fn published_name_glossary_shields_accented_quebec_names() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("glossary/popular-names.txt");
     let glossary = Glossary::load(&path).expect("published glossary");
