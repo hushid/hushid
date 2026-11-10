@@ -8089,3 +8089,49 @@ fn gitlab_runner_registration_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn planetscale_oauth_and_password_are_masked() {
+    // `pscale_oauth_` and `pscale_pw_` are not the service token.
+    // The value is not stored. A shorter body stays as written.
+    let body = "a".repeat(32);
+    let oauth = format!("pscale_oauth_{body}");
+    let password = format!("pscale_pw_{body}");
+    let password_upper = format!("PSCALE_PW_{body}");
+    for token in [&oauth, &password, &password_upper] {
+        let (vault, out, audit) = shield(token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, "pscale"), "{token} -> {out}");
+        assert!(hidden(&out, &body), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let wide = "b".repeat(64);
+    let token64 = format!("pscale_oauth_{wide}");
+    let (vault, out, audit) = shield(&token64);
+    assert_eq!(audit.secret, 1, "{token64} -> {out}");
+    assert_eq!(out, "h1_secret", "{token64} -> {out}");
+    assert!(hidden(&out, &wide), "{token64} -> {out}");
+    assert!(!vault.holds_surface(token64.as_bytes()), "{token64}");
+
+    let padded = format!("pscale_pw_{body}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(hidden(&out, "="), "{padded} -> {out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+
+    for bare in [
+        format!("pscale_oauth_{}", "a".repeat(31)),
+        format!("pscale_pw_{}", "a".repeat(31)),
+        format!("wordpscale_oauth_{body}"),
+        format!("PSCALE_OAUTH_{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

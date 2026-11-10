@@ -585,6 +585,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stays as written. A longer body stays too. The value is
             // not stored.
             r"\bpscale_tkn_[A-Za-z0-9=._\-]{32,64}",
+            // A PlanetScale OAuth token is `pscale_oauth_` plus 32 to
+            // 64 token characters. A password is `pscale_pw_` in any
+            // case, plus that same body. gitleaks planetscale-oauth-token
+            // and planetscale-password. The service-token rule does not
+            // see these prefixes. A final `=` stays inside the mark.
+            // A shorter body stays as written. The value is not stored.
+            r"\bpscale_oauth_[A-Za-z0-9=._\-]{32,64}",
+            r"(?i)\bpscale_pw_[A-Za-z0-9=._\-]{32,64}",
             // An OpenShift user token is `sha256~` plus 43 letters,
             // digits, underscores, or hyphens. gitleaks
             // openshift-user-token. A final hyphen is not a word
