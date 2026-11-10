@@ -923,6 +923,18 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stays as written. A shorter body and a longer body
             // stay as written. The value is not stored.
             r"\bsbp_(?:oauth_|v0_)?[a-f0-9]{40}\b",
+            // A Docker Hub personal access token is `dckr_pat_` plus
+            // 27 letters, digits, underscores, or hyphens. An
+            // organization access token is `dckr_oat_` plus 32 of
+            // those characters. TruffleHog's dockerhub detector
+            // publishes those lengths. The rules above do not see
+            // those prefixes, so the token stays in the clear. A
+            // final hyphen is not a word boundary. A shorter body
+            // stays as written. A longer body stays too. An
+            // uppercase prefix stays as written. The value is not
+            // stored.
+            r"\bdckr_pat_(?:[A-Za-z0-9_-]{26}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{26}-)",
+            r"\bdckr_oat_(?:[A-Za-z0-9_-]{31}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{31}-)",
             // A Linear personal API key is `lin_api_` plus 40
             // characters. Working with the GraphQL API is the page
             // that sends that key. The rules above do not see that
