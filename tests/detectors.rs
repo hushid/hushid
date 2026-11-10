@@ -6123,6 +6123,138 @@ fn xai_api_key_is_masked() {
 }
 
 #[test]
+fn supabase_secret_key_is_masked() {
+    // The self-hosted key generator builds `sb_secret_`, 22 URL-safe
+    // characters, `_`, and an 8-character checksum. A publishable key
+    // uses the same body and stays as written. A shorter body and a
+    // longer body stay as written. The value is not stored.
+    let random = "a1234567890bcdefghijkL";
+    let checksum = "Ab12cd3Z";
+    assert_eq!(random.len(), 22);
+    assert_eq!(checksum.len(), 8);
+    let token = format!("sb_secret_{random}_{checksum}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "sb_secret"), "{token} -> {out}");
+    assert!(hidden(&out, "1234567890"), "{token} -> {out}");
+    assert!(hidden(&out, "Ab12"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let dashed = format!("sb_secret_abcdefghij-lmnopqrstuv_{checksum}");
+    assert_eq!("abcdefghij-lmnopqrstuv".len(), 22);
+    let (vault, out, audit) = shield(&format!("see {dashed}.next"));
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{dashed} -> {out}");
+    assert!(hidden(&out, "sb_secret"), "{out}");
+    assert!(hidden(&out, "Ab12"), "{out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let (vault, out, audit) = shield(&format!("{token}-next"));
+    assert_eq!(audit.secret, 1, "{token}-next -> {out}");
+    assert_eq!(out, "h1_secret-next", "{token}-next -> {out}");
+    assert!(hidden(&out, "1234567890"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let hyphen_tail = "Ab12cd3-";
+    let underscore_tail = "Ab12cd3_";
+    assert_eq!(hyphen_tail.len(), 8);
+    assert_eq!(underscore_tail.len(), 8);
+    for tail in [hyphen_tail, underscore_tail] {
+        let ended = format!("sb_secret_{random}_{tail}");
+        let (vault, out, audit) = shield(&format!("{ended}.next"));
+        assert_eq!(audit.secret, 1, "{ended} -> {out}");
+        assert_eq!(out, "h1_secret.next", "{ended} -> {out}");
+        assert!(hidden(&out, "1234567890"), "{out}");
+        assert!(hidden(&out, "Ab12"), "{out}");
+        assert!(!vault.holds_surface(ended.as_bytes()));
+        assert!(vault.restore_write(&out).is_err());
+    }
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "1234567890"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let public = format!("sb_publishable_{random}_{checksum}");
+    for bare in [
+        format!("sb_secret_{}_Ab12cd3Z", "a1234567890bcdefghijk"),
+        format!("sb_secret_{random}_Ab12cd3"),
+        format!("sb_secret_{random}_Ab12cd3ZZ"),
+        format!("sb_secret_{}_Ab12cd3Z", "a1234567890bcdefghijkLM"),
+        public,
+        format!("wordsb_secret_{random}_{checksum}"),
+        format!("SB_SECRET_{random}_{checksum}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
+fn supabase_access_token_is_masked() {
+    // The CLI accepts `sbp_`, `sbp_oauth_`, or `sbp_v0_` plus 40
+    // lowercase hex characters. Uppercase hex stays as written. A
+    // shorter body and a longer body stay as written. The value is
+    // not stored.
+    let body = "0123456789abcdef0123456789abcdef01234567";
+    assert_eq!(body.len(), 40);
+    for prefix in ["sbp_", "sbp_oauth_", "sbp_v0_"] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, "sbp_"), "{token} -> {out}");
+        assert!(hidden(&out, "0123456789"), "{token} -> {out}");
+        assert!(hidden(&out, "abcdef"), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let token = format!("sbp_{body}");
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "0123456789"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "0123456789"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("sbp_{}", &body[..39]),
+        format!("sbp_{body}a"),
+        format!("sbp_oauth_{}", &body[..39]),
+        format!("sbp_v0_{body}a"),
+        format!("sbp_v1_{body}"),
+        format!("sbp_{}", body.to_ascii_uppercase()),
+        format!("SBP_{body}"),
+        format!("wordsbp_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn linear_api_key_is_masked() {
     // Working with the GraphQL API sends a personal API key. The key
     // is `lin_api_` plus 40 characters. A shorter body stays as

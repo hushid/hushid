@@ -906,6 +906,23 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // An uppercase prefix stays as written. The value is not
             // stored.
             r"\bxai-[A-Za-z0-9]{80}\b",
+            // A Supabase secret key is `sb_secret_`, 22 URL-safe
+            // characters, `_`, and an 8-character checksum. The
+            // self-hosted key generator publishes that shape. The
+            // publishable key `sb_publishable_` is meant to be
+            // public and stays as written. A shorter body and a
+            // longer body stay as written. A final hyphen or
+            // underscore on the checksum stays inside the mark.
+            // The value is not stored.
+            r"\bsb_secret_[A-Za-z0-9_-]{22}_(?:[A-Za-z0-9_-]{7}[A-Za-z0-9]\b|[A-Za-z0-9_-]{7}[_-])",
+            // A Supabase personal access token is `sbp_` plus 40
+            // lowercase hex characters. An OAuth token is
+            // `sbp_oauth_` and a versioned token is `sbp_v0_`,
+            // each plus that same body. The CLI access-token
+            // pattern publishes those three shapes. Uppercase hex
+            // stays as written. A shorter body and a longer body
+            // stay as written. The value is not stored.
+            r"\bsbp_(?:oauth_|v0_)?[a-f0-9]{40}\b",
             // A Linear personal API key is `lin_api_` plus 40
             // characters. Working with the GraphQL API is the page
             // that sends that key. The rules above do not see that
