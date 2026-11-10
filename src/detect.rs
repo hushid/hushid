@@ -200,7 +200,7 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     // parenthesis is that same mark. A trunk zero may sit against the
     // next digits (`+33 (0)1`). A later group may
     // hold more than four digits (`+44 7700 900123`). Five or more
-    // digits glued to `)` or `）` are still a bare tail
+    // digits glued to `)`, `）`, or `﹚` are still a bare tail
     // (`+44 (20)79460958`).
     // The NANP separator stays without parentheses, so a bare
     // `(416)5550123` is still not a phone. Whitespace may sit between
@@ -674,15 +674,17 @@ const IDD: &str = r"(?:(?:0|\u{FF10})(?:1|\u{FF11})(?:1|\u{FF11})|(?:0|\u{FF10})
 
 /// ASCII parentheses and the fullwidth pair. A wide-character keyboard
 /// writes those marks around a group. Leaving them out sends the number.
-const OPEN_PAREN: &str = r"(?:\(|\u{FF08})";
-const CLOSE_PAREN: &str = r"(?:\)|\u{FF09})";
+/// A small parenthesis is that mark. Leaving it out sends the number.
+const OPEN_PAREN: &str = r"(?:\(|\u{FF08}|\u{FE59})";
+const CLOSE_PAREN: &str = r"(?:\)|\u{FF09}|\u{FE5A})";
 
 fn international_sep_class() -> String {
     // A middle dot is that separator. A fullwidth solidus is that
     // slash. Leaving either mark out sends the number.
     // A halfwidth middle dot is that separator. Leaving it out
     // sends the number.
-    hyphen_class(r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FF0E}\u{30FB}\u{00B7}\u{FF65}")
+    // A small parenthesis is that mark. Leaving it out sends the number.
+    hyphen_class(r"\s./\u{FF0F}()\u{FF08}\u{FF09}\u{FE59}\u{FE5A}\u{FF0E}\u{30FB}\u{00B7}\u{FF65}")
 }
 
 /// Longest prefix of `text[start..end]` that is one international number.
@@ -843,14 +845,15 @@ fn idd_prefix_digits(slice: &str) -> usize {
     }
 }
 
-/// Five or more digits glued to `)` or `）` are a bare tail, not another group.
+/// Five or more digits glued to `)`, `）`, or `﹚` are a bare tail, not another group.
 ///
 /// `+44 (20)79460958` is that tail. A fullwidth closing mark is the same
-/// tail. `+33 (0)1` still has a one-digit group against the parenthesis,
-/// and `+44 (0)7700 900123` keeps the space before the long group.
+/// tail. A small closing mark is that same tail. `+33 (0)1` still has a
+/// one-digit group against the parenthesis, and `+44 (0)7700 900123`
+/// keeps the space before the long group.
 fn glued_paren_tail(text: &str) -> bool {
     for (index, ch) in text.char_indices() {
-        if ch != ')' && ch != '\u{FF09}' {
+        if ch != ')' && ch != '\u{FF09}' && ch != '\u{FE5A}' {
             continue;
         }
         let mut digits = 0usize;
