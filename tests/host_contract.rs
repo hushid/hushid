@@ -578,6 +578,29 @@ fn vault_file_is_mode_0600_and_round_trips() {
 }
 
 #[test]
+fn popular_names_are_opt_in() {
+    let glossary = Glossary::popular_names();
+    let sample = "Olivia met Léo";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, sample).unwrap();
+    assert_eq!(audit.glossary, 2, "{out}");
+    assert!(!out.contains("Olivia"), "{out}");
+    assert!(!out.contains("Léo"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sample);
+
+    let ordinary = "The clinic is open";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, ordinary).unwrap();
+    assert_eq!(audit.glossary, 0, "{out}");
+    assert_eq!(out, ordinary);
+
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &Glossary::empty(), "Olivia met Léo").unwrap();
+    assert_eq!(audit.glossary, 0, "{out}");
+    assert_eq!(out, "Olivia met Léo");
+}
+
+#[test]
 fn quiet_surfaces_stay_out_of_the_tree() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(!root.join("README.md").exists());
