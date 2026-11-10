@@ -543,6 +543,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // alphabet. A shorter body stays as written. A trailing
             // `=` is padding and stays outside the token.
             r"\bpypi-[A-Za-z0-9_-]{85,}",
+            // A PyPI upload token starts with `pypi-AgEIcHlwaS5vcmc`
+            // and then 50 or more token characters. gitleaks
+            // pypi-upload-token. The 85-character rule above leaves a
+            // shorter macaroon in the clear. A final hyphen stays
+            // inside the mark. A shorter tail stays as written. The
+            // value is not stored.
+            r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}",
             // A Sentry personal auth token is `sntryu_` and 64 hex
             // characters. An organization auth token is `sntrys_`, a
             // base64 payload, `_`, and 43 base64 characters. The
