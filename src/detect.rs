@@ -776,6 +776,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // Uppercase hex stays as written.
             r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
+            // An Authress service client key is `scauth_`,
+            // `authress_`, `ext_`, or `sc_`, two short segments, the
+            // lowercase marker `acc`, and a long tail. gitleaks
+            // authress-service-client-access-key. A final `=` stays
+            // inside the mark. A shorter segment stays as written.
+            // The value is not stored.
+            r"\b(?:scauth|authress|ext|sc)_(?i:[a-z0-9]{5,30}\.[a-z0-9]{4,6}\.)acc[_-][a-z0-9-]{10,32}\.[a-z0-9+/_=-]{30,120}",
             // A Mapbox token is `pk.`, 60 letters or digits, a dot,
             // and 22 more. gitleaks mapbox-api-token. The prefix may
             // be any case. The word is not required. A shorter

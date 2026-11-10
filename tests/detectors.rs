@@ -8574,3 +8574,58 @@ fn cloudflare_origin_ca_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn authress_service_key_is_masked() {
+    // An Authress service client key contains `.acc_`. The value is
+    // not stored. A shorter segment stays as written.
+    let token = format!("sc_abcde.abcd.acc_{}.{}", "c".repeat(10), "d".repeat(30));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, ".acc_"), "{token} -> {out}");
+    assert!(hidden(&out, &"d".repeat(30)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let long_prefix = format!(
+        "scauth_ABCDE.ABCD.acc-{}.{}",
+        "e".repeat(32),
+        "f".repeat(120)
+    );
+    let (vault, out, audit) = shield(&long_prefix);
+    assert_eq!(audit.secret, 1, "{long_prefix} -> {out}");
+    assert_eq!(out, "h1_secret", "{long_prefix} -> {out}");
+    assert!(
+        !vault.holds_surface(long_prefix.as_bytes()),
+        "{long_prefix}"
+    );
+
+    let padded = format!(
+        "authress_abcde.abcd.acc_{}.{}=",
+        "g".repeat(10),
+        "h".repeat(29)
+    );
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, "="), "{padded} -> {out}");
+    assert!(!vault.holds_surface(padded.as_bytes()), "{padded}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, ".acc_"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("sc_abcd.abcd.acc_{}.{}", "c".repeat(10), "d".repeat(30)),
+        format!("sc_abcde.abcd.ACC_{}.{}", "c".repeat(10), "d".repeat(30)),
+        format!("x{}", token),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
