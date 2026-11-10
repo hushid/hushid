@@ -6995,3 +6995,41 @@ fn prefect_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn readme_api_token_is_masked() {
+    // A ReadMe API token is `rdme_` plus 70 lowercase letters or digits characters.
+    // The value is not stored. A shorter body, a longer body, and an
+    // uppercase body stay as written.
+    let digits = "0123456789";
+    let body = format!("{}z{}", "a".repeat(59), digits);
+    assert_eq!(body.len(), 70);
+    let token = format!("rdme_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "rdme"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(hidden(&out, digits), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "rdme"), "{out}");
+    assert!(hidden(&out, digits), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("rdme_{}", "a".repeat(69)),
+        format!("rdme_{}", "a".repeat(71)),
+        format!("rdme_{}", "ABCDEF0123456789".repeat(4) + "ABCDEF"),
+        format!("wordrdme_{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
