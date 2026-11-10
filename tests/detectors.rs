@@ -7356,3 +7356,38 @@ fn square_eaaa_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn clojars_api_token_is_masked() {
+    // A Clojars token is `CLOJARS_` plus 60 letters or digits. The
+    // prefix may be any case. The value is not stored. A shorter body
+    // and a longer body stay as written.
+    let body = "a".repeat(60);
+    assert_eq!(body.len(), 60);
+    let token = format!("CLOJARS_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "CLOJARS_"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let lower = format!("clojars_{}", "b".repeat(60));
+    let (vault, out, audit) = shield(&format!("see {lower}.next"));
+    assert_eq!(audit.secret, 1, "{lower} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{lower} -> {out}");
+    assert!(hidden(&out, "clojars_"), "{out}");
+    assert!(hidden(&out, &"b".repeat(60)), "{out}");
+    assert!(!vault.holds_surface(lower.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("CLOJARS_{}", "a".repeat(59)),
+        format!("CLOJARS_{}", "a".repeat(61)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
