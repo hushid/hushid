@@ -9769,4 +9769,10 @@ fn fullwidth_birth_digits_are_shielded() {
     let (_vault, out, audit) = shield(bad);
     assert_eq!(audit.birth, 0, "{out}");
     assert_eq!(out, bad, "{out}");
+
+    let year = "DOB \u{FF11}\u{FF19}\u{FF19}\u{FF14}-\u{FF10}\u{FF13}-\u{FF11}\u{FF15}";
+    let (vault, out, audit) = shield(year);
+    assert_eq!(audit.birth, 1, "{out}");
+    assert!(hidden(&out, "\u{FF11}\u{FF19}\u{FF19}\u{FF14}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), year);
 }
