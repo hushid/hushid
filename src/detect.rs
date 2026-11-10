@@ -503,6 +503,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stays as written. A longer body stays too. The value
             // is not stored.
             r"\blin_api_[A-Za-z0-9]{40}\b",
+            // A Doppler service token is `dp.st.` and a personal token
+            // is `dp.pt.`. The auth token formats page publishes a body
+            // of 40 to 44 letters or digits. A service token may put a
+            // config name of 2 to 35 characters between that prefix and
+            // the body. The service tokens page shows `dp.st.`. The
+            // rules above do not see those prefixes, so the token stays
+            // in the clear. A shorter body stays as written. A longer
+            // body stays too. The value is not stored.
+            r"\bdp\.(?:st\.(?:[a-z0-9_-]{2,35}\.)?|pt\.)[A-Za-z0-9]{40,44}\b",
             // An older Square access token is `sq0atp-` plus 22
             // characters. An older application secret is `sq0csp-`
             // plus 43. Square's access tokens page is where those
