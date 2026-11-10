@@ -523,6 +523,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // not stored.
             r"\bglsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8}\b",
             r"\bglc_[A-Za-z0-9+/]{32,400}={0,2}",
+            // A Heroku API key is `HRKU-AA` plus 58 letters, digits,
+            // underscores, or hyphens. gitleaks heroku-api-key-v2.
+            // A shorter body stays as written. A longer body stays
+            // too. The value is not stored.
+            r"\bHRKU-AA[0-9a-zA-Z_-]{58}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
