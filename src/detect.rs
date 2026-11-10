@@ -489,6 +489,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // alphabet. A shorter body stays as written. A trailing
             // `=` is padding and stays outside the token.
             r"\bpypi-[A-Za-z0-9_-]{85,}",
+            // An older Square access token is `sq0atp-` plus 22
+            // characters. An older application secret is `sq0csp-`
+            // plus 43. Square's access tokens page is where those
+            // credentials are issued. The rules above do not see
+            // those prefixes, so the token stays in the clear. A
+            // shorter body stays as written. A longer body stays
+            // too. The value is not stored.
+            r"\bsq0(?:atp-[A-Za-z0-9_-]{22}|csp-[A-Za-z0-9_-]{43})\b",
             // A Postman API key is `PMAK-`, 24 hex characters, a
             // hyphen, and 34 hex characters. Postman's authentication
             // page shows that shape. The rules above do not see that
