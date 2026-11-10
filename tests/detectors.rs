@@ -9376,3 +9376,74 @@ fn discord_webhook_url_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn dropbox_short_lived_token_is_masked() {
+    // TruffleHog's dropbox detector matches `sl.` plus at least 130
+    // letters, digits, underscores, or hyphens, and the scoped form
+    // `sl.u.` plus that same body. A shorter body stays as written.
+    // The value is not stored.
+    let fixture = "sl.4ihqlizKRm9J8tJvdBUecLPfYunjh3Nx73cUBGcRKpTFxRny3cYKdaQdzVF_rBIEO9emJaHyRWeM_tm5pYJFTc1TwYjM2fHlhSdhKkzHJjf5dx86fUlaO_eKY9r4ijZ8eD";
+    assert_eq!(fixture.len(), 133);
+    let body130 = format!("a1B{}", "c".repeat(127));
+    assert_eq!(body130.len(), 130);
+    let plain = format!("sl.{body130}");
+    let scoped = format!("sl.u.{body130}");
+    for (token, needle) in [
+        (fixture, "4ihq"),
+        (plain.as_str(), "a1B"),
+        (scoped.as_str(), "a1B"),
+    ] {
+        let (vault, out, audit) = shield(token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, "sl"), "{token} -> {out}");
+        assert!(hidden(&out, needle), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let (vault, out, audit) = shield(&format!("see {plain}.next"));
+    assert_eq!(audit.secret, 1, "{plain} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{plain} -> {out}");
+    assert!(hidden(&out, "a1B"), "{out}");
+    assert!(!vault.holds_surface(plain.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let hyphen = format!("sl.{}-", "d".repeat(129));
+    let (vault, out, audit) = shield(&format!("{hyphen}.next"));
+    assert_eq!(audit.secret, 1, "{hyphen} -> {out}");
+    assert_eq!(out, "h1_secret.next", "{hyphen} -> {out}");
+    assert!(hidden(&out, &"d".repeat(129)), "{out}");
+    assert!(!vault.holds_surface(hyphen.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let long = format!("sl.u.{}", "e".repeat(400));
+    let (vault, out, audit) = shield(&long);
+    assert_eq!(audit.secret, 1, "{long} -> {out}");
+    assert_eq!(out, "h1_secret", "{long} -> {out}");
+    assert!(hidden(&out, &"e".repeat(40)), "{out}");
+    assert!(!vault.holds_surface(long.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{plain}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "a1B"), "{out}");
+    assert!(!vault.holds_surface(plain.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("sl.{}", "c".repeat(129)),
+        format!("sl.u.{}", "c".repeat(129)),
+        format!("SL.{body130}"),
+        format!("wordsl.{body130}"),
+        "sl.not-a-token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
