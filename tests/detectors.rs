@@ -7426,3 +7426,57 @@ fn infracost_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn settlemint_token_is_masked() {
+    // A Settlemint token is `sm_aat_`, `sm_pat_`, or `sm_sat_` plus 16
+    // letters or digits. The value is not stored. A shorter body stays
+    // as written.
+    let body = "Ab12Cd34Ef56Gh78".to_string();
+    assert_eq!(body.len(), 16);
+    let token = format!("sm_aat_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "sm_aat_"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "sm_aat_"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let pat_body = "Zy98Xw76Vu54Ts32".to_string();
+    let pat = format!("sm_pat_{pat_body}");
+    let (vault, out, audit) = shield(&pat);
+    assert_eq!(audit.secret, 1, "{pat} -> {out}");
+    assert_eq!(out, "h1_secret", "{pat} -> {out}");
+    assert!(hidden(&out, "sm_pat_"), "{pat} -> {out}");
+    assert!(hidden(&out, &pat_body), "{pat} -> {out}");
+    assert!(!vault.holds_surface(pat.as_bytes()), "{pat}");
+    assert!(vault.restore_write(&out).is_err(), "{pat}");
+
+    let sat_body = "aB3cD4eF5gH6iJ7k".to_string();
+    let sat = format!("sm_sat_{sat_body}");
+    let (vault, out, audit) = shield(&sat);
+    assert_eq!(audit.secret, 1, "{sat} -> {out}");
+    assert_eq!(out, "h1_secret", "{sat} -> {out}");
+    assert!(hidden(&out, "sm_sat_"), "{sat} -> {out}");
+    assert!(hidden(&out, &sat_body), "{sat} -> {out}");
+    assert!(!vault.holds_surface(sat.as_bytes()), "{sat}");
+    assert!(vault.restore_write(&out).is_err(), "{sat}");
+
+    for bare in [
+        format!("sm_pat_{}", "a".repeat(15)),
+        format!("wordsm_aat_{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
