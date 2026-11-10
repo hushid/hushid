@@ -574,6 +574,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // hex characters. The value is not stored. A shorter body,
             // a longer body, and an uppercase hex body stay as written.
             r"\brubygems_[a-f0-9]{48}\b",
+            // A Prefect API token is `pnu_` plus 36 letters or digits.
+            // The value is not stored. A shorter body and a longer body
+            // stay as written.
+            r"\bpnu_[a-zA-Z0-9]{36}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
