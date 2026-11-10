@@ -434,8 +434,11 @@ fn push_ramq(text: &str, out: &mut Vec<RawHit>) {
         // The letters may be lowercase. A paste of `bouf 9451 1419`
         // is the same number as `BOUF 9451 1419`. The original case
         // is what gets restored.
-        Regex::new(r"(?i)\b[A-Z]{4}(?:[ \t-]+[0-9]{4}){2}\b|\b[A-Z]{4}[0-9]{8}\b")
-            .expect("ramq pattern")
+        let digit = DIGIT;
+        Regex::new(&format!(
+            r"(?i)\b[A-Z]{{4}}(?:[ \t\u{{FF0D}}-]+[{digit}]{{4}}){{2}}\b|\b[A-Z]{{4}}[{digit}]{{8}}\b"
+        ))
+        .expect("ramq pattern")
     });
     for hit in RE.find_iter(text) {
         if !digit_bounded(text, hit.start(), hit.end()) {
@@ -468,25 +471,30 @@ fn ramq_layout_ok(text: &str) -> bool {
 
 fn ramq_group_closed(text: &str, end: usize) -> bool {
     let rest = &text[end..];
-    let trimmed = rest.trim_start_matches([' ', '\t', '-']);
+    let trimmed = rest.trim_start_matches([' ', '\t', '-', '\u{FF0D}']);
     if trimmed.len() == rest.len() {
         return true;
     }
-    !trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+    !trimmed
+        .chars()
+        .next()
+        .is_some_and(|ch| narrow_digit(ch).is_some())
 }
 
 fn push_postal(text: &str, out: &mut Vec<RawHit>) {
     // A Canadian postal code is letter, digit, letter, an optional
-    // space or hyphen, digit, letter, digit. The letters D, F, I, O,
+    // space or hyphen, digit, letter, digit. A fullwidth digit is that
+    // same digit. The letters D, F, I, O,
     // Q, and U are not used. W and Z are not used first. A no-break
     // space is that same space. The shape alone is not enough. A
     // street in the same 40-character window, or a `postal code` /
     // `code postal` cue, has to sit next to it. A bare example stays
     // as written. The value is restored.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
-            r"(?i)\b[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z][ \t\u{00A0}-]?[0-9][ABCEGHJ-NPRSTV-Z][0-9]\b",
-        )
+        let digit = DIGIT;
+        Regex::new(&format!(
+            r"(?i)\b[ABCEGHJ-NPRSTVXY][{digit}][ABCEGHJ-NPRSTV-Z][ \t\u{{00A0}}\u{{FF0D}}-]?[{digit}][ABCEGHJ-NPRSTV-Z][{digit}]\b"
+        ))
         .expect("postal code")
     });
     static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -757,7 +765,7 @@ fn address_spans(text: &str) -> Vec<(usize, usize)> {
 
 fn address_patterns() -> &'static [Regex] {
     static RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-        let civic = r"\d{1,6}(?:-\d{1,6})?(?:[A-Za-z]\b)?";
+        let civic = r"\d{1,6}(?:[-\u{FF0D}]\d{1,6})?(?:[A-Za-z]\b)?";
         let gap = r"(?:\s*,\s*|\s+)";
         // `1st` and `2e` are street names. A letter word is the other name.
         let name = r"(?:\p{L}[\p{L}\p{M}'’‘.-]*|\d{1,2}(?:ère|ere|er|re|st|nd|rd|th|e)\b)";
