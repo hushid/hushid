@@ -834,6 +834,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // final hyphen stays inside the mark. A shorter body
             // stays as written. The value is not stored.
             r"\bAQVN(?:[A-Za-z0-9_-]{34,37}[A-Za-z0-9]\b|[A-Za-z0-9_-]{34,37}-)",
+            // A current Yandex API key is `AQW9` plus 35 to 38 token
+            // characters. Yandex Cloud secret search calls this
+            // yandex_cloud_api_key_v1. The `AQVN` rule does not see
+            // this prefix. The word is not required. A final hyphen
+            // stays inside the mark. A shorter body stays as written.
+            // The value is not stored.
+            r"\bAQW9(?:[A-Za-z0-9_-]{34,37}[A-Za-z0-9]\b|[A-Za-z0-9_-]{34,37}-)",
             // An Airtable personal access token is `pat`, 14 letters
             // or digits, a dot, and 64 lowercase hex characters.
             // gitleaks airtable-personnal-access-token. The word is
