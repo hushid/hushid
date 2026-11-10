@@ -600,6 +600,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // 40 hex characters. The value is not stored. A shorter
             // body and a longer body stay as written.
             r"\bshippo_(?:live|test)_[a-fA-F0-9]{40}\b",
+            // A Frame.io token is `fio-u-` plus 64 letters, digits,
+            // `_`, `-`, or `=`. This regex crate has no lookahead, so
+            // a body that ends on a letter or digit uses a word
+            // boundary, and a body that ends on `-` or `=` is exact.
+            // The value is not stored. A shorter body and a longer
+            // body stay as written.
+            r"\bfio-u-(?i:[a-z0-9_=-]{63}[a-z0-9_]\b|[a-z0-9_=-]{63}[-=])",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

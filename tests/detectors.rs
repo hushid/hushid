@@ -7182,3 +7182,41 @@ fn shippo_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn frameio_api_token_is_masked() {
+    // A Frame.io token is `fio-u-` plus 64 letters, digits, `_`, `-`,
+    // or `=`. The value is not stored. A shorter body, a longer body,
+    // and an uppercase prefix stay as written. A final `=` stays
+    // inside the mark.
+    let body = "a".repeat(64);
+    assert_eq!(body.len(), 64);
+    let token = format!("fio-u-{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "fio-u-"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let padded = format!("fio-u-{}=", "A".repeat(63));
+    let (vault, out, audit) = shield(&format!("see {padded}.next"));
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{padded} -> {out}");
+    assert!(hidden(&out, "fio-u-"), "{out}");
+    assert!(!out.contains('='), "{out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("fio-u-{}", "a".repeat(63)),
+        format!("fio-u-{}", "a".repeat(65)),
+        format!("FIO-U-{body}"),
+        format!("wordfio-u-{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
