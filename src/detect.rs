@@ -496,6 +496,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // in the clear. A shorter body stays as written. A longer
             // body stays too. The value is not stored.
             r"\bgsk_[A-Za-z0-9]{52}\b",
+            // A Linear personal API key is `lin_api_` plus 40
+            // characters. Working with the GraphQL API is the page
+            // that sends that key. The rules above do not see that
+            // prefix, so the key stays in the clear. A shorter body
+            // stays as written. A longer body stays too. The value
+            // is not stored.
+            r"\blin_api_[A-Za-z0-9]{40}\b",
             // An older Square access token is `sq0atp-` plus 22
             // characters. An older application secret is `sq0csp-`
             // plus 43. Square's access tokens page is where those
