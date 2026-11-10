@@ -695,6 +695,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // This is not the `glsa_` or `glc_` token.
             r"(?i)\beyJrIjoi[A-Za-z0-9]{70,400}={0,2}",
+            // An intra42 client secret is `s-s4t2ud-` or `s-s4t2af-`
+            // plus 64 hex characters. The hex may be any case. The
+            // value is not stored. A shorter body stays as written.
+            r"\bs-s4t2(?:ud|af)-(?i:[a-f0-9]{64})\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

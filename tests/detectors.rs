@@ -7691,3 +7691,35 @@ fn grafana_eyj_api_key_is_masked() {
     assert_eq!(audit.secret, 0, "{short} -> {out}");
     assert_eq!(out, short, "{short} -> {out}");
 }
+
+#[test]
+fn intra42_client_secret_is_masked() {
+    // An intra42 client secret is `s-s4t2ud-` or `s-s4t2af-` plus 64
+    // hex characters. The hex may be any case. The value is not stored.
+    // A shorter body stays as written.
+    let body = "a".repeat(64);
+    assert_eq!(body.len(), 64);
+    for prefix in ["s-s4t2ud-", "s-s4t2af-"] {
+        let token = format!("{prefix}{body}");
+        let (vault, out, audit) = shield(&token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, prefix), "{token} -> {out}");
+        assert!(hidden(&out, &body), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+
+        let (vault, out, audit) = shield(&format!("see {token}.next"));
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+        assert!(hidden(&out, prefix), "{out}");
+        assert!(hidden(&out, &body), "{out}");
+        assert!(!vault.holds_surface(token.as_bytes()));
+        assert!(vault.restore_write(&out).is_err());
+    }
+
+    let short = format!("s-s4t2ud-{}", "a".repeat(63));
+    let (_vault, out, audit) = shield(&short);
+    assert_eq!(audit.secret, 0, "{short} -> {out}");
+    assert_eq!(out, short, "{short} -> {out}");
+}
