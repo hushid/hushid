@@ -7851,3 +7851,39 @@ fn sourcegraph_access_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn terraform_atlasv1_token_is_masked() {
+    // A Terraform API token is 14 letters or digits, `.atlasv1.`, and
+    // 60 to 70 token characters. `atlasv1` stays lowercase. The value
+    // is not stored. A shorter tail stays as written.
+    let head = "a".repeat(14);
+    let tail = "b".repeat(60);
+    let token = format!("{head}.atlasv1.{tail}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "atlasv1"), "{token} -> {out}");
+    assert!(hidden(&out, &head), "{token} -> {out}");
+    assert!(hidden(&out, &tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "atlasv1"), "{out}");
+    assert!(hidden(&out, &head), "{out}");
+    assert!(hidden(&out, &tail), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("{head}.atlasv1.{}", "b".repeat(59)),
+        format!("{head}.ATLASV1.{tail}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
