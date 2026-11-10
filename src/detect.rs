@@ -768,6 +768,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // Uppercase hex stays as written.
             r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
+            // A Defined Networking token is `dnkey-`, 26 token
+            // characters, a hyphen, and 52 more. gitleaks
+            // defined-networking-api-token. The prefix may be any
+            // case. A final `=` or hyphen stays inside the mark.
+            // A shorter group stays as written. The value is not stored.
+            r"(?i)\bdnkey-(?:[a-z0-9=_-]{26}-[a-z0-9=_-]{51}[a-z0-9_]\b|[a-z0-9=_-]{26}-[a-z0-9=_-]{51}[-=])",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

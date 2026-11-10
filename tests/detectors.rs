@@ -8169,3 +8169,42 @@ fn pypi_upload_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn defined_networking_token_is_masked() {
+    // A Defined Networking token is `dnkey-`, 26 characters, a hyphen,
+    // and 52 more. The value is not stored. A shorter group stays
+    // as written.
+    let token = format!("dnkey-{}-{}", "a".repeat(26), "b".repeat(52));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "dnkey"), "{token} -> {out}");
+    assert!(hidden(&out, &"a".repeat(26)), "{token} -> {out}");
+    assert!(hidden(&out, &"b".repeat(52)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let upper = format!("DNKEY-{}-{}", "c".repeat(26), "d".repeat(52));
+    let (vault, out, audit) = shield(&upper);
+    assert_eq!(audit.secret, 1, "{upper} -> {out}");
+    assert_eq!(out, "h1_secret", "{upper} -> {out}");
+    assert!(!vault.holds_surface(upper.as_bytes()), "{upper}");
+
+    let dashed = format!("dnkey-{}-{}-", "e".repeat(26), "f".repeat(51));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, &"f".repeat(51)), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    for bare in [
+        format!("dnkey-{}-{}", "a".repeat(25), "b".repeat(52)),
+        format!("dnkey-{}-{}", "a".repeat(26), "b".repeat(51)),
+        format!("xdnkey-{}-{}", "a".repeat(26), "b".repeat(52)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
