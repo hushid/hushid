@@ -7767,3 +7767,35 @@ fn scalingo_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn maxmind_license_key_is_masked() {
+    // A MaxMind license key is 6 letters or digits, `_`, 29 letters or
+    // digits, and `_mmk`. The value is not stored. A shorter middle
+    // stays as written.
+    let middle = "A".repeat(29);
+    assert_eq!(middle.len(), 29);
+    let token = format!("abcdef_{middle}_mmk");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "abcdef"), "{token} -> {out}");
+    assert!(hidden(&out, &middle), "{token} -> {out}");
+    assert!(hidden(&out, "_mmk"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "abcdef"), "{out}");
+    assert!(hidden(&out, &middle), "{out}");
+    assert!(hidden(&out, "_mmk"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let bare = format!("abcdef_{}_mmk", "A".repeat(28));
+    let (_vault, out, audit) = shield(&bare);
+    assert_eq!(audit.secret, 0, "{bare} -> {out}");
+    assert_eq!(out, bare, "{bare} -> {out}");
+}

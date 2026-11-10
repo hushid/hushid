@@ -703,6 +703,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // The value is not stored. A shorter body stays as written.
             // A final hyphen stays inside the mark.
             r"\btk-us-(?:[A-Za-z0-9_-]{47}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{47}-)",
+            // A MaxMind license key is 6 letters or digits, `_`, 29
+            // letters or digits, and `_mmk`. The value is not stored.
+            // A shorter middle stays as written.
+            r"\b[A-Za-z0-9]{6}_[A-Za-z0-9]{29}_mmk\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
