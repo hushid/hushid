@@ -8846,3 +8846,37 @@ fn typeform_access_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn gitlab_session_cookie_is_masked() {
+    // A GitLab session cookie is `_gitlab_session=` plus 32
+    // lowercase letters or digits. The value is not stored. A
+    // shorter value stays as written.
+    let value = "a".repeat(32);
+    let cookie = format!("_gitlab_session={value}");
+    let (vault, out, audit) = shield(&cookie);
+    assert_eq!(audit.secret, 1, "{cookie} -> {out}");
+    assert_eq!(out, "h1_secret", "{cookie} -> {out}");
+    assert!(hidden(&out, "_gitlab_session="), "{cookie} -> {out}");
+    assert!(hidden(&out, &value), "{cookie} -> {out}");
+    assert!(!vault.holds_surface(cookie.as_bytes()), "{cookie}");
+    assert!(vault.restore_write(&out).is_err(), "{cookie}");
+
+    let sentence = format!("Cookie: {cookie}; Path=/");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "Cookie: h1_secret; Path=/", "{sentence} -> {out}");
+    assert!(hidden(&out, &value), "{out}");
+    assert!(!vault.holds_surface(cookie.as_bytes()));
+
+    for bare in [
+        format!("_gitlab_session={}", "a".repeat(31)),
+        format!("_gitlab_session={}", "A".repeat(32)),
+        format!("_gitlab_session={}", "a".repeat(33)),
+        format!("x_gitlab_session={value}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
