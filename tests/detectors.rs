@@ -5387,9 +5387,9 @@ fn fullwidth_plus_in_the_local_part_still_shields_the_address() {
 #[test]
 fn telegram_bot_token_is_masked() {
     // The Bot API describes a bot token as digits, a colon, and a
-    // secret. Its sample (`123456:` plus 34 characters) is not a fixed
-    // length. This rule uses 8 to 10 digits and a 35-character secret.
-    // A shorter tail stays as written. A bare number stays as written.
+    // secret. The id can be 5 to 16 digits. The secret is 35
+    // characters. A final hyphen stays inside the mark. A shorter
+    // tail stays as written. A bare number stays as written.
     let token = format!("12345678:{}", "a".repeat(35));
     let (vault, out, audit) = shield(&token);
     assert_eq!(audit.secret, 1, "{token} -> {out}");
@@ -5407,6 +5407,17 @@ fn telegram_bot_token_is_masked() {
     assert!(hidden(&out, &"b".repeat(35)), "{ten} -> {out}");
     assert!(!vault.holds_surface(ten.as_bytes()), "{ten}");
     assert!(vault.restore_write(&out).is_err(), "{ten}");
+
+    let five = format!("12345:{}", "d".repeat(35));
+    let sixteen = format!("{}:{}", "1".repeat(16), "e".repeat(35));
+    let dashed = format!("1234567:{}-", "f".repeat(34));
+    for token in [&five, &sixteen, &dashed] {
+        let (vault, out, audit) = shield(token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
 
     let tail = "c".repeat(35);
     let embedded_token = format!("123456789:{tail}");
@@ -5437,7 +5448,8 @@ fn telegram_bot_token_is_masked() {
     assert!(vault.restore_write(&out).is_err(), "{mixed}");
 
     for bare in [
-        format!("1234567:{}", "a".repeat(35)),
+        format!("1234:{}", "a".repeat(35)),
+        format!("{}:{}", "1".repeat(17), "a".repeat(35)),
         format!("123456789:{}", "a".repeat(34)),
         format!("123456789:{}", "a".repeat(36)),
         "123456789".to_string(),

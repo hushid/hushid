@@ -857,14 +857,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // prefix, so the key stays in the clear. A shorter body
             // stays as written. The value is not stored.
             r"\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b",
-            // A Telegram bot token is digits, a colon, and a
-            // 35-character secret. The Bot API sample is illustrative
-            // (`123456:` plus 34 characters) and does not fix the
-            // length. The rules above do not see this shape, so the
-            // token stays in the clear. A shorter tail stays as
-            // written. A longer tail stays too. A bare number stays.
-            // The value is not stored.
-            r"\b[0-9]{8,10}:[A-Za-z0-9_-]{35}\b",
+            // A Telegram bot token is 5 to 16 digits, a colon, and a
+            // 35-character secret. gitleaks telegram-bot-api-token
+            // allows that id length. The old 8-to-10 rule left a
+            // shorter or longer id in the clear. A final hyphen is
+            // not a word boundary, so that alternative has no
+            // trailing boundary. A shorter tail stays as written. A
+            // longer tail stays too. A bare number stays. The value
+            // is not stored.
+            r"\b[0-9]{5,16}:(?:[A-Za-z0-9_-]{34}[A-Za-z0-9]\b|[A-Za-z0-9_-]{34}-)",
             // A Shopify access token is `shpat_` (public and online
             // admin), `shpca_` (custom apps), `shppa_` (legacy private
             // apps), or `shpss_` (app secret). The body is 32 letters
