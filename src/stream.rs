@@ -3,6 +3,7 @@ use crate::token::{
     is_hold_symbol, parse_token_at, secret_mark_at, Kind, PAYLOAD_LEN, SECRET_MARK,
 };
 use crate::vault::Vault;
+use std::sync::LazyLock;
 
 /// Holds a suffix that can still grow into an `h1_` token.
 ///
@@ -95,14 +96,38 @@ fn hold_len(text: &str) -> usize {
 }
 
 fn is_incomplete_prefix(suffix: &str) -> bool {
-    let lower = suffix.to_ascii_lowercase();
+    // Only the first token's worth of bytes can still be incomplete.
+    // Lowercasing the whole suffix at every byte makes one large chunk
+    // quadratic. A longer body is not this prefix.
+    let mut end = peek_limit().min(suffix.len());
+    while end > 0 && !suffix.is_char_boundary(end) {
+        end -= 1;
+    }
+    let lower = suffix[..end].to_ascii_lowercase();
     if lower == SECRET_MARK {
         return false;
     }
     if SECRET_MARK.starts_with(&lower) {
         return true;
     }
-    for kind in [
+    for head in HEADS.iter() {
+        if head.starts_with(&lower) && lower.len() < head.len() {
+            return true;
+        }
+        if let Some(rest) = lower.strip_prefix(head.as_str()) {
+            return rest.len() < PAYLOAD_LEN + 1 && rest.bytes().all(is_hold_symbol);
+        }
+    }
+    false
+}
+
+fn peek_limit() -> usize {
+    let longest_head = HEADS.iter().map(String::len).max().unwrap_or(0);
+    longest_head.max(SECRET_MARK.len()) + PAYLOAD_LEN + 1 + 1
+}
+
+static HEADS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    [
         Kind::Email,
         Kind::Phone,
         Kind::Card,
@@ -112,14 +137,8 @@ fn is_incomplete_prefix(suffix: &str) -> bool {
         Kind::Address,
         Kind::Birth,
         Kind::Glossary,
-    ] {
-        let head = format!("h1_{}_", kind.as_str());
-        if head.starts_with(&lower) && lower.len() < head.len() {
-            return true;
-        }
-        if let Some(rest) = lower.strip_prefix(&head) {
-            return rest.len() < PAYLOAD_LEN + 1 && rest.bytes().all(is_hold_symbol);
-        }
-    }
-    false
-}
+    ]
+    .into_iter()
+    .map(|kind| format!("h1_{}_", kind.as_str()))
+    .collect()
+});

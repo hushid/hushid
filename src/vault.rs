@@ -205,6 +205,12 @@ impl Vault {
 
     pub fn load(path: &Path) -> Result<Self, VaultError> {
         let text = fs::read_to_string(path)?;
+        // Every record ends with a newline. A torn write has no final
+        // newline, and an even-length hex fragment would otherwise load
+        // as a shorter surface.
+        if text.is_empty() || !text.ends_with('\n') {
+            return Err(VaultError::Corrupt);
+        }
         let mut lines = text.lines();
         let header = lines.next().ok_or(VaultError::Corrupt)?;
         if header != HEADER {
@@ -327,6 +333,30 @@ fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
             fs::create_dir_all(parent)?;
         }
     }
+    // Write a new file, then rename it over the vault. Truncating the
+    // only copy first drops the map when the write fails or the process
+    // stops mid-write.
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("vault");
+    let tmp = parent.join(format!(".{name}.{}.tmp", std::process::id()));
+    if let Err(err) = write_new_file(&tmp, data) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
+    if let Err(err) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn write_new_file(path: &Path, data: &[u8]) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
