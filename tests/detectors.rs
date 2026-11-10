@@ -7071,3 +7071,40 @@ fn huggingface_org_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn adobe_client_secret_is_masked() {
+    // An Adobe client secret is `p8e-` plus 32 letters or digits.
+    // The value is not stored. A shorter body, a longer body, and
+    // an uppercase prefix stay as written.
+    let body = "a".repeat(32);
+    assert_eq!(body.len(), 32);
+    let token = format!("p8e-{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "p8e-"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("p8e-{}", "A1".repeat(16));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "p8e-"), "{out}");
+    assert!(hidden(&out, "A1"), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("p8e-{}", "a".repeat(31)),
+        format!("p8e-{}", "a".repeat(33)),
+        format!("P8E-{body}"),
+        format!("wordp8e-{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
