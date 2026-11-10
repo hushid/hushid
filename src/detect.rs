@@ -617,8 +617,9 @@ fn assignment_name() -> String {
 fn push_assignment_secrets(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         let name = assignment_name();
+        // A fullwidth equals or colon is that separator. Leaving it out sends the value.
         Regex::new(&format!(
-            r#"(?i)(?:^|[^A-Za-z0-9_])({name}"?\s*[=:]\s*["']?{SECRET_RUN})"#
+            r#"(?i)(?:^|[^A-Za-z0-9_])({name}"?\s*[=:\u{{FF1D}}\u{{FF1A}}]\s*["']?{SECRET_RUN})"#
         ))
         .expect("secret assignment pattern")
     });
