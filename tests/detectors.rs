@@ -9803,4 +9803,13 @@ fn fullwidth_birth_marks_follow_the_ascii_ones() {
     let (_vault, out, audit) = shield(crossed);
     assert_eq!(audit.birth, 0, "{out}");
     assert_eq!(out, crossed, "{out}");
+
+    for crossed in [
+        "I was born\u{FF01} The build is 1994-03-15.",
+        "I was born\u{FF1F} The build is 1994-03-15.",
+    ] {
+        let (_vault, out, audit) = shield(crossed);
+        assert_eq!(audit.birth, 0, "{crossed} -> {out}");
+        assert_eq!(out, crossed, "{crossed} -> {out}");
+    }
 }

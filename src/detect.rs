@@ -1673,10 +1673,19 @@ fn born_near(cues: &[(usize, usize)], start: usize, end: usize, text: &str) -> b
 }
 
 fn sentence_end(ch: char) -> bool {
-    // U+FF0E and U+FF61 are the wide and halfwidth stops already used as dots.
+    // Wide and halfwidth stops, and the wide ! and ?, are the same
+    // sentence ends as the ASCII marks.
     matches!(
         ch,
-        '.' | '!' | '?' | '\n' | '\r' | '\u{3002}' | '\u{FF0E}' | '\u{FF61}'
+        '.' | '!'
+            | '?'
+            | '\n'
+            | '\r'
+            | '\u{3002}'
+            | '\u{FF0E}'
+            | '\u{FF61}'
+            | '\u{FF01}'
+            | '\u{FF1F}'
     )
 }
 
