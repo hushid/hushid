@@ -6827,3 +6827,49 @@ fn brevo_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn dynatrace_api_token_is_masked() {
+    // A Dynatrace token is `dt0c01.`, 24 letters or digits, a dot,
+    // and 64 lowercase hex characters. The value is not stored. A
+    // shorter body stays as written. The prefix is case sensitive.
+    let head = "a1".repeat(12);
+    assert_eq!(head.len(), 24);
+    let tail = "abcdef01".repeat(8);
+    assert_eq!(tail.len(), 64);
+    let token = format!("dt0c01.{head}.{tail}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "dt0c01"), "{token} -> {out}");
+    assert!(hidden(&out, &head), "{token} -> {out}");
+    assert!(hidden(&out, &tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let upper_head = "A1B2C3D4E5F6".repeat(2);
+    assert_eq!(upper_head.len(), 24);
+    let upper_tail = "ABCDEF01".repeat(8);
+    assert_eq!(upper_tail.len(), 64);
+    let mixed = format!("dt0c01.{upper_head}.{upper_tail}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "dt0c01"), "{out}");
+    assert!(hidden(&out, &upper_head), "{out}");
+    assert!(hidden(&out, &upper_tail), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("dt0c01.{}.{tail}", "a".repeat(23)),
+        format!("dt0c01.{head}.{}", "b".repeat(63)),
+        format!("worddt0c01.{head}.{tail}"),
+        format!("DT0C01.{head}.{tail}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
