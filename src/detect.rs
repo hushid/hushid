@@ -719,6 +719,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stays lowercase. The value is not stored. A shorter
             // tail stays as written.
             r"(?i)[a-z0-9]{14}\.(?-i:atlasv1)\.[a-z0-9_=-]{60,70}",
+            // A Databricks token is `dapi` plus 32 lowercase hex
+            // characters, with an optional hyphen and one digit. The
+            // value is not stored. A shorter body stays as written.
+            // Uppercase hex stays as written.
+            r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
