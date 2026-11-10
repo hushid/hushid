@@ -6924,3 +6924,39 @@ fn easypost_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn rubygems_api_token_is_masked() {
+    // A RubyGems API token is `rubygems_` plus 48 lowercase hex
+    // characters. The value is not stored. A shorter body, a longer
+    // body, and an uppercase hex body stay as written.
+    let body = "a".repeat(48);
+    assert_eq!(body.len(), 48);
+    let token = format!("rubygems_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "rubygems"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "rubygems"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("rubygems_{}", "a".repeat(47)),
+        format!("rubygems_{}", "a".repeat(49)),
+        format!("rubygems_{}", "A".repeat(48)),
+        format!("wordrubygems_{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
