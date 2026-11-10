@@ -6658,3 +6658,54 @@ fn perplexity_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn artifactory_token_is_masked() {
+    // An Artifactory API key is `AKCp` plus 69 letters or digits. A
+    // reference token is `cmVmd` plus 59 letters or digits. The value
+    // is not stored. A shorter body and a longer body stay as written.
+    let body = "a".repeat(69);
+    assert_eq!(body.len(), 69);
+    let token = format!("AKCp{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "AKCp"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let ref_body = "b".repeat(59);
+    assert_eq!(ref_body.len(), 59);
+    let reference = format!("cmVmd{ref_body}");
+    let (vault, out, audit) = shield(&reference);
+    assert_eq!(audit.secret, 1, "{reference} -> {out}");
+    assert_eq!(out, "h1_secret", "{reference} -> {out}");
+    assert!(hidden(&out, "cmVmd"), "{reference} -> {out}");
+    assert!(hidden(&out, &ref_body), "{reference} -> {out}");
+    assert!(!vault.holds_surface(reference.as_bytes()), "{reference}");
+    assert!(vault.restore_write(&out).is_err(), "{reference}");
+
+    let mixed_body = format!("a1Bc{}", "d".repeat(65));
+    assert_eq!(mixed_body.len(), 69);
+    let mixed = format!("AKCp{mixed_body}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "AKCp"), "{out}");
+    assert!(hidden(&out, "a1Bc"), "{out}");
+    assert!(hidden(&out, &"d".repeat(65)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("AKCp{}", "a".repeat(68)),
+        format!("AKCp{}", "a".repeat(70)),
+        format!("cmVmd{}", "b".repeat(58)),
+        format!("wordAKCp{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
