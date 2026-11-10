@@ -558,6 +558,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // characters, a hyphen, and 16 more letters or digits.
             // The value is not stored. A shorter body stays as written.
             r"\bxkeysib-[a-f0-9]{64}-(?i:[a-z0-9]{16})\b",
+            // A Dynatrace token is `dt0c01.`, 24 letters or digits,
+            // a dot, and 64 more. Both bodies may be any case. The
+            // prefix is case sensitive. The value is not stored. A
+            // shorter body stays as written.
+            r"\bdt0c01\.(?i:[a-z0-9]{24}\.[a-z0-9]{64})\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
