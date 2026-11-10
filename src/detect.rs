@@ -780,6 +780,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // used. A final hyphen or `=` stays inside the mark. A
             // shorter body stays as written. The value is not stored.
             r"\bATATT3(?:[A-Za-z0-9_\-=]{185}[A-Za-z0-9_]\b|[A-Za-z0-9_\-=]{185}[-=])",
+            // An Azure AD client secret is 3 token characters, a
+            // digit, `Q~`, and 31 to 34 more token characters.
+            // gitleaks azure-ad-client-secret. A final hyphen, dot,
+            // or tilde stays inside the mark when it follows 30
+            // token characters. Letting that punctuation follow a
+            // longer run also takes a sentence dot. A shorter tail
+            // stays as written. The value is not stored.
+            r"\b[A-Za-z0-9_~.]{3}\dQ~(?:[A-Za-z0-9_~.-]{30,33}[A-Za-z0-9_]\b|[A-Za-z0-9_~.-]{30}[.~-]{1,4})",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

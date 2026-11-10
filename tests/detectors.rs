@@ -8249,3 +8249,49 @@ fn atlassian_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn azure_ad_client_secret_is_masked() {
+    // An Azure AD client secret contains `Q~`. The value is not stored.
+    // A shorter tail stays as written.
+    let token = format!("abc8Q~{}", "a".repeat(31));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "Q~"), "{token} -> {out}");
+    assert!(hidden(&out, &"a".repeat(31)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let wide = format!("abc8Q~{}", "b".repeat(34));
+    let (vault, out, audit) = shield(&wide);
+    assert_eq!(audit.secret, 1, "{wide} -> {out}");
+    assert_eq!(out, "h1_secret", "{wide} -> {out}");
+    assert!(hidden(&out, &"b".repeat(34)), "{wide} -> {out}");
+    assert!(!vault.holds_surface(wide.as_bytes()), "{wide}");
+
+    let dashed = format!("abc8Q~{}-", "c".repeat(30));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, "Q~"), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "Q~"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("abc8Q~{}", "a".repeat(30)),
+        format!("abc8Q~{}", "a".repeat(35)),
+        format!("xabc8Q~{}", "a".repeat(31)),
+        format!("abc8q~{}", "a".repeat(31)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
