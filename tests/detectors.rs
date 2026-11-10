@@ -9872,6 +9872,24 @@ fn ideographic_space_in_a_postal_code_is_shielded() {
 }
 
 #[test]
+fn decomposed_french_street_accent_is_shielded() {
+    let samples = [
+        "123 monte\u{0301}e Saint-Denis",
+        "8 alle\u{0301}e des Erables",
+        "12 co\u{0302}te Saint-Denis",
+        "4 carre\u{0301} Saint-Denis",
+        "unite\u{0301} 4, 123 rue Saint-Denis",
+        "45 2e\u{0300}re Avenue",
+    ];
+    for sample in samples {
+        let (vault, out, audit) = shield(sample);
+        assert_eq!(audit.address, 1, "{sample} -> {out}");
+        assert!(out.contains("h1_address_"), "{sample} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sample);
+    }
+}
+
+#[test]
 fn fullwidth_letters_in_a_postal_code_and_health_number_are_shielded() {
     let postal = "postal code \u{FF28}\u{FF12}\u{FF38}\u{3000}\u{FF11}\u{FF39}\u{FF14}";
     let (vault, out, audit) = shield(postal);

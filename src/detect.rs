@@ -812,14 +812,18 @@ fn address_patterns() -> &'static [Regex] {
         let civic = r"\d{1,6}(?:[-\u{FF0D}]\d{1,6})?(?:[A-Za-z]\b)?";
         let gap = r"(?:\s*,\s*|\s+)";
         // `1st` and `2e` are street names. A letter word is the other name.
-        let name = r"(?:\p{L}[\p{L}\p{M}'’‘.-]*|\d{1,2}(?:ère|ere|er|re|st|nd|rd|th|e)\b)";
+        // `ère` is also the decomposed form, e plus a grave accent.
+        let ordinal = "ère|ere|e\u{0300}re|er|re|st|nd|rd|th|e";
+        let name = format!(r"(?:\p{{L}}[\p{{L}}\p{{M}}'’‘.-]*|\d{{1,2}}(?:{ordinal})\b)");
         // A short type uses this name. The first letter has to be uppercase.
         let capital_name =
-            r"(?-i:\p{Lu}[\p{L}\p{M}'’‘.-]*|\d{1,2}(?:ère|ere|er|re|st|nd|rd|th|e)\b)";
+            format!(r"(?-i:\p{{Lu}}[\p{{L}}\p{{M}}'’‘.-]*|\d{{1,2}}(?:{ordinal})\b)");
         let particle = r"(?:de|du|des|la|le|les|au|aux)\s+|d['’‘]|l['’‘]";
         let direction = "Ouest|OUEST|Est|EST|Nord|NORD|Sud|SUD|West|WEST|East|EAST|North|NORTH|South|SOUTH|[NESWO]";
-        let unit = r"(?:(?:appartement|apartment|appart|apt|app|suite|bureau|unité|unite|unit)\.?\s+#?\d{1,6}[A-Za-z]?\s*,\s+)?";
-        let french_type = "boulevard|avenue|chemin|croissant|terrasse|impasse|promenade|ruelle|sentier|montée|montee|allée|allee|cercle|carré|carre|côte|cote|place|rang|voie|rue|boul|blvd|ave|av";
+        let unit = "(?:(?:appartement|apartment|appart|apt|app|suite|bureau|unité|unite|unite\u{0301}|unit)\\.?\\s+#?\\d{1,6}[A-Za-z]?\\s*,\\s+)?";
+        // Decomposed accents are the same words. A file saved as NFD
+        // writes `e` plus a combining mark where the composed letter is.
+        let french_type = "boulevard|avenue|chemin|croissant|terrasse|impasse|promenade|ruelle|sentier|montée|montee|monte\u{0301}e|allée|allee|alle\u{0301}e|cercle|carré|carre|carre\u{0301}|côte|cote|co\u{0302}te|place|rang|voie|rue|boul|blvd|ave|av";
         let english_type = "boulevard|crescent|terrace|parkway|highway|street|avenue|circle|drive|court|trail|gardens|heights|square|alley|route|place|ridge|point|road|lane|blvd|pkwy|cres|terr|hwy|ave|cir|trl|gdns|hts|aly|rte";
         let short_type = "way|st|rd|dr|ct|ln|pl|pt|sq";
         let french = format!(
