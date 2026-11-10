@@ -8135,3 +8135,37 @@ fn planetscale_oauth_and_password_are_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn pypi_upload_token_is_masked() {
+    // `pypi-AgEIcHlwaS5vcmc` plus 50 characters is shorter than the
+    // 85-character PyPI rule. The value is not stored.
+    let body = "a".repeat(50);
+    let token = format!("pypi-AgEIcHlwaS5vcmc{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pypi-"), "{token} -> {out}");
+    assert!(hidden(&out, "AgEIcHlwaS5vcmc"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let dashed = format!("pypi-AgEIcHlwaS5vcmc{}-", "b".repeat(49));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, "AgEIcHlwaS5vcmc"), "{dashed} -> {out}");
+    assert!(hidden(&out, "-"), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    for bare in [
+        format!("pypi-AgEIcHlwaS5vcmc{}", "a".repeat(49)),
+        format!("pypi-ageichlwas5vcmc{body}"),
+        format!("xpypi-AgEIcHlwaS5vcmc{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
