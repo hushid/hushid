@@ -578,6 +578,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // The value is not stored. A shorter body and a longer body
             // stay as written.
             r"\bpnu_[a-zA-Z0-9]{36}\b",
+            // A ReadMe API token is `rdme_` plus 70 lowercase letters
+            // or digits. Letters past `f` are part of the token. The
+            // value is not stored. A shorter body, a longer body, and
+            // an uppercase body stay as written.
+            r"\brdme_[a-z0-9]{70}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
