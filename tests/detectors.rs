@@ -7660,3 +7660,34 @@ fn flutterwave_test_key_is_masked() {
     assert_eq!(out, short, "{short} -> {out}");
     assert!(!hidden(&out, "FLWSECK_TEST"), "{short} -> {out}");
 }
+
+#[test]
+fn grafana_eyj_api_key_is_masked() {
+    // A Grafana API key starts with `eyJrIjoi` and then 70 to 400
+    // letters or digits, with optional `=` padding. The value is not
+    // stored. A shorter body stays as written. This is not the
+    // `glsa_` or `glc_` token.
+    let body = "A".repeat(70);
+    assert_eq!(body.len(), 70);
+    let token = format!("eyJrIjoi{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "eyJrIjoi"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "eyJrIjoi"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let short = format!("eyJrIjoi{}", "A".repeat(69));
+    let (_vault, out, audit) = shield(&short);
+    assert_eq!(audit.secret, 0, "{short} -> {out}");
+    assert_eq!(out, short, "{short} -> {out}");
+}
