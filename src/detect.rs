@@ -590,6 +590,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // digits. The value is not stored. A shorter body and a
             // longer body stay as written.
             r"\bpplx-[a-zA-Z0-9]{48}\b",
+            // A New Relic browser key is `NRJS-` plus 19 hex characters.
+            // A user key is `NRAK-` plus 27 letters or digits. An insert
+            // key is `NRII-` plus 32 letters, digits, or hyphens. The
+            // prefix is the token. A final hyphen on an insert key is
+            // not a word boundary. A shorter body stays as written.
+            // The value is not stored.
+            r"\bNRJS-[a-f0-9]{19}\b",
+            r"\bNRAK-[a-z0-9]{27}\b",
+            r"\bNRII-(?:[a-z0-9-]{31}[a-z0-9]\b|[a-z0-9-]{31}-)",
             // An Artifactory API key is `AKCp` plus 69 letters or
             // digits. A reference token is `cmVmd` plus 59 letters or
             // digits. The value is not stored. A shorter body and a

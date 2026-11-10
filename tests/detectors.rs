@@ -8008,3 +8008,43 @@ fn other_aws_access_key_prefixes_are_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn new_relic_api_keys_are_masked() {
+    // New Relic keys start with NRJS-, NRAK-, or NRII-. The value is
+    // not stored. A shorter body stays as written.
+    let nrjs = format!("NRJS-{}", "a".repeat(19));
+    let nrak = format!("NRAK-{}", "b".repeat(27));
+    let nrii = format!("NRII-{}", "c".repeat(32));
+    let nrii_dash = format!("NRII-{}-", "d".repeat(31));
+    for token in [&nrjs, &nrak, &nrii, &nrii_dash] {
+        let (vault, out, audit) = shield(token);
+        assert_eq!(audit.secret, 1, "{token} -> {out}");
+        assert_eq!(out, "h1_secret", "{token} -> {out}");
+        assert!(hidden(&out, token), "{token} -> {out}");
+        assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+        assert!(vault.restore_write(&out).is_err(), "{token}");
+    }
+
+    let sentence = format!("see {nrjs}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, &nrjs), "{out}");
+    assert!(!vault.holds_surface(nrjs.as_bytes()));
+
+    for bare in [
+        format!("NRJS-{}", "a".repeat(18)),
+        format!("NRJS-{}", "A".repeat(19)),
+        format!("NRJS-{}", "a".repeat(20)),
+        format!("NRAK-{}", "b".repeat(26)),
+        format!("NRAK-{}", "b".repeat(28)),
+        format!("NRII-{}", "c".repeat(31)),
+        format!("NRII-{}", "c".repeat(33)),
+        format!("x{nrjs}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
