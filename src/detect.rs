@@ -106,11 +106,12 @@ fn resolve(mut raw: Vec<RawHit>) -> Vec<Hit> {
     chosen.into_iter().map(|hit| hit.hit).collect()
 }
 
-/// ASCII `@` and the fullwidth commercial at, U+FF20.
+/// ASCII `@`, the fullwidth commercial at U+FF20, and the small
+/// commercial at U+FE6B.
 ///
-/// A wide-character keyboard writes that sign. Leaving it out sends
-/// the address. The local part still does not start on the sign.
-const AT: &str = r"[@\u{FF20}]";
+/// A small commercial at is that sign. Leaving it out sends the address.
+/// The local part still does not start on the sign.
+const AT: &str = r"[@\u{FF20}\u{FE6B}]";
 
 /// ASCII `.` and the fullwidth full stop, U+FF0E, outside a character class.
 ///
