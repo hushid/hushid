@@ -788,6 +788,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // sidekiq-sensitive-url. A shorter hex group stays as
             // written. The value is not stored.
             r"(?i)\bhttps?://[a-f0-9]{8}:[a-f0-9]{8}@(?:gems\.contribsys\.com|enterprise\.contribsys\.com)\b",
+            // A Typeform personal access token is `tfp_` plus 40 to 59
+            // letters, digits, or underscores. The personal access
+            // token page shows a 40-character body. gitleaks
+            // typeform-api-token asks for 59 and also requires the
+            // word typeform, so that published token stays in the
+            // clear. A dot is not part of the token. The value is
+            // not stored. A shorter body and a longer body stay as
+            // written. An uppercase prefix stays as written.
+            r"\btfp_[A-Za-z0-9_]{40,59}\b",
             // An Authress service client key is `scauth_`,
             // `authress_`, `ext_`, or `sc_`, two short segments, the
             // lowercase marker `acc`, and a long tail. gitleaks
