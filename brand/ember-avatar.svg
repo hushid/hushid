@@ -11,25 +11,25 @@
       <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
     <clipPath id="wall">
-      <rect x="230" y="86" width="194" height="337"/>
+      <rect x="248.7" y="56.2" width="225.8" height="399.6"/>
     </clipPath>
   </defs>
   <rect width="512" height="512" fill="url(#card)"/>
-  <rect width="512" height="160" fill="url(#sheen)"/>
-  <g fill="#f8f1e8" transform="translate(88 86) scale(1.45) translate(-40.6 -139.8)">
+  <rect width="512" height="150" fill="url(#sheen)"/>
+  <g fill="#f8f1e8" transform="translate(37.47 56.22) scale(1.72) translate(-40.6 -139.8)">
     <rect x="40.6" y="139.8" width="48.4" height="232.3"/>
     <path fill-rule="evenodd" d="M 125.3 139.8 h 53.2 a 116.2 116.2 0 0 1 0 232.3 h -53.2 z M 178.6 183.4 a 72.6 72.6 0 0 1 0 145.2 z"/>
   </g>
   <g opacity="0.72" clip-path="url(#wall)">
-    <rect x="236" y="86" width="86" height="75" rx="3" fill="#f0c9a4"/>
-    <rect x="334" y="86" width="86" height="75" rx="3" fill="#8e3e28"/>
-    <rect x="187" y="173" width="86" height="75" rx="3" fill="#e09468"/>
-    <rect x="285" y="173" width="86" height="75" rx="3" fill="#f0c9a4"/>
-    <rect x="383" y="173" width="86" height="75" rx="3" fill="#c4623c"/>
-    <rect x="236" y="260" width="86" height="75" rx="3" fill="#c4623c"/>
-    <rect x="334" y="260" width="86" height="75" rx="3" fill="#e09468"/>
-    <rect x="187" y="347" width="86" height="75" rx="3" fill="#8e3e28"/>
-    <rect x="285" y="347" width="86" height="75" rx="3" fill="#c4623c"/>
-    <rect x="383" y="347" width="86" height="75" rx="3" fill="#f0c9a4"/>
+    <rect x="248.7" y="56.2" width="106.9" height="90.9" rx="3" fill="#f0c9a4"/>
+    <rect x="367.6" y="56.2" width="106.9" height="90.9" rx="3" fill="#8e3e28"/>
+    <rect x="189.3" y="159.1" width="106.9" height="90.9" rx="3" fill="#e09468"/>
+    <rect x="308.2" y="159.1" width="106.9" height="90.9" rx="3" fill="#f0c9a4"/>
+    <rect x="427.1" y="159.1" width="106.9" height="90.9" rx="3" fill="#c4623c"/>
+    <rect x="248.7" y="262.0" width="106.9" height="90.9" rx="3" fill="#c4623c"/>
+    <rect x="367.6" y="262.0" width="106.9" height="90.9" rx="3" fill="#e09468"/>
+    <rect x="189.3" y="364.9" width="106.9" height="90.9" rx="3" fill="#8e3e28"/>
+    <rect x="308.2" y="364.9" width="106.9" height="90.9" rx="3" fill="#c4623c"/>
+    <rect x="427.1" y="364.9" width="106.9" height="90.9" rx="3" fill="#f0c9a4"/>
   </g>
 </svg>
