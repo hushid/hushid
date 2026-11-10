@@ -6133,3 +6133,78 @@ fn doppler_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn doppler_cli_token_is_masked() {
+    // A Doppler CLI token is `dp.ct.` plus 40 to 44 letters or
+    // digits. The auth token formats page publishes that shape.
+    // The service and personal rules do not see `ct`, so the
+    // token stays in the clear. A CLI token has no config name.
+    // A shorter body stays as written. A longer body stays too.
+    // The value is not stored.
+    let body = "bAqhcVzrhy5cRHkOlNTc0Ve6w5NUDCpcutm8vGE9myi";
+    assert_eq!(body.len(), 43);
+    let token = format!("dp.ct.{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "dp.ct"), "{token} -> {out}");
+    assert!(hidden(&out, body), "{token} -> {out}");
+    assert!(hidden(&out, "0Ve6w5"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let digits = format!("0123456789{}", "a".repeat(30));
+    assert_eq!(digits.len(), 40);
+    let numbered = format!("dp.ct.{digits}");
+    let (vault, out, audit) = shield(&format!("see {numbered}.next"));
+    assert_eq!(audit.secret, 1, "{numbered} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{numbered} -> {out}");
+    assert!(hidden(&out, "dp.ct"), "{out}");
+    assert!(hidden(&out, "0123456789"), "{out}");
+    assert!(hidden(&out, &"a".repeat(30)), "{out}");
+    assert!(!vault.holds_surface(numbered.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let long = "b".repeat(44);
+    let wide = format!("dp.ct.{long}");
+    let (vault, out, audit) = shield(&wide);
+    assert_eq!(audit.secret, 1, "{wide} -> {out}");
+    assert_eq!(out, "h1_secret", "{wide} -> {out}");
+    assert!(hidden(&out, &long), "{out}");
+    assert!(!vault.holds_surface(wide.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let configured = format!("dp.st.ct.{body}");
+    let (vault, out, audit) = shield(&configured);
+    assert_eq!(audit.secret, 1, "{configured} -> {out}");
+    assert_eq!(out, "h1_secret", "{configured} -> {out}");
+    assert!(hidden(&out, "dp.st"), "{configured} -> {out}");
+    assert!(hidden(&out, "ct"), "{configured} -> {out}");
+    assert!(hidden(&out, body), "{configured} -> {out}");
+    assert!(!vault.holds_surface(configured.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, body), "{out}");
+    assert!(hidden(&out, "0Ve6w5"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("dp.ct.{}", "a".repeat(39)),
+        format!("dp.ct.{}", "a".repeat(45)),
+        format!("dp.ct.dev.{}", "a".repeat(40)),
+        format!("worddp.ct.{}", "a".repeat(40)),
+        format!("DP.CT.{}", "a".repeat(40)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
