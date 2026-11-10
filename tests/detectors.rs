@@ -5589,3 +5589,44 @@ fn postman_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn small_commercial_at_still_shields_the_address() {
+    // `user@example.com` is already an email. A small commercial at,
+    // U+FE6B, is that sign. Leaving it out sends the address. A sign
+    // with no domain, a domain with no local part, and a space around
+    // the sign stay as written.
+    let email = "user\u{FE6B}example.com";
+    let (vault, out, audit) = shield(email);
+    assert_eq!(audit.email, 1, "{email} -> {out}");
+    assert_eq!(audit.phone, 0, "{email} -> {out}");
+    assert_eq!(audit.card, 0, "{email} -> {out}");
+    assert_eq!(audit.sin, 0, "{email} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+    assert!(!out.contains('\u{FE6B}'), "{email} -> {out}");
+    assert!(hidden(&out, "user"), "{email} -> {out}");
+    assert!(hidden(&out, "example"), "{email} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), email);
+
+    let sentence = "see user\u{FE6B}example.com next";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("see h1_email_"), "{out}");
+    assert!(out.ends_with(" next"), "{out}");
+    assert!(!out.contains('\u{FE6B}'), "{out}");
+    assert!(hidden(&out, "user"), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    for bare in [
+        "user\u{FE6B}",
+        "example.com",
+        "not an address",
+        "user \u{FE6B} example.com",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
