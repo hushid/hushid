@@ -40,10 +40,12 @@ fn luhn_check_digit(body: &str) -> char {
 fn ramq_number_is_shielded_and_restored() {
     // Fictional numbers in the published 4-letter, 8-digit layout.
     // They are not issued RAMQ numbers. Month 51 and 52 are January
-    // and February with 50 added. A bad month, a bad day, a lowercase
-    // number, and a glued extra digit stay as written.
+    // and February with 50 added. Lowercase letters are the same
+    // number. A bad month, a bad day, three letters, and a glued
+    // extra digit stay as written, in either case.
     let samples = [
         "BOUF 9451 1419",
+        "bouf 9451 1419",
         "DUPA 9503 1512",
         "MART 8807 2345",
         "TREJ 0209 1018",
@@ -51,7 +53,9 @@ fn ramq_number_is_shielded_and_restored() {
         "BELA 9911 0507",
         "ROBE 0612 1719",
         "BOUF94511419",
+        "bouf94511419",
         "BOUF-9451-1419",
+        "bouf-9451-1419",
     ];
     for sample in samples {
         let (vault, out, audit) = shield(sample);
@@ -81,11 +85,14 @@ fn ramq_number_is_shielded_and_restored() {
 
     for bare in [
         "BOUF 9413 1419",
+        "bouf 9413 1419",
         "BOUF 9400 1419",
         "BOUF 9401 0019",
-        "bouf 9451 1419",
+        "bouf 9401 0019",
         "BOU 9451 1419",
+        "bou 9451 1419",
         "BOUF945114199",
+        "bouf945114199",
         "BOUF 9451 14199",
     ] {
         let (_vault, out, audit) = shield(bare);
@@ -9493,38 +9500,45 @@ fn ca_direct_id_postal_code_is_shielded_and_restored() {
     // A Canadian postal code is letter, digit, letter, an optional
     // space or hyphen, digit, letter, digit. The letters D, F, I, O,
     // Q, and U are not used. W and Z are not used first. A narrow
-    // no-break space is that same space. A code outside that shape
-    // stays as written. The value is restored.
+    // no-break space is that same space. The code needs a street or
+    // a `postal code` / `code postal` cue in the same 40-character
+    // window. A bare example stays as written. The value is restored.
     let samples = [
-        "H2X 1Y4",
-        "h2x 1y4",
-        "H2X1Y4",
-        "H2X-1Y4",
-        "K1A 0B1",
-        "A1A 1A1",
-        "H2X\u{00A0}1Y4",
+        ("postal code H2X 1Y4", "H2X"),
+        ("postal code h2x 1y4", "h2x"),
+        ("postal code H2X1Y4", "H2X1Y4"),
+        ("postal code H2X-1Y4", "H2X-1Y4"),
+        ("code postal K1A 0B1", "K1A"),
+        ("code postal A1A 1A1", "A1A"),
+        ("postal code H2X\u{00A0}1Y4", "H2X"),
     ];
-    for sample in samples {
+    for (sample, needle) in samples {
         let (vault, out, audit) = shield(sample);
         assert_eq!(audit.postal, 1, "{sample} -> {out}");
-        assert!(out.starts_with("h1_postal_"), "{sample} -> {out}");
-        assert_eq!(visible(&out), "", "{sample} -> {out}");
+        assert!(out.contains("h1_postal_"), "{sample} -> {out}");
+        assert!(hidden(&out, needle), "{sample} -> {out}");
         assert_eq!(vault.restore_write(&out).unwrap(), sample);
     }
 
-    let (vault, out, audit) = shield("code H2X 1Y4.");
+    let (vault, out, audit) = shield("postal code H2X 1Y4.");
     assert_eq!(audit.postal, 1, "{out}");
-    assert!(out.starts_with("code h1_postal_"), "{out}");
+    assert!(out.starts_with("postal code h1_postal_"), "{out}");
     assert!(out.ends_with('.'), "{out}");
     assert!(hidden(&out, "H2X"), "{out}");
-    assert_eq!(vault.restore_write(&out).unwrap(), "code H2X 1Y4.");
+    assert_eq!(vault.restore_write(&out).unwrap(), "postal code H2X 1Y4.");
 
-    let raw = r#"{"code":"H2X 1Y4"}"#;
+    let raw = r#"{"postal code":"H2X 1Y4"}"#;
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
     assert_eq!(audit.postal, 1, "{out}");
     assert!(hidden(&out, "H2X"), "{out}");
     assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let bare_json = r#"{"code":"H2X 1Y4"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), bare_json).unwrap();
+    assert_eq!(audit.postal, 0, "{out}");
+    assert!(out.contains("H2X 1Y4"), "{out}");
 
     let email = "note user@h2x1y4.ca today";
     let (vault, out, audit) = shield(email);
@@ -9535,8 +9549,26 @@ fn ca_direct_id_postal_code_is_shielded_and_restored() {
     assert_eq!(vault.restore_write(&out).unwrap(), email);
 
     for bare in [
-        "D1A 1A1", "F1A 1A1", "I1A 1A1", "O1A 1A1", "Q1A 1A1", "U1A 1A1", "W1A 1A1", "Z1A 1A1",
-        "H2D 1A1", "H2X 1O4", "H2X 1U4", "H2X1Y", "H2X 1Y45", "H2X  1Y4", "xH2X1Y4", "H2X1Y4x",
+        "D1A 1A1",
+        "F1A 1A1",
+        "I1A 1A1",
+        "O1A 1A1",
+        "Q1A 1A1",
+        "U1A 1A1",
+        "W1A 1A1",
+        "Z1A 1A1",
+        "H2D 1A1",
+        "H2X 1O4",
+        "H2X 1U4",
+        "H2X1Y",
+        "H2X 1Y45",
+        "H2X  1Y4",
+        "xH2X1Y4",
+        "H2X1Y4x",
+        "H2X 1Y4",
+        "A1A 1A1 is only an example",
+        "code H2X 1Y4.",
+        "postal code D1A 1A1",
     ] {
         let (_vault, out, audit) = shield(bare);
         assert_eq!(audit.postal, 0, "{bare} -> {out}");
@@ -9560,6 +9592,7 @@ fn ca_direct_id_street_address_is_shielded_and_restored() {
         "88 Main Street",
         "88 Main Street West",
         "123 1st Street",
+        "88 Main St",
         "45 2e Avenue",
         "8 1re Avenue",
         "120-124 rue Saint-Denis",
@@ -9624,6 +9657,9 @@ fn ca_direct_id_street_address_is_shielded_and_restored() {
         "CP 42",
         "Box 42",
         "on Main Street today",
+        "see 12 of the st now",
+        "use 3 test rd today",
+        "take 1 the way home",
     ] {
         let (_vault, out, audit) = shield(bare);
         assert_eq!(audit.address, 0, "{bare} -> {out}");
@@ -9710,6 +9746,7 @@ fn ca_direct_id_birth_date_is_shielded_and_restored() {
         "DOB 1900-02-29",
         "DOB 15/03/94",
         "born yesterday",
+        "I was born in town. The build is 1994-03-15.",
     ] {
         let (_vault, out, audit) = shield(bare);
         assert_eq!(audit.birth, 0, "{bare} -> {out}");
