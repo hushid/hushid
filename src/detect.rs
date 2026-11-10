@@ -554,6 +554,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // The value is not stored. A shorter body, a longer body,
             // and an uppercase hex body stay as written.
             r"\bpul-[a-f0-9]{40}\b",
+            // A Brevo API key is `xkeysib-`, 64 lowercase hex
+            // characters, a hyphen, and 16 more letters or digits.
+            // The value is not stored. A shorter body stays as written.
+            r"\bxkeysib-[a-f0-9]{64}-(?i:[a-z0-9]{16})\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

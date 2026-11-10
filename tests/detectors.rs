@@ -6784,3 +6784,46 @@ fn pulumi_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn brevo_api_key_is_masked() {
+    // A Brevo API key is `xkeysib-`, 64 lowercase hex characters, a
+    // hyphen, and 16 more letters or digits. The value is not stored.
+    // A shorter body stays as written. The tail may be uppercase.
+    let hex = "a".repeat(64);
+    let tail = "b".repeat(16);
+    assert_eq!(hex.len(), 64);
+    assert_eq!(tail.len(), 16);
+    let token = format!("xkeysib-{hex}-{tail}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "xkeysib"), "{token} -> {out}");
+    assert!(hidden(&out, &hex), "{token} -> {out}");
+    assert!(hidden(&out, &tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let upper_tail = "C".repeat(16);
+    let mixed = format!("xkeysib-{hex}-{upper_tail}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "xkeysib"), "{out}");
+    assert!(hidden(&out, &hex), "{out}");
+    assert!(hidden(&out, &upper_tail), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let upper_hex = "A".repeat(64);
+    for bare in [
+        format!("xkeysib-{}-{tail}", "a".repeat(63)),
+        format!("xkeysib-{hex}-{}", "b".repeat(15)),
+        format!("xkeysib-{upper_hex}-{tail}"),
+        format!("wordxkeysib-{hex}-{tail}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
