@@ -5720,6 +5720,51 @@ fn de_l_assurance_cue_still_shields_the_number() {
     ] {
         let (_vault, out, audit) = shield(&bare);
         assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
+fn comma_between_groups_still_shields_the_number() {
+    // A comma is that separator. Leaving it out sends the number.
+    let phone = "416,555,0123";
+    round_trip(phone, |audit| audit.phone);
+    let (vault, out, audit) = shield(phone);
+    assert_eq!(audit.phone, 1, "{phone} -> {out}");
+    assert!(hidden(&out, "416"), "{phone} -> {out}");
+    assert!(hidden(&out, "555"), "{phone} -> {out}");
+    assert!(hidden(&out, "0123"), "{phone} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), phone);
+
+    let fullwidth = "416\u{FF0C}555\u{FF0C}0123";
+    round_trip(fullwidth, |audit| audit.phone);
+    let (vault, out, audit) = shield(fullwidth);
+    assert_eq!(audit.phone, 1, "{fullwidth} -> {out}");
+    assert!(hidden(&out, "416"), "{fullwidth} -> {out}");
+    assert!(hidden(&out, "555"), "{fullwidth} -> {out}");
+    assert!(hidden(&out, "0123"), "{fullwidth} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), fullwidth);
+
+    let card = "4111,1111,1111,1111";
+    round_trip(card, |audit| audit.card);
+    let (vault, out, audit) = shield(card);
+    assert_eq!(audit.card, 1, "{card} -> {out}");
+    assert!(hidden(&out, "4111"), "{card} -> {out}");
+    assert!(hidden(&out, "1111"), "{card} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), card);
+
+    for bare in [
+        "not,a,phone",
+        "4111,1111,1111,1112",
+        "SIN 130,692,544",
+        "130,692,544",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+        assert_eq!(audit.card, 0, "{bare} -> {out}");
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
