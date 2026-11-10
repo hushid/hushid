@@ -563,6 +563,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // prefix is case sensitive. The value is not stored. A
             // shorter body stays as written.
             r"\bdt0c01\.(?i:[a-z0-9]{24}\.[a-z0-9]{64})\b",
+            // An EasyPost production key is `EZAK` plus 54 letters
+            // or digits. A test key is `EZTK` plus 54. The prefixes
+            // stay uppercase. The bodies may be any case. The value
+            // is not stored. A shorter body and a longer body stay
+            // as written.
+            r"\bEZAK(?i:[a-z0-9]{54})\b",
+            r"\bEZTK(?i:[a-z0-9]{54})\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
