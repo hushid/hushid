@@ -7108,3 +7108,40 @@ fn adobe_client_secret_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn alibaba_access_key_is_masked() {
+    // An Alibaba Cloud access key id is `LTAI` plus 20 letters or
+    // digits. The value is not stored. A shorter body, a longer body,
+    // and a lowercase prefix stay as written.
+    let body = "a".repeat(20);
+    assert_eq!(body.len(), 20);
+    let token = format!("LTAI{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "LTAI"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("LTAI{}", "A1".repeat(10));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "LTAI"), "{out}");
+    assert!(hidden(&out, "A1"), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("LTAI{}", "a".repeat(19)),
+        format!("LTAI{}", "a".repeat(21)),
+        format!("ltai{body}"),
+        format!("wordLTAI{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
