@@ -363,6 +363,11 @@ fn push_sins(text: &str, out: &mut Vec<RawHit>) {
             format!(r"(?i)\bsocial{gap}insurance\b"),
             format!(r"(?i)\bnum(?:é|e\u{{0301}})ro{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
             format!(r"(?i)\bnumero{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
+            // `de l'assurance` is that same cue. Leaving it out sends the number.
+            format!(
+                r"(?i)\bnum(?:é|e\u{{0301}})ro{gap}de{gap}l['’\u{{2018}}]assurance{gap}sociale\b"
+            ),
+            format!(r"(?i)\bnumero{gap}de{gap}l['’\u{{2018}}]assurance{gap}sociale\b"),
             // `n°` and `nº` are that same cue. Leaving the sign out sends the number.
             format!(r"(?i)\bn[\u{{00B0}}\u{{00BA}}]{gap}d['’\u{{2018}}]assurance{gap}sociale\b"),
         ];

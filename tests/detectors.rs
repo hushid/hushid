@@ -5670,3 +5670,56 @@ fn small_parentheses_still_shield_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn de_l_assurance_cue_still_shields_the_number() {
+    // `de l'assurance` is that same cue. Leaving it out sends the number.
+    let sin = "130692544";
+    let cue = "numéro de l'assurance sociale";
+    let text = format!("{cue} {sin}");
+    let (vault, out, audit) = shield(&text);
+    assert_eq!(audit.sin, 1, "{text} -> {out}");
+    assert!(out.starts_with(&format!("{cue} h1_sin_")), "{out}");
+    assert!(hidden(&out, sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), text);
+
+    let plain = format!(
+        "numero de l'assurance sociale {} {} {}",
+        &sin[..3],
+        &sin[3..6],
+        &sin[6..]
+    );
+    let (vault, out, audit) = shield(&plain);
+    assert_eq!(audit.sin, 1, "{plain} -> {out}");
+    assert!(
+        out.starts_with("numero de l'assurance sociale h1_sin_"),
+        "{out}"
+    );
+    assert!(hidden(&out, sin), "{out}");
+    assert!(hidden(&out, &sin[..3]), "{out}");
+    assert!(hidden(&out, &sin[3..6]), "{out}");
+    assert!(hidden(&out, &sin[6..]), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), plain);
+
+    let curly = format!("numéro de l\u{2019}assurance sociale {sin}");
+    let (vault, out, audit) = shield(&curly);
+    assert_eq!(audit.sin, 1, "{curly} -> {out}");
+    assert!(
+        out.starts_with("numéro de l\u{2019}assurance sociale h1_sin_"),
+        "{out}"
+    );
+    assert!(out.contains('\u{2019}'), "{out}");
+    assert!(hidden(&out, sin), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), curly);
+
+    for bare in [
+        sin.to_string(),
+        format!("{cue} 130692545"),
+        format!("{cue}{}{sin}", " ".repeat(41)),
+        format!("note {sin}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.sin, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
