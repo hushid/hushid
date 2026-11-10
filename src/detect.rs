@@ -776,6 +776,11 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // Uppercase hex stays as written.
             r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
+            // A Microsoft Teams incoming webhook is
+            // `{tenant}.webhook.office.com/webhookb2/`, two ids, and
+            // `IncomingWebhook`. gitleaks microsoft-teams-webhook.
+            // A shorter URL stays as written. The value is not stored.
+            r"\bhttps://[a-z0-9]+\.webhook\.office\.com/webhookb2/[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}@[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}/IncomingWebhook/[a-z0-9]{32}/[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}\b",
             // A Defined Networking token is `dnkey-`, 26 token
             // characters, a hyphen, and 52 more. gitleaks
             // defined-networking-api-token. The prefix may be any
