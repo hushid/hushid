@@ -431,11 +431,20 @@ fn push_ramq(text: &str, out: &mut Vec<RawHit>) {
     // that range stays as written. These checks are the published
     // layout. They do not ask RAMQ whether the number was issued.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\b[A-Z]{4}(?:[ \t-]+[0-9]{4}){2}\b|\b[A-Z]{4}[0-9]{8}\b")
+        // The letters may be lowercase. A paste of `bouf 9451 1419`
+        // is the same number as `BOUF 9451 1419`. The original case
+        // is what gets restored.
+        Regex::new(r"(?i)\b[A-Z]{4}(?:[ \t-]+[0-9]{4}){2}\b|\b[A-Z]{4}[0-9]{8}\b")
             .expect("ramq pattern")
     });
     for hit in RE.find_iter(text) {
         if !digit_bounded(text, hit.start(), hit.end()) {
+            continue;
+        }
+        // `visa 4111-1111-1111-...` has four letters and then more
+        // groups. That is a card, not a health number. Another group
+        // after the eight digits stays as written.
+        if !ramq_group_closed(text, hit.end()) {
             continue;
         }
         if ramq_layout_ok(hit.as_str()) {
@@ -445,7 +454,7 @@ fn push_ramq(text: &str, out: &mut Vec<RawHit>) {
 }
 
 fn ramq_layout_ok(text: &str) -> bool {
-    let letters = text.chars().filter(|ch| ch.is_ascii_uppercase()).count();
+    let letters = text.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
     let digits = digits_of(text);
     if letters != 4 || digits.len() != 8 {
         return false;
@@ -457,20 +466,50 @@ fn ramq_layout_ok(text: &str) -> bool {
     month_ok && day_ok
 }
 
+fn ramq_group_closed(text: &str, end: usize) -> bool {
+    let rest = &text[end..];
+    let trimmed = rest.trim_start_matches([' ', '\t', '-']);
+    if trimmed.len() == rest.len() {
+        return true;
+    }
+    !trimmed.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+}
+
 fn push_postal(text: &str, out: &mut Vec<RawHit>) {
     // A Canadian postal code is letter, digit, letter, an optional
     // space or hyphen, digit, letter, digit. The letters D, F, I, O,
     // Q, and U are not used. W and Z are not used first. A no-break
-    // space is that same space. Leaving the shape out sends the code.
-    // A code outside it stays as written. The value is restored.
+    // space is that same space. The shape alone is not enough. A
+    // street in the same 40-character window, or a `postal code` /
+    // `code postal` cue, has to sit next to it. A bare example stays
+    // as written. The value is restored.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)\b[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z][ \t\u{00A0}-]?[0-9][ABCEGHJ-NPRSTV-Z][0-9]\b",
         )
         .expect("postal code")
     });
+    static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        let gap = cue_word_gap();
+        let patterns = [
+            format!(r"(?i)\bpostal{gap}code\b"),
+            format!(r"(?i)\bcode{gap}postal\b"),
+        ];
+        patterns
+            .into_iter()
+            .map(|pattern| Regex::new(&pattern).expect("postal cue"))
+            .collect()
+    });
+    let cues = cue_spans(text, &CUES);
+    let streets = address_spans(text);
     for hit in RE.find_iter(text) {
-        if digit_bounded(text, hit.start(), hit.end()) {
+        if !digit_bounded(text, hit.start(), hit.end()) {
+            continue;
+        }
+        let near_street = streets
+            .iter()
+            .any(|(start, end)| edge_gap(*start, *end, hit.start(), hit.end(), text) <= CUE_WINDOW);
+        if near_street || cue_near(&cues, hit.start(), hit.end(), text) {
             out.push(span(TIER_POSTAL, Kind::Postal, hit.start(), hit.end()));
         }
     }
@@ -479,9 +518,11 @@ fn push_postal(text: &str, out: &mut Vec<RawHit>) {
 fn push_births(text: &str, out: &mut Vec<RawHit>) {
     // A date of birth is a calendar date within 40 characters of a
     // birth cue. The cue is `date of birth`, `birth date`, `DOB`,
-    // `D.O.B.`, `born`, `date de naissance`, `DDN`, or `né le`.
-    // A date with no cue stays as written. A day that month does not
-    // have stays as written. The value is restored.
+    // `D.O.B.`, `date de naissance`, `DDN`, or `né le`. `born` counts
+    // only inside the same sentence, so a period between that word
+    // and a later date leaves the date as written. A date with no
+    // cue stays as written. A day that month does not have stays as
+    // written. The value is restored.
     static RE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         let months = month_alt();
         // `\d{1,2}` takes both digits when they are there. A shorter
@@ -514,14 +555,15 @@ fn push_births(text: &str, out: &mut Vec<RawHit>) {
             r"(?i)\bddn\b".to_string(),
             format!(r"(?i)\bn(?:é|e\u{{0301}})e?{gap}le\b"),
             format!(r"(?i)\bnee{gap}le\b"),
-            r"(?i)\bborn\b".to_string(),
         ];
         patterns
             .into_iter()
             .map(|pattern| Regex::new(&pattern).expect("birth cue"))
             .collect()
     });
+    static BORN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bborn\b").expect("born cue"));
     let cues = cue_spans(text, &CUES);
+    let born = cue_spans(text, std::slice::from_ref(&*BORN));
     for re in RE.iter() {
         for hit in re.find_iter(text) {
             if !birth_edge_ok(text, hit.start(), hit.end()) {
@@ -530,7 +572,9 @@ fn push_births(text: &str, out: &mut Vec<RawHit>) {
             if !birth_layout_ok(hit.as_str()) {
                 continue;
             }
-            if cue_near(&cues, hit.start(), hit.end(), text) {
+            let near = cue_near(&cues, hit.start(), hit.end(), text)
+                || born_near(&born, hit.start(), hit.end(), text);
+            if near {
                 out.push(span(TIER_BIRTH, Kind::Birth, hit.start(), hit.end()));
             }
         }
@@ -681,19 +725,42 @@ fn birth_numbers(text: &str) -> Vec<u16> {
 fn push_addresses(text: &str, out: &mut Vec<RawHit>) {
     // A street address is a civic number and a street type. Quebec
     // writes the type first (`123 rue Saint-Denis`). English writes
-    // it last (`88 Main Street`). A case postale or a PO box is that
-    // same address. A street with no number stays as written. `CP 42`
-    // without the dots stays as written. The value is restored.
+    // it last (`88 Main Street`). A short type such as `st`, `rd`,
+    // `dr`, or `way` needs a capitalized name, so `12 of the st`
+    // stays as written and `88 Main St` is still an address. A case
+    // postale or a PO box is that same address. A street with no
+    // number stays as written. `CP 42` without the dots stays as
+    // written. The value is restored.
+    for (start, end) in address_spans(text) {
+        out.push(span(TIER_ADDRESS, Kind::Address, start, end));
+    }
+}
+
+fn address_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    for re in address_patterns() {
+        for hit in re.find_iter(text) {
+            spans.push((hit.start(), hit.end()));
+        }
+    }
+    spans
+}
+
+fn address_patterns() -> &'static [Regex] {
     static RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         let civic = r"\d{1,6}(?:-\d{1,6})?(?:[A-Za-z]\b)?";
         let gap = r"(?:\s*,\s*|\s+)";
         // `1st` and `2e` are street names. A letter word is the other name.
         let name = r"(?:\p{L}[\p{L}\p{M}'’‘.-]*|\d{1,2}(?:ère|ere|er|re|st|nd|rd|th|e)\b)";
+        // A short type uses this name. The first letter has to be uppercase.
+        let capital_name =
+            r"(?-i:\p{Lu}[\p{L}\p{M}'’‘.-]*|\d{1,2}(?:ère|ere|er|re|st|nd|rd|th|e)\b)";
         let particle = r"(?:de|du|des|la|le|les|au|aux)\s+|d['’‘]|l['’‘]";
         let direction = "Ouest|OUEST|Est|EST|Nord|NORD|Sud|SUD|West|WEST|East|EAST|North|NORTH|South|SOUTH|[NESWO]";
         let unit = r"(?:(?:appartement|apartment|appart|apt|app|suite|bureau|unité|unite|unit)\.?\s+#?\d{1,6}[A-Za-z]?\s*,\s+)?";
         let french_type = "boulevard|avenue|chemin|croissant|terrasse|impasse|promenade|ruelle|sentier|montée|montee|allée|allee|cercle|carré|carre|côte|cote|place|rang|voie|rue|boul|blvd|ave|av";
-        let english_type = "boulevard|crescent|terrace|parkway|highway|street|avenue|circle|drive|court|trail|gardens|heights|square|alley|route|place|ridge|point|road|lane|way|blvd|pkwy|cres|terr|hwy|ave|cir|trl|gdns|hts|aly|rte|st|rd|dr|ct|ln|pl|pt|sq";
+        let english_type = "boulevard|crescent|terrace|parkway|highway|street|avenue|circle|drive|court|trail|gardens|heights|square|alley|route|place|ridge|point|road|lane|blvd|pkwy|cres|terr|hwy|ave|cir|trl|gdns|hts|aly|rte";
+        let short_type = "way|st|rd|dr|ct|ln|pl|pt|sq";
         let french = format!(
             r"(?i)\b{unit}{civic}{gap}(?:{french_type})\b{gap}(?:(?:{particle})){{0,4}}{name}(?-i:\s+\p{{Lu}}\p{{L}}[\p{{L}}\p{{M}}'’‘.-]*)?(?-i:\s+(?:{direction})\b)?",
             unit = unit,
@@ -713,17 +780,22 @@ fn push_addresses(text: &str, out: &mut Vec<RawHit>) {
             english_type = english_type,
             direction = direction,
         );
+        let english_short = format!(
+            r"(?i)\b{unit}{civic}{gap}(?:{capital_name}{gap}){{1,3}}(?:{short_type})\b(?-i:\s+(?:{direction})\b)?",
+            unit = unit,
+            civic = civic,
+            gap = gap,
+            capital_name = capital_name,
+            short_type = short_type,
+            direction = direction,
+        );
         let postal_box = r"(?i)\b(?:p\.?\s*o\.?\s*box|case(?:\s+|-)postale|c\.p\.)\s+#?\d{1,6}\b";
-        [french, english, postal_box.to_string()]
+        [french, english, english_short, postal_box.to_string()]
             .into_iter()
             .map(|pattern| Regex::new(&pattern).expect("address pattern"))
             .collect()
     });
-    for re in RES.iter() {
-        for hit in re.find_iter(text) {
-            out.push(span(TIER_ADDRESS, Kind::Address, hit.start(), hit.end()));
-        }
-    }
+    RES.as_slice()
 }
 
 fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
@@ -1571,6 +1643,28 @@ fn cue_spans(text: &str, cues: &[Regex]) -> Vec<(usize, usize)> {
 fn cue_near(cues: &[(usize, usize)], start: usize, end: usize, text: &str) -> bool {
     cues.iter()
         .any(|(cue_start, cue_end)| edge_gap(*cue_start, *cue_end, start, end, text) <= CUE_WINDOW)
+}
+
+/// `born` is a short cue. A sentence end between it and the date means
+/// the date is not the birth date.
+fn born_near(cues: &[(usize, usize)], start: usize, end: usize, text: &str) -> bool {
+    cues.iter().any(|(cue_start, cue_end)| {
+        if edge_gap(*cue_start, *cue_end, start, end, text) > CUE_WINDOW {
+            return false;
+        }
+        let between = if *cue_end <= start {
+            &text[*cue_end..start]
+        } else if end <= *cue_start {
+            &text[end..*cue_start]
+        } else {
+            return true;
+        };
+        !between.chars().any(sentence_end)
+    })
+}
+
+fn sentence_end(ch: char) -> bool {
+    matches!(ch, '.' | '!' | '?' | '\n' | '\r' | '\u{3002}')
 }
 
 fn edge_gap(a0: usize, a1: usize, b0: usize, b1: usize, text: &str) -> usize {
