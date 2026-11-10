@@ -6566,3 +6566,57 @@ fn heroku_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn planetscale_api_token_is_masked() {
+    // gitleaks planetscale-api-token. The token is `pscale_tkn_` plus
+    // 32 to 64 characters. A shorter body stays as written. A trailing
+    // `=` is part of the token. The value is not stored.
+    let body = "a".repeat(32);
+    let token = format!("pscale_tkn_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pscale_tkn"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let wide = "b".repeat(64);
+    let token64 = format!("pscale_tkn_{wide}");
+    let (vault, out, audit) = shield(&token64);
+    assert_eq!(audit.secret, 1, "{token64} -> {out}");
+    assert_eq!(out, "h1_secret", "{token64} -> {out}");
+    assert!(hidden(&out, "pscale_tkn"), "{token64} -> {out}");
+    assert!(hidden(&out, &wide), "{token64} -> {out}");
+    assert!(!vault.holds_surface(token64.as_bytes()), "{token64}");
+    assert!(vault.restore_write(&out).is_err(), "{token64}");
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let padded = format!("pscale_tkn_{body}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!out.contains('='), "{padded} -> {out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("pscale_tkn_{}", "a".repeat(31)),
+        format!("wordpscale_tkn_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
