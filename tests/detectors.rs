@@ -8504,3 +8504,40 @@ fn airtable_access_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn mapbox_api_token_is_masked() {
+    // A Mapbox token is `pk.`, 60 characters, a dot, and 22 more.
+    // The value is not stored. A shorter segment stays as written.
+    let token = format!("pk.{}.{}", "a".repeat(60), "b".repeat(22));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pk."), "{token} -> {out}");
+    assert!(hidden(&out, &"b".repeat(22)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let upper = format!("PK.{}.{}", "c".repeat(60), "d".repeat(22));
+    let (vault, out, audit) = shield(&upper);
+    assert_eq!(audit.secret, 1, "{upper} -> {out}");
+    assert_eq!(out, "h1_secret", "{upper} -> {out}");
+    assert!(!vault.holds_surface(upper.as_bytes()), "{upper}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "pk."), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("pk.{}.{}", "a".repeat(59), "b".repeat(22)),
+        format!("pk.{}.{}", "a".repeat(60), "b".repeat(21)),
+        format!("xpk.{}.{}", "a".repeat(60), "b".repeat(22)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
