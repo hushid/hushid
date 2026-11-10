@@ -776,6 +776,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // Uppercase hex stays as written.
             r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
+            // A Yandex IAM token is `t1.`, a token segment, optional
+            // `=` padding, a dot, and 86 more token characters.
+            // gitleaks yandex-access-token. The prefix may be any
+            // case. The word is not required. A final `=` stays
+            // inside the mark. A shorter second segment stays as
+            // written. The value is not stored.
+            r"(?i)\bt1\.[A-Za-z0-9_-]+={0,2}\.[A-Za-z0-9_-]{86}={0,2}",
             // A Microsoft Teams incoming webhook is
             // `{tenant}.webhook.office.com/webhookb2/`, two ids, and
             // `IncomingWebhook`. gitleaks microsoft-teams-webhook.
