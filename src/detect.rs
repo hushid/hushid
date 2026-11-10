@@ -457,6 +457,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // AKIA is a long-term access key id. ASIA is the temporary
             // one. Both are 20 characters. Leaving ASIA out sends the id.
             r"\bA(?:K|S)IA[0-9A-Z]{16}\b",
+            // ABIA and ACCA are the other 20-character access key id
+            // prefixes in the gitleaks aws-access-token rule. A3T plus
+            // one letter and 16 characters from the AWS alphabet is
+            // the same id. Leaving them out sends the id. The value
+            // is not stored. A shorter id stays as written.
+            r"\b(?:ABIA|ACCA)[0-9A-Z]{16}\b",
+            r"\bA3T[0-9A-Z][A-Z2-7]{16}\b",
             r"\bghp_[A-Za-z0-9]{36}\b",
             r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
             r"\bgho_[A-Za-z0-9]{36}\b",
