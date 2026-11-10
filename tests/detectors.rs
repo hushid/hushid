@@ -5868,3 +5868,56 @@ fn square_access_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn notion_integration_token_is_masked() {
+    // Notion's authentication page sends a bearer token. New tokens
+    // start with `ntn_` so scanners can find them. The published body
+    // is 11 digits and 35 letters or digits, 46 characters. A shorter
+    // body stays as written. The older `secret_` prefix is a common
+    // word and stays as written. The value is not stored.
+    let digits = "1".repeat(11);
+    let tail = "a".repeat(35);
+    let body = format!("{digits}{tail}");
+    let token = format!("ntn_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "ntn"), "{token} -> {out}");
+    assert!(hidden(&out, &digits), "{token} -> {out}");
+    assert!(hidden(&out, &tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed_tail = "aBcDeFgHiJkLmNoPqRsT1234567890abcde";
+    let mixed = format!("ntn_12345678901{mixed_tail}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "ntn"), "{out}");
+    assert!(hidden(&out, "12345678901"), "{out}");
+    assert!(hidden(&out, mixed_tail), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &digits), "{out}");
+    assert!(hidden(&out, &tail), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("ntn_{}{}", "1".repeat(11), "a".repeat(34)),
+        format!("wordntn_{body}"),
+        format!("secret_{}", "b".repeat(50)),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
