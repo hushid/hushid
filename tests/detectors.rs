@@ -6873,3 +6873,54 @@ fn dynatrace_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn easypost_api_token_is_masked() {
+    // An EasyPost production key is `EZAK` plus 54 letters or digits.
+    // A test key is `EZTK` plus 54. The value is not stored. A shorter
+    // body and a longer body stay as written.
+    let body = "a".repeat(54);
+    assert_eq!(body.len(), 54);
+    let token = format!("EZAK{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "EZAK"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let test_body = "b".repeat(54);
+    assert_eq!(test_body.len(), 54);
+    let test_token = format!("EZTK{test_body}");
+    let (vault, out, audit) = shield(&test_token);
+    assert_eq!(audit.secret, 1, "{test_token} -> {out}");
+    assert_eq!(out, "h1_secret", "{test_token} -> {out}");
+    assert!(hidden(&out, "EZTK"), "{test_token} -> {out}");
+    assert!(hidden(&out, &test_body), "{test_token} -> {out}");
+    assert!(!vault.holds_surface(test_token.as_bytes()), "{test_token}");
+    assert!(vault.restore_write(&out).is_err(), "{test_token}");
+
+    let mixed_body = format!("a1Bc{}", "d".repeat(50));
+    assert_eq!(mixed_body.len(), 54);
+    let mixed = format!("EZAK{mixed_body}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "EZAK"), "{out}");
+    assert!(hidden(&out, "a1Bc"), "{out}");
+    assert!(hidden(&out, &"d".repeat(50)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("EZAK{}", "a".repeat(53)),
+        format!("EZAK{}", "a".repeat(55)),
+        format!("ezak{}", "a".repeat(54)),
+        format!("wordEZAK{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
