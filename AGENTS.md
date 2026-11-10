@@ -10,6 +10,7 @@ Library crate. It replaces direct identifiers it recognizes with typed tokens. A
 - Do not describe this crate as anonymization, private mode, or Law 25 compliant.
 - No Bline types. No `gaze-recognizers` dependency.
 - Sign every commit with `git commit -s`. The sign-off email is `git config user.email`.
+- The optional name list is `glossary/popular-names.txt`. It is not loaded unless the host sets `glossary` to that path.
 
 ## Checks
 

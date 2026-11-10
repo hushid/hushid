@@ -492,6 +492,25 @@ fn glossary_file_round_trip() {
 }
 
 #[test]
+fn published_name_glossary_shields_listed_names() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("glossary/popular-names.txt");
+    let glossary = Glossary::load(&path).expect("published glossary");
+    let sample = "Olivia met Noah Smith and Florence";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, sample).unwrap();
+    assert_eq!(audit.glossary, 4, "{out}");
+    assert!(!out.contains("Olivia"), "{out}");
+    assert!(!out.contains("Smith"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sample);
+
+    let ordinary = "The clinic is open";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, ordinary).unwrap();
+    assert_eq!(audit.glossary, 0, "{out}");
+    assert_eq!(out, ordinary);
+}
+
+#[test]
 fn vault_file_is_mode_0600_and_round_trips() {
     let path = std::env::temp_dir().join(format!("hushid-vault-{}", std::process::id()));
     let _ = fs::remove_file(&path);
