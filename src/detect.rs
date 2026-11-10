@@ -654,6 +654,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // body stays as written. A final hyphen stays inside
             // the mark.
             r"\bEAAA(?:[A-Za-z0-9_-]{21,59}[A-Za-z0-9]\b|[A-Za-z0-9_-]{21,59}-)",
+            // A Clojars token is `CLOJARS_` plus 60 letters or digits.
+            // The prefix may be any case. The value is not stored. A
+            // shorter body and a longer body stay as written.
+            r"(?i)\bCLOJARS_[a-z0-9]{60}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
