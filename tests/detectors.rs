@@ -9850,3 +9850,23 @@ fn wide_postal_street_and_health_digits_follow_ascii() {
     assert_eq!(audit.ramq, 0, "{out}");
     assert_eq!(out, extra, "{out}");
 }
+
+#[test]
+fn ideographic_space_in_a_postal_code_is_shielded() {
+    let postal = "postal code H2X\u{3000}1Y4";
+    let (vault, out, audit) = shield(postal);
+    assert_eq!(audit.postal, 1, "{out}");
+    assert!(hidden(&out, "H2X"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), postal);
+
+    let street = "123\u{3000}rue Saint-Denis";
+    let (vault, out, audit) = shield(street);
+    assert_eq!(audit.address, 1, "{out}");
+    assert!(hidden(&out, "Saint-Denis"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), street);
+
+    let doubled = "postal code H2X\u{3000}\u{3000}1Y4";
+    let (_vault, out, audit) = shield(doubled);
+    assert_eq!(audit.postal, 0, "{out}");
+    assert_eq!(out, doubled, "{out}");
+}
