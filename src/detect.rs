@@ -513,6 +513,16 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // written. A longer body stays too. The value is not
             // stored.
             r"\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b",
+            // A Grafana service account token is `glsa_`, 32 letters
+            // or digits, an underscore, and 8 hex characters. A
+            // Grafana cloud token is `glc_` and at least 32 base64
+            // characters. gitleaks grafana-service-account-token and
+            // grafana-cloud-api-token. A trailing `+` or `/` is not a
+            // word boundary, and `=` padding stays on the cloud
+            // token. A shorter body stays as written. The value is
+            // not stored.
+            r"\bglsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8}\b",
+            r"\bglc_[A-Za-z0-9+/]{32,400}={0,2}",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
