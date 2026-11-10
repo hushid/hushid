@@ -487,6 +487,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // Leaving one of these out sends the token. Longer prefixes
             // come first so `glrtr-` is not cut down to `glrt-`.
             r"\b(?:glagent|glffct|glsoat|glrtr|glcbt|glptt|glimt|gloas|gldt|glft|glrt|glwt)-[A-Za-z0-9_\-]{20,}\b",
+            // A routable runner token is `glrt-t`, one digit, `_`, at
+            // least 27 characters, and a 9-character tail after a dot.
+            // gitleaks gitlab-runner-authentication-token-routable.
+            // The `glrt-` rule above stops at that dot, so the tail
+            // stays in the clear. A 20-character token has no tail.
+            // The value is not stored.
+            r"\bglrt-t\d_[A-Za-z0-9_-]{27,300}\.[0-9a-z]{2}[0-9a-z]{7}\b",
             // A GitLab runner registration token is `GR1348941` plus
             // 20 letters, digits, underscores, or hyphens. gitleaks
             // gitlab-rrt. The glrt- alternation does not match this

@@ -9447,3 +9447,33 @@ fn dropbox_short_lived_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn gitlab_routable_runner_token_keeps_its_tail() {
+    // A routable runner token is `glrt-t`, a digit, `_`, at least 27
+    // characters, and a 9-character tail after a dot. The `glrt-`
+    // rule stops at that dot, so the tail stays in the clear. The
+    // value is not stored.
+    let body = "a".repeat(27);
+    let token = format!("glrt-t1_{body}.ab1234567");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "glrt-t1_"), "{token} -> {out}");
+    assert!(hidden(&out, "ab1234567"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "ab1234567"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    let short = format!("glrt-{}", "b".repeat(20));
+    let (vault, out, audit) = shield(&short);
+    assert_eq!(audit.secret, 1, "{short} -> {out}");
+    assert_eq!(out, "h1_secret", "{short} -> {out}");
+    assert!(!vault.holds_surface(short.as_bytes()), "{short}");
+}
