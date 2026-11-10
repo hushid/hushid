@@ -7617,3 +7617,46 @@ fn onepassword_a3_secret_is_masked() {
     assert_eq!(audit.secret, 0, "{short} -> {out}");
     assert_eq!(out, short, "{short} -> {out}");
 }
+
+#[test]
+fn flutterwave_test_key_is_masked() {
+    // A Flutterwave test secret or public key is `FLWSECK_TEST-` or
+    // `FLWPUBK_TEST-`, 32 hex characters from a through h, and `-X`.
+    // The encryption key is `FLWSECK_TEST-` plus 12 of those
+    // characters. The value is not stored. A shorter body stays as
+    // written.
+    let body = "a".repeat(32);
+    let token = format!("FLWSECK_TEST-{body}-X");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "FLWSECK_TEST"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let public = format!("FLWPUBK_TEST-{body}-X");
+    let (vault, out, audit) = shield(&format!("see {public}.next"));
+    assert_eq!(audit.secret, 1, "{public} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{public} -> {out}");
+    assert!(hidden(&out, "FLWPUBK_TEST"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(public.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let enc_body = "b".repeat(12);
+    let enc = format!("FLWSECK_TEST-{enc_body}");
+    let (vault, out, audit) = shield(&enc);
+    assert_eq!(audit.secret, 1, "{enc} -> {out}");
+    assert_eq!(out, "h1_secret", "{enc} -> {out}");
+    assert!(hidden(&out, "FLWSECK_TEST"), "{enc} -> {out}");
+    assert!(hidden(&out, &enc_body), "{enc} -> {out}");
+    assert!(!vault.holds_surface(enc.as_bytes()), "{enc}");
+    assert!(vault.restore_write(&out).is_err(), "{enc}");
+
+    let short = format!("FLWSECK_TEST-{}", "a".repeat(11));
+    let (_vault, out, audit) = shield(&short);
+    assert_eq!(audit.secret, 0, "{short} -> {out}");
+    assert_eq!(out, short, "{short} -> {out}");
+    assert!(!hidden(&out, "FLWSECK_TEST"), "{short} -> {out}");
+}

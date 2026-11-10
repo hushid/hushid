@@ -682,6 +682,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // published groups of uppercase letters and digits. The
             // value is not stored. A shorter group stays as written.
             r"\bA3-[A-Z0-9]{6}-(?:(?:[A-Z0-9]{11})|(?:[A-Z0-9]{6}-[A-Z0-9]{5}))-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}\b",
+            // A Flutterwave test secret or public key is
+            // `FLWSECK_TEST-` or `FLWPUBK_TEST-`, 32 characters from
+            // `a` through `h` and digits, then `-X`. The encryption
+            // key is `FLWSECK_TEST-` plus 12 of those characters. The
+            // value is not stored. A shorter body stays as written.
+            r"\bFLWSECK_TEST-(?i:[a-h0-9]{32})-X\b",
+            r"\bFLWPUBK_TEST-(?i:[a-h0-9]{32})-X\b",
+            r"\bFLWSECK_TEST-(?i:[a-h0-9]{12})\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
