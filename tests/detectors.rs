@@ -9288,3 +9288,91 @@ fn yandex_aqw9_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn discord_webhook_url_is_masked() {
+    // TruffleHog's discordwebhook detector matches discord.com, an
+    // 18 or 19 digit id, and 68 letters, digits, or hyphens. The
+    // webhook resource example is 100 hex characters. discordapp.com
+    // is the same path. The value is not stored. A shorter token and
+    // a longer token stay as written.
+    let id18 = "123456789012345678";
+    let id19 = "1234567890123456789";
+    let token68 = format!("Ab9{}", "c".repeat(65));
+    let token100 = format!("a1{}", "b".repeat(98));
+    assert_eq!(id18.len(), 18);
+    assert_eq!(id19.len(), 19);
+    assert_eq!(token68.len(), 68);
+    assert_eq!(token100.len(), 100);
+    for url in [
+        format!("https://discord.com/api/webhooks/{id18}/{token68}"),
+        format!("https://discord.com/api/webhooks/{id19}/{token68}"),
+        format!("https://discord.com/api/webhooks/{id18}/{token100}"),
+        format!("https://discordapp.com/api/webhooks/{id18}/{token68}"),
+        format!("https://discord.com/api/v10/webhooks/{id18}/{token68}"),
+        format!("discord.com/api/webhooks/{id18}/{token68}"),
+    ] {
+        let (vault, out, audit) = shield(&url);
+        assert_eq!(audit.secret, 1, "{url} -> {out}");
+        assert_eq!(out, "h1_secret", "{url} -> {out}");
+        assert!(hidden(&out, id18), "{url} -> {out}");
+        assert!(hidden(&out, "webhooks"), "{url} -> {out}");
+        assert!(!vault.holds_surface(url.as_bytes()), "{url}");
+        assert!(vault.restore_write(&out).is_err(), "{url}");
+    }
+
+    let url = format!("https://discord.com/api/webhooks/{id18}/{token68}");
+    let (vault, out, audit) = shield(&format!("see {url}.next"));
+    assert_eq!(audit.secret, 1, "{url} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{url} -> {out}");
+    assert!(hidden(&out, id18), "{out}");
+    assert!(hidden(&out, "Ab9"), "{out}");
+    assert!(!vault.holds_surface(url.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let hyphen = format!(
+        "https://discord.com/api/webhooks/{id18}/{}-",
+        "d".repeat(67)
+    );
+    let (vault, out, audit) = shield(&format!("{hyphen}.next"));
+    assert_eq!(audit.secret, 1, "{hyphen} -> {out}");
+    assert_eq!(out, "h1_secret.next", "{hyphen} -> {out}");
+    assert!(hidden(&out, id18), "{out}");
+    assert!(!vault.holds_surface(hyphen.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let canary = format!("https://canary.discord.com/api/webhooks/{id18}/{token68}");
+    let (vault, out, audit) = shield(&canary);
+    assert_eq!(audit.secret, 1, "{canary} -> {out}");
+    assert_eq!(out, "https://canary.h1_secret", "{canary} -> {out}");
+    assert!(hidden(&out, id18), "{canary} -> {out}");
+    assert!(hidden(&out, "Ab9"), "{canary} -> {out}");
+    assert!(!vault.holds_surface(token68.as_bytes()), "{canary}");
+
+    for bare in [
+        format!("https://discord.com/api/webhooks/{id18}/{}", "c".repeat(67)),
+        format!("https://discord.com/api/webhooks/{id18}/{}", "c".repeat(69)),
+        format!("https://discord.com/api/webhooks/{id18}/{}", "b".repeat(99)),
+        format!(
+            "https://discord.com/api/webhooks/{id18}/{}",
+            "b".repeat(101)
+        ),
+        format!(
+            "https://discord.com/api/webhooks/{}/{}",
+            "1".repeat(17),
+            token68
+        ),
+        format!(
+            "https://discord.com/api/webhooks/{}/{}",
+            "1".repeat(20),
+            token68
+        ),
+        format!("https://example.com/api/webhooks/{id18}/{token68}"),
+        format!("https://discord.com/api/channels/{id18}/{token68}"),
+        format!("https://notdiscord.com/api/webhooks/{id18}/{token68}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
