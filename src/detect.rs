@@ -487,6 +487,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // Leaving one of these out sends the token. Longer prefixes
             // come first so `glrtr-` is not cut down to `glrt-`.
             r"\b(?:glagent|glffct|glsoat|glrtr|glcbt|glptt|glimt|gloas|gldt|glft|glrt|glwt)-[A-Za-z0-9_\-]{20,}\b",
+            // A GitLab runner registration token is `GR1348941` plus
+            // 20 letters, digits, underscores, or hyphens. gitleaks
+            // gitlab-rrt. The glrt- alternation does not match this
+            // prefix. A final hyphen is not a word boundary. A shorter
+            // body stays as written. The value is not stored.
+            r"\bGR1348941(?:[A-Za-z0-9_-]{19}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{19}-)",
             // Session tokens are `xoxc-` and `xoxd-`. Leaving `c` or `d`
             // out sends the token. A short payload stays as written.
             r"\bxox[abcdprs]-[0-9A-Za-z-]{10,}",
