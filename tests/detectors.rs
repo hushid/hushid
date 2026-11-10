@@ -6348,3 +6348,69 @@ fn ideographic_comma_between_groups_still_shields_the_number() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn sentry_auth_token_is_masked() {
+    // The token formats page publishes a personal auth token as
+    // `sntryu_` plus 64 hex characters, and an organization auth
+    // token as `sntrys_`, a base64 payload, `_`, and 43 base64
+    // characters. An organization token runs about 180 to 250
+    // characters, so the payload length is not fixed. A shorter
+    // body stays as written. A longer personal token stays too.
+    // The value is not stored.
+    let body = "a".repeat(64);
+    let token = format!("sntryu_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "sntryu"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let payload = "ab+cd/ef=";
+    let tail = format!("{}+", "A".repeat(42));
+    assert_eq!(tail.len(), 43);
+    let org = format!("sntrys_{payload}_{tail}");
+    let (vault, out, audit) = shield(&org);
+    assert_eq!(audit.secret, 1, "{org} -> {out}");
+    assert_eq!(out, "h1_secret", "{org} -> {out}");
+    assert!(hidden(&out, "sntrys"), "{org} -> {out}");
+    assert!(hidden(&out, payload), "{org} -> {out}");
+    assert!(hidden(&out, &tail), "{org} -> {out}");
+    assert!(!vault.holds_surface(org.as_bytes()), "{org}");
+    assert!(vault.restore_write(&out).is_err(), "{org}");
+
+    let mixed_body = format!("a1b{}", "c".repeat(61));
+    let mixed = format!("sntryu_{mixed_body}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "sntryu"), "{out}");
+    assert!(hidden(&out, "a1b"), "{out}");
+    assert!(hidden(&out, &"c".repeat(61)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("sntryu_{}", "a".repeat(63)),
+        format!("sntryu_{}", "a".repeat(65)),
+        format!("sntryu_{}", "A".repeat(64)),
+        format!("sntrys_{payload}_{}", "A".repeat(42)),
+        format!("wordsntryu_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

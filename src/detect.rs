@@ -493,6 +493,18 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // alphabet. A shorter body stays as written. A trailing
             // `=` is padding and stays outside the token.
             r"\bpypi-[A-Za-z0-9_-]{85,}",
+            // A Sentry personal auth token is `sntryu_` and 64 hex
+            // characters. An organization auth token is `sntrys_`, a
+            // base64 payload, `_`, and 43 base64 characters. The
+            // token formats page publishes those shapes. An
+            // organization token runs about 180 to 250 characters,
+            // so the payload length is not fixed. The rules above do
+            // not see those prefixes, so the token stays in the
+            // clear. A shorter body stays as written. A longer
+            // personal token stays too. The tail may end in `+` or
+            // `/`, so that alternative has no trailing word
+            // boundary. The value is not stored.
+            r"\bsntry(?:u_[a-f0-9]{64}\b|s_[A-Za-z0-9+/=]+_[A-Za-z0-9+/]{43})",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
