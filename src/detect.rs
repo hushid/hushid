@@ -529,14 +529,18 @@ fn push_births(text: &str, out: &mut Vec<RawHit>) {
         // alternative would stop after `1994-03-1` and leave the `5`.
         // Four decimal digits, not a literal ASCII 19 or 20. A fullwidth
         // year is still `\d`. The calendar check keeps 1900 through 2099.
-        let iso = r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}";
-        let dmy = r"\d{1,2}[-/.]\d{1,2}[-/.]\d{4}";
-        let french = format!(r"\d{{1,2}}\s+(?:{months})\.?\s*,?\s*\d{{4}}");
-        let english = format!(r"(?:{months})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\s*,?\s*\d{{4}}");
-        [iso, dmy]
+        // The hyphen, slash, and stop include the fullwidth forms. A wide
+        // keyboard writes those where the ASCII mark already separates a date.
+        let sep = r"[-/.\u{FF0D}\u{FF0F}\u{FF0E}]";
+        let dot = DOT;
+        let comma = r"[,\u{FF0C}]";
+        let iso = format!(r"\d{{4}}{sep}\d{{1,2}}{sep}\d{{1,2}}");
+        let dmy = format!(r"\d{{1,2}}{sep}\d{{1,2}}{sep}\d{{4}}");
+        let french = format!(r"\d{{1,2}}\s+(?:{months}){dot}?\s*{comma}?\s*\d{{4}}");
+        let english =
+            format!(r"(?:{months}){dot}?\s+\d{{1,2}}(?:st|nd|rd|th)?\s*{comma}?\s*\d{{4}}");
+        [iso, dmy, french, english]
             .into_iter()
-            .map(str::to_string)
-            .chain([french, english])
             .map(|body| Regex::new(&format!(r"(?i)\b{body}")).expect("birth date"))
             .collect()
     });
@@ -1669,7 +1673,11 @@ fn born_near(cues: &[(usize, usize)], start: usize, end: usize, text: &str) -> b
 }
 
 fn sentence_end(ch: char) -> bool {
-    matches!(ch, '.' | '!' | '?' | '\n' | '\r' | '\u{3002}')
+    // U+FF0E and U+FF61 are the wide and halfwidth stops already used as dots.
+    matches!(
+        ch,
+        '.' | '!' | '?' | '\n' | '\r' | '\u{3002}' | '\u{FF0E}' | '\u{FF61}'
+    )
 }
 
 fn edge_gap(a0: usize, a1: usize, b0: usize, b1: usize, text: &str) -> usize {
