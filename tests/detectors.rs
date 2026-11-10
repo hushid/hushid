@@ -5632,6 +5632,53 @@ fn small_commercial_at_still_shields_the_address() {
 }
 
 #[test]
+fn fullwidth_low_line_still_shields_the_address() {
+    // `user_tag@example.com` is already an email. A wide keyboard writes
+    // that underscore as U+FF3F. Leaving the mark out sends the head.
+    // A local part may start on `_`, so it may start on this mark too.
+    // The same mark in a domain stays as written.
+    let email = "user\u{FF3F}tag@example.com";
+    let (vault, out, audit) = shield(email);
+    assert_eq!(audit.email, 1, "{email} -> {out}");
+    assert_eq!(audit.phone, 0, "{email} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{email} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{email} -> {out}");
+    assert!(!out.contains('\u{FF3F}'), "{email} -> {out}");
+    assert!(!out.contains('@'), "{email} -> {out}");
+    assert!(hidden(&out, "user"), "{email} -> {out}");
+    assert!(hidden(&out, "tag"), "{email} -> {out}");
+    assert!(hidden(&out, "example"), "{email} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), email);
+
+    let sentence = "see user\u{FF3F}name@example.com next";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.email, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("see h1_email_"), "{out}");
+    assert!(out.ends_with(" next"), "{out}");
+    assert!(!out.contains('\u{FF3F}'), "{out}");
+    assert!(hidden(&out, "user"), "{out}");
+    assert!(hidden(&out, "name"), "{out}");
+    assert!(hidden(&out, "example"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let leading = "\u{FF3F}tag@example.com";
+    let (vault, out, audit) = shield(leading);
+    assert_eq!(audit.email, 1, "{leading} -> {out}");
+    assert!(out.starts_with("h1_email_"), "{leading} -> {out}");
+    assert_eq!(out.len(), "h1_email_".len() + 9, "{leading} -> {out}");
+    assert!(!out.contains('\u{FF3F}'), "{leading} -> {out}");
+    assert!(hidden(&out, "tag"), "{leading} -> {out}");
+    assert!(hidden(&out, "example"), "{leading} -> {out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), leading);
+
+    for bare in ["user@ex\u{FF3F}ample.com", "not an address"] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.email, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn small_parentheses_still_shield_the_number() {
     // `(416) 555-0123` is already a phone, and so is `+44 (20) 7946 0958`.
     // A small parenthesis is that mark. Leaving it out sends the number.
