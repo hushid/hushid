@@ -674,6 +674,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // shorter `fo1_` body stays as written.
             r"\bfo1_[A-Za-z0-9_-]{42}[A-Za-z0-9_]\b",
             r"\bfm(?:1[ar]|2)_[A-Za-z0-9+/]{100,}={0,2}",
+            // A Bedrock long-lived key is `ABSK` plus 109 to 269
+            // base64 characters, with optional `=` padding. The value
+            // is not stored. A shorter body stays as written.
+            r"\bABSK[A-Za-z0-9+/]{109,269}={0,2}",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
