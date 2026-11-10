@@ -5950,3 +5950,50 @@ fn fullwidth_assignment_sign_still_masks_the_value() {
         assert_eq!(out, text, "{text} -> {out}");
     }
 }
+
+#[test]
+fn groq_api_key_is_masked() {
+    // Groq's API keys page issues a key as `gsk_` plus a body. The
+    // published body is 52 letters or digits. A shorter body stays as
+    // written. A longer body stays too. The value is not stored.
+    let body = "a".repeat(52);
+    let token = format!("gsk_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "gsk"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("gsk_a1B{}", "c".repeat(49));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "gsk"), "{out}");
+    assert!(hidden(&out, "a1B"), "{out}");
+    assert!(hidden(&out, &"c".repeat(49)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    for bare in [
+        format!("gsk_{}", "a".repeat(51)),
+        format!("gsk_{}", "a".repeat(53)),
+        format!("wordgsk_{body}"),
+        format!("GSK_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

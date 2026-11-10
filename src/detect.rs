@@ -490,6 +490,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // alphabet. A shorter body stays as written. A trailing
             // `=` is padding and stays outside the token.
             r"\bpypi-[A-Za-z0-9_-]{85,}",
+            // A Groq API key is `gsk_` and 52 letters or digits. The
+            // API keys page is where those credentials are issued.
+            // The rules above do not see that prefix, so the key stays
+            // in the clear. A shorter body stays as written. A longer
+            // body stays too. The value is not stored.
+            r"\bgsk_[A-Za-z0-9]{52}\b",
             // An older Square access token is `sq0atp-` plus 22
             // characters. An older application secret is `sq0csp-`
             // plus 43. Square's access tokens page is where those
