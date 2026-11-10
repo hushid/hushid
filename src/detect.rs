@@ -498,6 +498,15 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // shorter body stays as written. A longer body stays
             // too. The value is not stored.
             r"\bsq0(?:atp-[A-Za-z0-9_-]{22}|csp-[A-Za-z0-9_-]{43})\b",
+            // A Notion integration token is `ntn_` and a 46-character
+            // body. The authentication page sends that bearer token.
+            // New tokens start with `ntn_` so scanners can find them.
+            // The body is 11 digits and 35 letters or digits. The
+            // rules above do not see that prefix, so the token stays
+            // in the clear. A shorter body stays as written. The
+            // older `secret_` prefix is a common word and stays as
+            // written. The value is not stored.
+            r"\bntn_[0-9]{11}[A-Za-z0-9]{35}\b",
             // A Postman API key is `PMAK-`, 24 hex characters, a
             // hyphen, and 34 hex characters. Postman's authentication
             // page shows that shape. The rules above do not see that
