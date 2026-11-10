@@ -23,6 +23,9 @@ pub enum Kind {
     Card,
     Sin,
     Ramq,
+    Postal,
+    Address,
+    Birth,
     Glossary,
 }
 
@@ -34,6 +37,9 @@ impl Kind {
             Kind::Card => "card",
             Kind::Sin => "sin",
             Kind::Ramq => "ramq",
+            Kind::Postal => "postal",
+            Kind::Address => "address",
+            Kind::Birth => "birth",
             Kind::Glossary => "glossary",
         }
     }
@@ -49,6 +55,12 @@ impl Kind {
             Some(Kind::Sin)
         } else if name.eq_ignore_ascii_case("ramq") {
             Some(Kind::Ramq)
+        } else if name.eq_ignore_ascii_case("postal") {
+            Some(Kind::Postal)
+        } else if name.eq_ignore_ascii_case("address") {
+            Some(Kind::Address)
+        } else if name.eq_ignore_ascii_case("birth") {
+            Some(Kind::Birth)
         } else if name.eq_ignore_ascii_case("glossary") {
             Some(Kind::Glossary)
         } else {

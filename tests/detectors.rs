@@ -131,7 +131,17 @@ fn mark_body_len(tail: &str) -> Option<usize> {
             return Some("secret".len());
         }
     }
-    for head in ["email_", "phone_", "card_", "sin_", "glossary_"] {
+    for head in [
+        "email_",
+        "phone_",
+        "card_",
+        "sin_",
+        "ramq_",
+        "postal_",
+        "address_",
+        "birth_",
+        "glossary_",
+    ] {
         let Some(rest) = tail.strip_prefix(head) else {
             continue;
         };
@@ -9476,4 +9486,233 @@ fn gitlab_routable_runner_token_keeps_its_tail() {
     assert_eq!(audit.secret, 1, "{short} -> {out}");
     assert_eq!(out, "h1_secret", "{short} -> {out}");
     assert!(!vault.holds_surface(short.as_bytes()), "{short}");
+}
+
+#[test]
+fn ca_direct_id_postal_code_is_shielded_and_restored() {
+    // A Canadian postal code is letter, digit, letter, an optional
+    // space or hyphen, digit, letter, digit. The letters D, F, I, O,
+    // Q, and U are not used. W and Z are not used first. A narrow
+    // no-break space is that same space. A code outside that shape
+    // stays as written. The value is restored.
+    let samples = [
+        "H2X 1Y4",
+        "h2x 1y4",
+        "H2X1Y4",
+        "H2X-1Y4",
+        "K1A 0B1",
+        "A1A 1A1",
+        "H2X\u{00A0}1Y4",
+    ];
+    for sample in samples {
+        let (vault, out, audit) = shield(sample);
+        assert_eq!(audit.postal, 1, "{sample} -> {out}");
+        assert!(out.starts_with("h1_postal_"), "{sample} -> {out}");
+        assert_eq!(visible(&out), "", "{sample} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sample);
+    }
+
+    let (vault, out, audit) = shield("code H2X 1Y4.");
+    assert_eq!(audit.postal, 1, "{out}");
+    assert!(out.starts_with("code h1_postal_"), "{out}");
+    assert!(out.ends_with('.'), "{out}");
+    assert!(hidden(&out, "H2X"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), "code H2X 1Y4.");
+
+    let raw = r#"{"code":"H2X 1Y4"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.postal, 1, "{out}");
+    assert!(hidden(&out, "H2X"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let email = "note user@h2x1y4.ca today";
+    let (vault, out, audit) = shield(email);
+    assert_eq!(audit.email, 1, "{out}");
+    assert_eq!(audit.postal, 0, "{out}");
+    assert!(hidden(&out, "h2x1y4"), "{out}");
+    assert!(!out.contains('@'), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), email);
+
+    for bare in [
+        "D1A 1A1", "F1A 1A1", "I1A 1A1", "O1A 1A1", "Q1A 1A1", "U1A 1A1", "W1A 1A1", "Z1A 1A1",
+        "H2D 1A1", "H2X 1O4", "H2X 1U4", "H2X1Y", "H2X 1Y45", "H2X  1Y4", "xH2X1Y4", "H2X1Y4x",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.postal, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
+fn ca_direct_id_street_address_is_shielded_and_restored() {
+    // Quebec writes the street type first. English writes it last.
+    // A case postale or a PO box is that same address. A following
+    // sentence stays outside the span. A street with no number, a
+    // number with no street, and `CP 42` without the dots stay as
+    // written. The value is restored.
+    let samples = [
+        "123 rue Saint-Denis",
+        "123, rue Saint-Denis",
+        "1234 avenue du Mont-Royal",
+        "88 boulevard René-Lévesque Ouest",
+        "10 chemin de la Côte-Sainte-Catherine",
+        "88 Main Street",
+        "88 Main Street West",
+        "123 1st Street",
+        "45 2e Avenue",
+        "8 1re Avenue",
+        "120-124 rue Saint-Denis",
+        "123A Main Street",
+        "App. 4, 123 rue Saint-Denis",
+        "Apt 4, 88 Main Street",
+        "P.O. Box 42",
+        "PO Box 42",
+        "case postale 42",
+        "C.P. 42",
+        "123 RUE SAINT-DENIS",
+    ];
+    for sample in samples {
+        let (vault, out, audit) = shield(sample);
+        assert_eq!(audit.address, 1, "{sample} -> {out}");
+        assert!(out.starts_with("h1_address_"), "{sample} -> {out}");
+        assert_eq!(visible(&out), "", "{sample} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sample);
+    }
+
+    let (vault, out, audit) = shield("habite au 123 rue Saint-Denis est ici");
+    assert_eq!(audit.address, 1, "{out}");
+    assert!(out.starts_with("habite au h1_address_"), "{out}");
+    assert!(out.ends_with(" est ici"), "{out}");
+    assert!(hidden(&out, "Saint-Denis"), "{out}");
+    assert_eq!(
+        vault.restore_write(&out).unwrap(),
+        "habite au 123 rue Saint-Denis est ici"
+    );
+
+    let (vault, out, audit) = shield("see 88 Main Street. Next");
+    assert_eq!(audit.address, 1, "{out}");
+    assert!(out.starts_with("see h1_address_"), "{out}");
+    assert!(out.ends_with(". Next"), "{out}");
+    assert!(hidden(&out, "Main"), "{out}");
+    assert_eq!(
+        vault.restore_write(&out).unwrap(),
+        "see 88 Main Street. Next"
+    );
+
+    let raw = r#"{"street":"123 rue Saint-Denis"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.address, 1, "{out}");
+    assert!(hidden(&out, "Saint-Denis"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let both = "call 416-555-0123 about 123 rue Saint-Denis H2X 1Y4";
+    let (vault, out, audit) = shield(both);
+    assert_eq!(audit.phone, 1, "{out}");
+    assert_eq!(audit.address, 1, "{out}");
+    assert_eq!(audit.postal, 1, "{out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert!(hidden(&out, "Saint-Denis"), "{out}");
+    assert!(hidden(&out, "H2X"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), both);
+
+    for bare in [
+        "Main Street",
+        "123 rue",
+        "App. 4",
+        "CP 42",
+        "Box 42",
+        "on Main Street today",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.address, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
+fn ca_direct_id_birth_date_is_shielded_and_restored() {
+    // A date of birth is a calendar date within 40 characters of a
+    // birth cue. A date with no cue stays as written. 31 April and
+    // 29 February in a year that is not a leap year stay as written.
+    // The value is restored.
+    let samples = [
+        "date de naissance: 1994-03-15",
+        "date de naissance: 15/03/1994",
+        "date de naissance: 15-03-1994",
+        "DOB 03/15/1994",
+        "D.O.B. 15.03.1994",
+        "née le 15 mars 1994",
+        "né le 15 février 1994",
+        "nee le 29 février 1996",
+        "born March 15, 1994",
+        "DDN 1994-03-15",
+        "birthdate 1994-03-05",
+        "1994-03-15 (date de naissance)",
+        "DOB 2000-02-29",
+        "date of birth 15/03/1994",
+        "dateDeNaissance: 1994-06-01",
+        "date_de_naissance 15/06/1994",
+    ];
+    for sample in samples {
+        let (vault, out, audit) = shield(sample);
+        assert_eq!(audit.birth, 1, "{sample} -> {out}");
+        assert!(out.contains("h1_birth_"), "{sample} -> {out}");
+        let year = sample
+            .split(|ch: char| !ch.is_ascii_digit())
+            .find(|part| part.len() == 4)
+            .expect(sample);
+        assert!(hidden(&out, year), "{sample} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), sample);
+    }
+
+    let timed = "née le 1994-03-15T08:30:00";
+    let (vault, out, audit) = shield(timed);
+    assert_eq!(audit.birth, 1, "{out}");
+    assert!(out.contains("h1_birth_"), "{out}");
+    assert!(out.contains("T08:30:00"), "{out}");
+    assert!(hidden(&out, "1994-03-15"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), timed);
+
+    let raw = r#"{"date de naissance":"15 mars 1994"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.birth, 1, "{out}");
+    assert!(hidden(&out, "1994"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    let with_ramq = "née le 15 mars 1994, RAMQ BOUF 9451 1419";
+    let (vault, out, audit) = shield(with_ramq);
+    assert_eq!(audit.birth, 1, "{out}");
+    assert_eq!(audit.ramq, 1, "{out}");
+    assert!(hidden(&out, "1994"), "{out}");
+    assert!(hidden(&out, "94511419"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), with_ramq);
+
+    let near = format!("date de naissance{}1994-03-15", " ".repeat(40));
+    let (vault, out, audit) = shield(&near);
+    assert_eq!(audit.birth, 1, "{out}");
+    assert!(hidden(&out, "1994-03-15"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), near);
+
+    let far = format!("date de naissance{}1994-03-15", " ".repeat(41));
+    let (_vault, out, audit) = shield(&far);
+    assert_eq!(audit.birth, 0, "{out}");
+    assert_eq!(out, far, "{out}");
+
+    for bare in [
+        "1994-03-15",
+        "the release is 1994-03-15",
+        "née le 31 avril 1994",
+        "née le 29 février 1995",
+        "née le 1994-02-31",
+        "DOB 1900-02-29",
+        "DOB 15/03/94",
+        "born yesterday",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.birth, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
 }

@@ -10,7 +10,10 @@ const TIER_RAMQ: u8 = 2;
 const TIER_CARD: u8 = 3;
 const TIER_EMAIL: u8 = 4;
 const TIER_PHONE: u8 = 5;
-const TIER_GLOSSARY: u8 = 6;
+const TIER_POSTAL: u8 = 6;
+const TIER_BIRTH: u8 = 7;
+const TIER_ADDRESS: u8 = 8;
+const TIER_GLOSSARY: u8 = 9;
 
 const CUE_WINDOW: usize = 40;
 
@@ -73,6 +76,9 @@ pub fn find_hits(text: &str, glossary: &Glossary) -> Vec<Hit> {
     push_cards(text, &mut raw);
     push_emails(text, &mut raw);
     push_phones(text, &mut raw);
+    push_postal(text, &mut raw);
+    push_births(text, &mut raw);
+    push_addresses(text, &mut raw);
     for (start, end) in glossary.find(text) {
         raw.push(RawHit {
             tier: TIER_GLOSSARY,
@@ -449,6 +455,275 @@ fn ramq_layout_ok(text: &str) -> bool {
     let month_ok = (1u8..=12).contains(&month) || (51u8..=62).contains(&month);
     let day_ok = (1u8..=31).contains(&day);
     month_ok && day_ok
+}
+
+fn push_postal(text: &str, out: &mut Vec<RawHit>) {
+    // A Canadian postal code is letter, digit, letter, an optional
+    // space or hyphen, digit, letter, digit. The letters D, F, I, O,
+    // Q, and U are not used. W and Z are not used first. A no-break
+    // space is that same space. Leaving the shape out sends the code.
+    // A code outside it stays as written. The value is restored.
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)\b[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z][ \t\u{00A0}-]?[0-9][ABCEGHJ-NPRSTV-Z][0-9]\b",
+        )
+        .expect("postal code")
+    });
+    for hit in RE.find_iter(text) {
+        if digit_bounded(text, hit.start(), hit.end()) {
+            out.push(span(TIER_POSTAL, Kind::Postal, hit.start(), hit.end()));
+        }
+    }
+}
+
+fn push_births(text: &str, out: &mut Vec<RawHit>) {
+    // A date of birth is a calendar date within 40 characters of a
+    // birth cue. The cue is `date of birth`, `birth date`, `DOB`,
+    // `D.O.B.`, `born`, `date de naissance`, `DDN`, or `né le`.
+    // A date with no cue stays as written. A day that month does not
+    // have stays as written. The value is restored.
+    static RE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        let months = month_alt();
+        // `\d{1,2}` takes both digits when they are there. A shorter
+        // alternative would stop after `1994-03-1` and leave the `5`.
+        let iso = r"(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}";
+        let dmy = r"\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}";
+        let french = format!(r"\d{{1,2}}\s+(?:{months})\.?\s*,?\s*(?:19|20)\d{{2}}");
+        let english =
+            format!(r"(?:{months})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\s*,?\s*(?:19|20)\d{{2}}");
+        [iso, dmy]
+            .into_iter()
+            .map(str::to_string)
+            .chain([french, english])
+            .map(|body| Regex::new(&format!(r"(?i)\b{body}")).expect("birth date"))
+            .collect()
+    });
+    static CUES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        let gap = cue_word_gap();
+        let patterns = [
+            format!(r"(?i)\bdate{gap}of{gap}birth\b"),
+            format!(r"(?i)\bbirth{gap}date\b"),
+            r"(?i)\bbirthdate\b".to_string(),
+            r"(?i)\bdob\b".to_string(),
+            format!(
+                r"(?i)\bd(?:\s*{dot}\s*|\s+)o(?:\s*{dot}\s*|\s+)b\b{dot}?",
+                dot = DOT
+            ),
+            format!(r"(?i)\bdate{gap}de{gap}naissance\b"),
+            r"(?i)\bdate(?:_de_|[\W_]*de)?[\W_]*naissance\b".to_string(),
+            r"(?i)\bddn\b".to_string(),
+            format!(r"(?i)\bn(?:é|e\u{{0301}})e?{gap}le\b"),
+            format!(r"(?i)\bnee{gap}le\b"),
+            r"(?i)\bborn\b".to_string(),
+        ];
+        patterns
+            .into_iter()
+            .map(|pattern| Regex::new(&pattern).expect("birth cue"))
+            .collect()
+    });
+    let cues = cue_spans(text, &CUES);
+    for re in RE.iter() {
+        for hit in re.find_iter(text) {
+            if !birth_edge_ok(text, hit.start(), hit.end()) {
+                continue;
+            }
+            if !birth_layout_ok(hit.as_str()) {
+                continue;
+            }
+            if cue_near(&cues, hit.start(), hit.end(), text) {
+                out.push(span(TIER_BIRTH, Kind::Birth, hit.start(), hit.end()));
+            }
+        }
+    }
+}
+
+/// Full month names, longest first when the pattern is built.
+///
+/// `mars` is March, and `mai` is May. A shorter name that sits inside
+/// a longer one loses, so `sept` does not take the front of `septembre`.
+const MONTHS: &[(&str, u8)] = &[
+    ("janvier", 1),
+    ("january", 1),
+    ("février", 2),
+    ("fevrier", 2),
+    ("february", 2),
+    ("septembre", 9),
+    ("september", 9),
+    ("novembre", 11),
+    ("november", 11),
+    ("décembre", 12),
+    ("decembre", 12),
+    ("december", 12),
+    ("octobre", 10),
+    ("october", 10),
+    ("juillet", 7),
+    ("august", 8),
+    ("avril", 4),
+    ("april", 4),
+    ("march", 3),
+    ("mars", 3),
+    ("juin", 6),
+    ("june", 6),
+    ("july", 7),
+    ("août", 8),
+    ("aout", 8),
+    ("sept", 9),
+    ("mai", 5),
+    ("may", 5),
+];
+
+fn month_alt() -> String {
+    let mut names: Vec<&str> = MONTHS.iter().map(|(name, _)| *name).collect();
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    names.join("|")
+}
+
+fn month_in(text: &str) -> Option<u8> {
+    let lower = text.to_lowercase();
+    let mut best: Option<(usize, u8)> = None;
+    for &(name, month) in MONTHS {
+        let Some(at) = lower.find(name) else {
+            continue;
+        };
+        let end = at + name.len();
+        if !name_edge(&lower, at, end) {
+            continue;
+        }
+        if best.map(|(len, _)| name.len() > len).unwrap_or(true) {
+            best = Some((name.len(), month));
+        }
+    }
+    best.map(|(_, month)| month)
+}
+
+fn name_edge(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after = text[end..].chars().next();
+    !before.is_some_and(|ch| ch.is_alphabetic()) && !after.is_some_and(|ch| ch.is_alphabetic())
+}
+
+fn birth_edge_ok(text: &str, start: usize, end: usize) -> bool {
+    if !digit_bounded(text, start, end) {
+        return false;
+    }
+    match text[end..].chars().next() {
+        // A clock time may follow an ISO date. The `T` stays outside.
+        None | Some('T') | Some('t') => true,
+        Some(ch) if ch.is_alphanumeric() || ch == '_' => false,
+        Some(_) => true,
+    }
+}
+
+fn birth_layout_ok(text: &str) -> bool {
+    let numbers = birth_numbers(text);
+    if let Some(month) = month_in(text) {
+        return match numbers.as_slice() {
+            [day, year] => birth_named(*year, month, *day),
+            _ => false,
+        };
+    }
+    // Year-month-day, day-month-year, or month-day-year. The calendar
+    // check drops a month or a day that does not exist.
+    match numbers.as_slice() {
+        [a, b, c] => {
+            birth_numeric(*a, *b, *c) || birth_numeric(*c, *b, *a) || birth_numeric(*c, *a, *b)
+        }
+        _ => false,
+    }
+}
+
+fn birth_named(year: u16, month: u8, day: u16) -> bool {
+    let Ok(day) = u8::try_from(day) else {
+        return false;
+    };
+    (1900..=2099).contains(&year) && calendar_day(year, month, day)
+}
+
+fn birth_numeric(year: u16, month: u16, day: u16) -> bool {
+    let (Ok(month), Ok(day)) = (u8::try_from(month), u8::try_from(day)) else {
+        return false;
+    };
+    (1900..=2099).contains(&year) && calendar_day(year, month, day)
+}
+
+fn calendar_day(year: u16, month: u8, day: u8) -> bool {
+    let max = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year(year) => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=max).contains(&day)
+}
+
+fn leap_year(year: u16) -> bool {
+    year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
+}
+
+fn birth_numbers(text: &str) -> Vec<u16> {
+    let mut numbers = Vec::new();
+    let mut current: Option<u16> = None;
+    for ch in text.chars() {
+        if let Some(digit) = ch.to_digit(10) {
+            let slot = current.get_or_insert(0);
+            *slot = slot.saturating_mul(10).saturating_add(digit as u16);
+        } else if let Some(value) = current.take() {
+            numbers.push(value);
+        }
+    }
+    if let Some(value) = current.take() {
+        numbers.push(value);
+    }
+    numbers
+}
+
+fn push_addresses(text: &str, out: &mut Vec<RawHit>) {
+    // A street address is a civic number and a street type. Quebec
+    // writes the type first (`123 rue Saint-Denis`). English writes
+    // it last (`88 Main Street`). A case postale or a PO box is that
+    // same address. A street with no number stays as written. `CP 42`
+    // without the dots stays as written. The value is restored.
+    static RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+        let civic = r"\d{1,6}(?:-\d{1,6})?(?:[A-Za-z]\b)?";
+        let gap = r"(?:\s*,\s*|\s+)";
+        // `1st` and `2e` are street names. A letter word is the other name.
+        let name = r"(?:\p{L}[\p{L}\p{M}'’‘.-]*|\d{1,2}(?:ère|ere|er|re|st|nd|rd|th|e)\b)";
+        let particle = r"(?:de|du|des|la|le|les|au|aux)\s+|d['’‘]|l['’‘]";
+        let direction = "Ouest|OUEST|Est|EST|Nord|NORD|Sud|SUD|West|WEST|East|EAST|North|NORTH|South|SOUTH|[NESWO]";
+        let unit = r"(?:(?:appartement|apartment|appart|apt|app|suite|bureau|unité|unite|unit)\.?\s+#?\d{1,6}[A-Za-z]?\s*,\s+)?";
+        let french_type = "boulevard|avenue|chemin|croissant|terrasse|impasse|promenade|ruelle|sentier|montée|montee|allée|allee|cercle|carré|carre|côte|cote|place|rang|voie|rue|boul|blvd|ave|av";
+        let english_type = "boulevard|crescent|terrace|parkway|highway|street|avenue|circle|drive|court|trail|gardens|heights|square|alley|route|place|ridge|point|road|lane|way|blvd|pkwy|cres|terr|hwy|ave|cir|trl|gdns|hts|aly|rte|st|rd|dr|ct|ln|pl|pt|sq";
+        let french = format!(
+            r"(?i)\b{unit}{civic}{gap}(?:{french_type})\b{gap}(?:(?:{particle})){{0,4}}{name}(?-i:\s+\p{{Lu}}\p{{L}}[\p{{L}}\p{{M}}'’‘.-]*)?(?-i:\s+(?:{direction})\b)?",
+            unit = unit,
+            civic = civic,
+            gap = gap,
+            french_type = french_type,
+            particle = particle,
+            name = name,
+            direction = direction,
+        );
+        let english = format!(
+            r"(?i)\b{unit}{civic}{gap}(?:{name}{gap}){{1,3}}(?:{english_type})\b(?-i:\s+(?:{direction})\b)?",
+            unit = unit,
+            civic = civic,
+            gap = gap,
+            name = name,
+            english_type = english_type,
+            direction = direction,
+        );
+        let postal_box = r"(?i)\b(?:p\.?\s*o\.?\s*box|case(?:\s+|-)postale|c\.p\.)\s+#?\d{1,6}\b";
+        [french, english, postal_box.to_string()]
+            .into_iter()
+            .map(|pattern| Regex::new(&pattern).expect("address pattern"))
+            .collect()
+    });
+    for re in RES.iter() {
+        for hit in re.find_iter(text) {
+            out.push(span(TIER_ADDRESS, Kind::Address, hit.start(), hit.end()));
+        }
+    }
 }
 
 fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
