@@ -592,6 +592,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // digits. The body may be any case. The value is not
             // stored. A shorter body and a longer body stay as written.
             r"\bp8e-(?i:[a-z0-9]{32})\b",
+            // An Alibaba Cloud access key id is `LTAI` plus 20 letters
+            // or digits. The body may be any case. The value is not
+            // stored. A shorter body and a longer body stay as written.
+            r"\bLTAI(?i:[a-z0-9]{20})\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
