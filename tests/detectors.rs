@@ -6746,3 +6746,41 @@ fn age_secret_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn pulumi_api_token_is_masked() {
+    // A Pulumi access token is `pul-` plus 40 hex characters. The
+    // value is not stored. A shorter body, a longer body, and an
+    // uppercase hex body stay as written.
+    let digits = "a1b2c3d4e5";
+    let body = digits.repeat(4);
+    assert_eq!(body.len(), 40);
+    let token = format!("pul-{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pul"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(hidden(&out, digits), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "pul"), "{out}");
+    assert!(hidden(&out, digits), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("pul-{}", "a".repeat(39)),
+        format!("pul-{}", "a".repeat(41)),
+        format!("pul-{}", "A".repeat(40)),
+        format!("wordpul-{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

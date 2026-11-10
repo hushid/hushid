@@ -550,6 +550,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // body stays as written. A character outside that alphabet
             // stays outside the key.
             r"\bAGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}\b",
+            // A Pulumi access token is `pul-` plus 40 hex characters.
+            // The value is not stored. A shorter body, a longer body,
+            // and an uppercase hex body stay as written.
+            r"\bpul-[a-f0-9]{40}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
