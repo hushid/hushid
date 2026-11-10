@@ -782,6 +782,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // value is not stored. A shorter body stays as written.
             // Uppercase hex stays as written.
             r"\bdapi[a-f0-9]{32}(?:-\d)?\b",
+            // A Sidekiq gem URL is http or https, 8 hex characters,
+            // a colon, 8 hex characters, and gems.contribsys.com or
+            // enterprise.contribsys.com. gitleaks
+            // sidekiq-sensitive-url. A shorter hex group stays as
+            // written. The value is not stored.
+            r"(?i)\bhttps?://[a-f0-9]{8}:[a-f0-9]{8}@(?:gems\.contribsys\.com|enterprise\.contribsys\.com)\b",
             // An Authress service client key is `scauth_`,
             // `authress_`, `ext_`, or `sc_`, two short segments, the
             // lowercase marker `acc`, and a long tail. gitleaks
