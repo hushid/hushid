@@ -781,6 +781,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // `IncomingWebhook`. gitleaks microsoft-teams-webhook.
             // A shorter URL stays as written. The value is not stored.
             r"\bhttps://[a-z0-9]+\.webhook\.office\.com/webhookb2/[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}@[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}/IncomingWebhook/[a-z0-9]{32}/[a-z0-9]{8}-(?:[a-z0-9]{4}-){3}[a-z0-9]{12}\b",
+            // A Sonar token is `squ_`, `sqp_`, or `sqa_` plus 40
+            // token characters. gitleaks sonar-api-token. The
+            // prefix may be any case. A bare 40-character string
+            // is not this token. A final hyphen or `=` stays inside
+            // the mark. A shorter body stays as written. The value
+            // is not stored.
+            r"(?i)\b(?:squ|sqp|sqa)_(?:[a-z0-9_=-]{39}[a-z0-9_]\b|[a-z0-9_=-]{39}[-=])",
             // A Defined Networking token is `dnkey-`, 26 token
             // characters, a hyphen, and 52 more. gitleaks
             // defined-networking-api-token. The prefix may be any
