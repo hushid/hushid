@@ -493,6 +493,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // prefix. A final hyphen is not a word boundary. A shorter
             // body stays as written. The value is not stored.
             r"\bGR1348941(?:[A-Za-z0-9_-]{19}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{19}-)",
+            // A GitLab session cookie is `_gitlab_session=` plus 32
+            // lowercase letters or digits. gitleaks
+            // gitlab-session-cookie. The glrt- rules do not see this
+            // name. A shorter value stays as written. Uppercase
+            // stays as written. The value is not stored.
+            r"\b_gitlab_session=[0-9a-z]{32}\b",
             // Session tokens are `xoxc-` and `xoxd-`. Leaving `c` or `d`
             // out sends the token. A short payload stays as written.
             r"\bxox[abcdprs]-[0-9A-Za-z-]{10,}",
