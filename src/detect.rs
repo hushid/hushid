@@ -899,6 +899,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // in the clear. A shorter body stays as written. A longer
             // body stays too. The value is not stored.
             r"\bgsk_[A-Za-z0-9]{52}\b",
+            // An xAI API key is `xai-` plus 80 letters or digits. The
+            // management API example has that body. The rules above do
+            // not see that prefix, so the key stays in the clear. A
+            // shorter body stays as written. A longer body stays too.
+            // An uppercase prefix stays as written. The value is not
+            // stored.
+            r"\bxai-[A-Za-z0-9]{80}\b",
             // A Linear personal API key is `lin_api_` plus 40
             // characters. Working with the GraphQL API is the page
             // that sends that key. The rules above do not see that
