@@ -5551,3 +5551,41 @@ fn halfwidth_full_stop_still_shields_the_address() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn postman_api_key_is_masked() {
+    // Postman's authentication page shows an API key as `PMAK-`,
+    // 24 hex characters, a hyphen, and 34 hex characters. A shorter
+    // body stays as written. The value is not stored.
+    let head = "a".repeat(24);
+    let tail = "b".repeat(34);
+    let body = format!("{head}-{tail}");
+    let token = format!("PMAK-{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "PMAK"), "{token} -> {out}");
+    assert!(hidden(&out, &head), "{token} -> {out}");
+    assert!(hidden(&out, &tail), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "PMAK"), "{out}");
+    assert!(hidden(&out, &head), "{out}");
+    assert!(hidden(&out, &tail), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("PMAK-{}-{}", "a".repeat(24), "b".repeat(33)),
+        format!("wordPMAK-{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

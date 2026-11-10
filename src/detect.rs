@@ -482,6 +482,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // alphabet. A shorter body stays as written. A trailing
             // `=` is padding and stays outside the token.
             r"\bpypi-[A-Za-z0-9_-]{85,}",
+            // A Postman API key is `PMAK-`, 24 hex characters, a
+            // hyphen, and 34 hex characters. Postman's authentication
+            // page shows that shape. The rules above do not see that
+            // prefix, so the key stays in the clear. A shorter body
+            // stays as written. The value is not stored.
+            r"\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b",
             // A Telegram bot token is digits, a colon, and a
             // 35-character secret. The Bot API sample is illustrative
             // (`123456:` plus 34 characters) and does not fix the
