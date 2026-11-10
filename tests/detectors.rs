@@ -7580,3 +7580,40 @@ fn bedrock_long_lived_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn onepassword_a3_secret_is_masked() {
+    // A 1Password secret key starts with `A3-` and then the published
+    // groups of uppercase letters and digits. The value is not stored.
+    // A shorter group stays as written.
+    let token = "A3-ABCDEF-ABCDEFGHIJK-ABCDE-ABCDE-ABCDE";
+    let (vault, out, audit) = shield(token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "A3"), "{token} -> {out}");
+    assert!(hidden(&out, "ABCDEFGHIJK"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "A3"), "{out}");
+    assert!(hidden(&out, "ABCDEFGHIJK"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let other = "A3-ABCDEF-ABCDEF-ABCDE-ABCDE-ABCDE-ABCDE";
+    let (vault, out, audit) = shield(other);
+    assert_eq!(audit.secret, 1, "{other} -> {out}");
+    assert_eq!(out, "h1_secret", "{other} -> {out}");
+    assert!(hidden(&out, "A3"), "{other} -> {out}");
+    assert!(hidden(&out, "ABCDEF-ABCDE"), "{other} -> {out}");
+    assert!(!vault.holds_surface(other.as_bytes()), "{other}");
+    assert!(vault.restore_write(&out).is_err(), "{other}");
+
+    let short = "A3-ABCDEF-ABCDEFGHIJK-ABCDE-ABCDE-ABCD";
+    let (_vault, out, audit) = shield(short);
+    assert_eq!(audit.secret, 0, "{short} -> {out}");
+    assert_eq!(out, short, "{short} -> {out}");
+}
