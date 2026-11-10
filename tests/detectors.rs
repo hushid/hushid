@@ -7887,3 +7887,46 @@ fn terraform_atlasv1_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn databricks_api_token_is_masked() {
+    // A Databricks token is `dapi` plus 32 lowercase hex characters,
+    // with an optional hyphen and one digit. The value is not stored.
+    // A shorter body stays as written. Uppercase hex stays as written.
+    let body = "a".repeat(32);
+    let token = format!("dapi{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "dapi"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let dashed = format!("{token}-1");
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, "dapi"), "{dashed} -> {out}");
+    assert!(hidden(&out, &body), "{dashed} -> {out}");
+    assert!(hidden(&out, "-1"), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+    assert!(vault.restore_write(&out).is_err(), "{dashed}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "dapi"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("dapi{}", "a".repeat(31)),
+        format!("dapi{}", "A".repeat(32)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
