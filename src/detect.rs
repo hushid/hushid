@@ -596,6 +596,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // or digits. The body may be any case. The value is not
             // stored. A shorter body and a longer body stay as written.
             r"\bLTAI(?i:[a-z0-9]{20})\b",
+            // A Shippo token is `shippo_live_` or `shippo_test_` plus
+            // 40 hex characters. The value is not stored. A shorter
+            // body and a longer body stay as written.
+            r"\bshippo_(?:live|test)_[a-fA-F0-9]{40}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

@@ -7145,3 +7145,40 @@ fn alibaba_access_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn shippo_api_token_is_masked() {
+    // A Shippo token is `shippo_live_` or `shippo_test_` plus 40 hex
+    // characters. The value is not stored. A shorter body, a longer
+    // body, and another prefix stay as written.
+    let body = "ab".repeat(20);
+    assert_eq!(body.len(), 40);
+    let token = format!("shippo_live_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "shippo_live"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let test_token = format!("shippo_test_{}", "CD".repeat(20));
+    let (vault, out, audit) = shield(&format!("see {test_token}.next"));
+    assert_eq!(audit.secret, 1, "{test_token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{test_token} -> {out}");
+    assert!(hidden(&out, "shippo_test"), "{out}");
+    assert!(hidden(&out, "CD"), "{out}");
+    assert!(!vault.holds_surface(test_token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("shippo_live_{}", "ab".repeat(19)),
+        format!("shippo_live_{}", "ab".repeat(21)),
+        format!("shippo_prod_{body}"),
+        format!("wordshippo_live_{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
