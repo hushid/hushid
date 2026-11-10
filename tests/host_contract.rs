@@ -476,7 +476,7 @@ fn config_accepts_off_and_cloud_only() {
     assert!(parse_identifiers_config("[identifiers]\nmode = \"private\"\n").is_err());
     assert!(parse_identifiers_config("[identifiers]\nmode = \"law25\"\n").is_err());
     assert!(accept_non_text(Mode::Cloud).is_err());
-    assert!(accept_non_text(Mode::Off).is_ok());
+    accept_non_text(Mode::Off).expect("off mode accepts non-text");
 }
 
 #[test]
