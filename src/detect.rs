@@ -154,8 +154,9 @@ fn push_emails(text: &str, out: &mut Vec<RawHit>) {
         // A plus in the local part may be the fullwidth sign. That
         // keyboard writes `user＋tag@`. Leaving it out sends the head
         // and keeps the tail. The sign is not part of the domain.
+        // A fullwidth low line is that underscore. Leaving it out sends the head of the address.
         Regex::new(
-            &r"\b[\p{L}\p{M}{digit}.\u{FF0E}\u{3002}\u{FF61}_%{plus}'\u{2018}\u{2019}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}\u{FF61}_%{plus}{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}{digit}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}\u{FF61}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
+            &r"\b[\p{L}\p{M}{digit}.\u{FF0E}\u{3002}\u{FF61}_\u{FF3F}%{plus}'\u{2018}\u{2019}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}\u{FF61}_\u{FF3F}%{plus}{hyphen}'\u{2018}\u{2019}]*{at}[\p{L}\p{M}{digit}][\p{L}\p{M}{digit}.\u{FF0E}\u{3002}\u{FF61}{hyphen}]*{dot}(?:\p{L}\p{M}*){2,}\b"
                 .replace("{digit}", DIGIT)
                 .replace("{hyphen}", HYPHEN)
                 .replace("{plus}", r"+\u{FF0B}")
