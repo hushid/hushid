@@ -13,9 +13,16 @@
 # https://www150.statcan.gc.ca/n1/pub/11-627-m/11-627-m2025045-eng.htm
 # https://www150.statcan.gc.ca/n1/daily-quotidien/260923/g-e001-fra.htm
 # Quebec given names: Retraite Quebec, top 100 boys and top 100 girls
-# by count in 2025. The public bank omits accents.
+# by count in 2025. The downloadable bank stores LEO and EDOUARD
+# with no accents, so those spellings are listed as stored.
 # https://www.donneesquebec.ca/recherche/dataset/banque-de-prenoms-garcons
 # https://www.donneesquebec.ca/recherche/dataset/banque-de-prenoms-filles
+# The 18 June 2026 release writes Léo. French spellings of the 2025
+# rows that use an accent are listed at the end of this file.
+# Éloi is the French spelling of the bank row ELOI. A different
+# accent, such as Éloï, Maël, Mathéo, or Océane, is not that row
+# and is not listed.
+# https://www.retraitequebec.gouv.qc.ca/fr/communiques-de-presse/2026/prenoms-plus-populaires-nouveau-nes-et-nouveaux-retraites-rrq-2025
 
 # United States given names
 James
@@ -485,3 +492,27 @@ Zoey
 Liana
 Oceane
 Leanne
+
+# French spelling of the same 2025 Quebec rows
+Léo
+Édouard
+Théo
+Béatrice
+Théodore
+Émile
+Raphaël
+Félix
+Léa
+Zoé
+Éloïse
+Clémence
+Léonie
+Chloé
+Ophélie
+Adèle
+Éléonore
+Raphaëlle
+Éloi
+Léonard
+Léon
+Clément

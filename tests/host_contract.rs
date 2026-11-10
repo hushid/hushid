@@ -511,6 +511,31 @@ fn published_name_glossary_shields_listed_names() {
 }
 
 #[test]
+fn published_name_glossary_shields_accented_quebec_names() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("glossary/popular-names.txt");
+    let glossary = Glossary::load(&path).expect("published glossary");
+    let sample = "Léo Édouard Théo Béatrice Théodore Émile Raphaël Félix Léa Zoé Éloïse Clémence Léonie Chloé Ophélie Adèle Éléonore Raphaëlle Éloi Léonard Léon Clément";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, sample).unwrap();
+    assert_eq!(audit.glossary, 22, "{out}");
+    assert!(!out.contains("Édouard"), "{out}");
+    assert!(!out.contains("Béatrice"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sample);
+
+    let bank = "Edouard a vu Theo et Beatrice";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, bank).unwrap();
+    assert_eq!(audit.glossary, 3, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), bank);
+
+    let other_accent = "Maël, Éloï, Mathéo et Océane restent";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, other_accent).unwrap();
+    assert_eq!(audit.glossary, 0, "{out}");
+    assert_eq!(out, other_accent);
+}
+
+#[test]
 fn vault_file_is_mode_0600_and_round_trips() {
     let path = std::env::temp_dir().join(format!("hushid-vault-{}", std::process::id()));
     let _ = fs::remove_file(&path);
