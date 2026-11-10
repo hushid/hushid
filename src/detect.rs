@@ -539,6 +539,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // digits. The value is not stored. A shorter body and a
             // longer body stay as written.
             r"\bpplx-[a-zA-Z0-9]{48}\b",
+            // An Artifactory API key is `AKCp` plus 69 letters or
+            // digits. A reference token is `cmVmd` plus 59 letters or
+            // digits. The value is not stored. A shorter body and a
+            // longer body stay as written.
+            r"\bAKCp[A-Za-z0-9]{69}\b",
+            r"\bcmVmd[A-Za-z0-9]{59}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
