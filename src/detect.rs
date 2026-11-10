@@ -648,6 +648,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // 43 token characters. The value is not stored. A shorter
             // body stays as written. `duffel_prod_` stays as written.
             r"\bduffel_(?:test|live)_(?i:[a-z0-9_-]{42}[a-z0-9_]\b|[a-z0-9_-]{42}[-=])",
+            // A Square access token may be `EAAA` plus 22 to 60
+            // token characters. The existing `sq0atp` rule is a
+            // different shape. The value is not stored. A shorter
+            // body stays as written. A final hyphen stays inside
+            // the mark.
+            r"\bEAAA(?:[A-Za-z0-9_-]{21,59}[A-Za-z0-9]\b|[A-Za-z0-9_-]{21,59}-)",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays

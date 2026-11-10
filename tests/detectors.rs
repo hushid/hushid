@@ -7315,3 +7315,44 @@ fn duffel_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn square_eaaa_token_is_masked() {
+    // A Square access token may be `EAAA` plus 22 to 60 token
+    // characters. The existing `sq0atp` rule is a different shape.
+    // The value is not stored. A shorter body stays as written. A
+    // final hyphen stays inside the mark.
+    let body = "a".repeat(22);
+    let token = format!("EAAA{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "EAAA"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "EAAA"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let hyphenated = format!("EAAA{}-", "b".repeat(21));
+    let (vault, out, audit) = shield(&hyphenated);
+    assert_eq!(audit.secret, 1, "{hyphenated} -> {out}");
+    assert_eq!(out, "h1_secret", "{hyphenated} -> {out}");
+    assert!(hidden(&out, "EAAA"), "{out}");
+    assert!(hidden(&out, "-"), "{out}");
+    assert!(hidden(&out, &"b".repeat(21)), "{out}");
+    assert!(!vault.holds_surface(hyphenated.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [format!("EAAA{}", "a".repeat(21)), format!("wordEAAA{body}")] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
