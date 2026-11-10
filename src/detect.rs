@@ -813,6 +813,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // not required. A shorter group stays as written. The
             // value is not stored.
             r"\bpat[A-Za-z0-9]{14}\.[a-f0-9]{64}\b",
+            // A Harness key is `pat.` or `sat.`, 22 characters, a
+            // dot, 24 letters or digits, a dot, and 20 more. gitleaks
+            // harness-api-key. The Airtable rule above needs 14
+            // letters and then a dot, so it does not see `pat.`. A
+            // shorter segment stays as written. An uppercase prefix
+            // stays as written. The value is not stored.
+            r"\b(?:pat|sat)\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9]{24}\.[A-Za-z0-9]{20}\b",
             // A Microsoft Teams incoming webhook is
             // `{tenant}.webhook.office.com/webhookb2/`, two ids, and
             // `IncomingWebhook`. gitleaks microsoft-teams-webhook.
