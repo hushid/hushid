@@ -7799,3 +7799,55 @@ fn maxmind_license_key_is_masked() {
     assert_eq!(audit.secret, 0, "{bare} -> {out}");
     assert_eq!(out, bare, "{bare} -> {out}");
 }
+
+#[test]
+fn sourcegraph_access_token_is_masked() {
+    // A Sourcegraph token is `sgp_` plus 40 hex characters, or `sgp_`
+    // plus 16 hex characters or `local`, then `_`, then 40 hex
+    // characters. The value is not stored. A bare 40 hex run with no
+    // `sgp_` prefix stays as written. A shorter `sgp_` body stays as
+    // written.
+    let body = "a".repeat(40);
+    assert_eq!(body.len(), 40);
+    let token = format!("sgp_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "sgp"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "sgp"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let local_body = "b".repeat(40);
+    let local = format!("sgp_local_{local_body}");
+    let (vault, out, audit) = shield(&local);
+    assert_eq!(audit.secret, 1, "{local} -> {out}");
+    assert_eq!(out, "h1_secret", "{local} -> {out}");
+    assert!(hidden(&out, "sgp"), "{local} -> {out}");
+    assert!(hidden(&out, "local"), "{local} -> {out}");
+    assert!(hidden(&out, &local_body), "{local} -> {out}");
+    assert!(!vault.holds_surface(local.as_bytes()), "{local}");
+    assert!(vault.restore_write(&out).is_err(), "{local}");
+
+    let (vault, out, audit) = shield(&format!("see {local}.next"));
+    assert_eq!(audit.secret, 1, "{local} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{local} -> {out}");
+    assert!(hidden(&out, "sgp"), "{out}");
+    assert!(hidden(&out, &local_body), "{out}");
+    assert!(!vault.holds_surface(local.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [format!("sgp_{}", "a".repeat(39)), "c".repeat(40)] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

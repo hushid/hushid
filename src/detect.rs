@@ -707,6 +707,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // letters or digits, and `_mmk`. The value is not stored.
             // A shorter middle stays as written.
             r"\b[A-Za-z0-9]{6}_[A-Za-z0-9]{29}_mmk\b",
+            // A Sourcegraph token is `sgp_` plus 40 hex characters,
+            // or `sgp_` plus 16 hex characters or `local`, then `_`,
+            // then 40 hex characters. The value is not stored. A bare
+            // 40 hex run with no `sgp_` prefix stays as written. A
+            // shorter `sgp_` body stays as written.
+            r"\bsgp_(?:[a-fA-F0-9]{16}_|local_)[a-fA-F0-9]{40}\b",
+            r"\bsgp_[a-fA-F0-9]{40}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
