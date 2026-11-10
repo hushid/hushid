@@ -709,9 +709,13 @@ fn birth_numbers(text: &str) -> Vec<u16> {
     let mut numbers = Vec::new();
     let mut current: Option<u16> = None;
     for ch in text.chars() {
-        if let Some(digit) = ch.to_digit(10) {
+        // `\d` matches every decimal block. `to_digit` keeps only ASCII,
+        // so a fullwidth month would match and then stay in the clear.
+        if let Some(digit) = narrow_digit(ch) {
             let slot = current.get_or_insert(0);
-            *slot = slot.saturating_mul(10).saturating_add(digit as u16);
+            *slot = slot
+                .saturating_mul(10)
+                .saturating_add(u16::from(digit - b'0'));
         } else if let Some(value) = current.take() {
             numbers.push(value);
         }
