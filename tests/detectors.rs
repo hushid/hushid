@@ -5921,3 +5921,32 @@ fn notion_integration_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn fullwidth_assignment_sign_still_masks_the_value() {
+    // ASCII `=` and `:` already separate the name from the value. A
+    // fullwidth equals or colon is that separator. Leaving it out sends
+    // the value. A short value and the name with no value stay as written.
+    let secret = "abcdefghijklmnopqrstuvwxyz";
+    for text in [
+        format!("api_key\u{FF1D}{secret}"),
+        format!("api_key\u{FF1A}{secret}"),
+    ] {
+        let (vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 1, "{text} -> {out}");
+        assert!(out.contains("h1_secret"), "{text} -> {out}");
+        assert!(hidden(&out, secret), "{text} -> {out}");
+        assert!(!vault.holds_surface(secret.as_bytes()), "{text}");
+        assert!(vault.restore_write(&out).is_err(), "{text} -> {out}");
+    }
+
+    for text in [
+        "api_key\u{FF1D}short".to_string(),
+        "not a secret".to_string(),
+        "api_key".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&text);
+        assert_eq!(audit.secret, 0, "{text} -> {out}");
+        assert_eq!(out, text, "{text} -> {out}");
+    }
+}
