@@ -572,6 +572,13 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // stays as written. A longer body stays too. The value is
             // not stored.
             r"\bpscale_tkn_[A-Za-z0-9=._\-]{32,64}",
+            // An OpenShift user token is `sha256~` plus 43 letters,
+            // digits, underscores, or hyphens. gitleaks
+            // openshift-user-token. A final hyphen is not a word
+            // boundary, so that alternative has no trailing boundary.
+            // A shorter body stays as written. A longer body stays
+            // too. The value is not stored.
+            r"\bsha256~(?:[A-Za-z0-9_-]{42}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{42}-)",
             // A Perplexity API key is `pplx-` plus 48 letters or
             // digits. The value is not stored. A shorter body and a
             // longer body stay as written.
