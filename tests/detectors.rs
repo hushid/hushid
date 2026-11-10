@@ -6069,6 +6069,60 @@ fn groq_api_key_is_masked() {
 }
 
 #[test]
+fn xai_api_key_is_masked() {
+    // The management API example is `xai-` plus 80 letters or digits.
+    // A shorter body stays as written. A longer body stays too. The
+    // value is not stored.
+    let body = format!("{}{}", "a".repeat(70), "1234567890");
+    let token = format!("xai-{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "xai"), "{token} -> {out}");
+    assert!(hidden(&out, "1234567890"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("xai-a12B{}", "c".repeat(76));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "xai"), "{out}");
+    assert!(hidden(&out, "a12B"), "{out}");
+    assert!(hidden(&out, &"c".repeat(76)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let raw = format!(r#"{{"token":"{token}"}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &raw).unwrap();
+    assert_eq!(audit.secret, 1, "{raw} -> {out}");
+    assert_eq!(out, r#"{"token":"h1_secret"}"#);
+    assert!(hidden(&out, "1234567890"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(restore_json_write(&vault, &out).is_err());
+
+    let (vault, out, audit) = shield(&format!("{token}-next"));
+    assert_eq!(audit.secret, 1, "{token}-next -> {out}");
+    assert_eq!(out, "h1_secret-next", "{token}-next -> {out}");
+    assert!(hidden(&out, "1234567890"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("xai-{}", "a".repeat(79)),
+        format!("xai-{}", "a".repeat(81)),
+        format!("wordxai-{body}"),
+        format!("XAI-{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn linear_api_key_is_masked() {
     // Working with the GraphQL API sends a personal API key. The key
     // is `lin_api_` plus 40 characters. A shorter body stays as
