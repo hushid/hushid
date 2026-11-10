@@ -7536,3 +7536,47 @@ fn flyio_access_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn bedrock_long_lived_key_is_masked() {
+    // A Bedrock long-lived key is `ABSK` plus 109 to 269 base64
+    // characters, with optional `=` padding. The value is not stored.
+    // A shorter body stays as written.
+    let body = "A".repeat(109);
+    assert_eq!(body.len(), 109);
+    let token = format!("ABSK{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "ABSK"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "ABSK"), "{out}");
+    assert!(hidden(&out, &body), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let padded = format!("{token}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, "ABSK"), "{padded} -> {out}");
+    assert!(hidden(&out, &body), "{padded} -> {out}");
+    assert!(hidden(&out, "="), "{padded} -> {out}");
+    assert!(!vault.holds_surface(padded.as_bytes()), "{padded}");
+    assert!(vault.restore_write(&out).is_err(), "{padded}");
+
+    for bare in [
+        format!("ABSK{}", "A".repeat(108)),
+        format!("wordABSK{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
