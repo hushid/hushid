@@ -699,6 +699,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // plus 64 hex characters. The hex may be any case. The
             // value is not stored. A shorter body stays as written.
             r"\bs-s4t2(?:ud|af)-(?i:[a-f0-9]{64})\b",
+            // A Scalingo token is `tk-us-` plus 48 token characters.
+            // The value is not stored. A shorter body stays as written.
+            // A final hyphen stays inside the mark.
+            r"\btk-us-(?:[A-Za-z0-9_-]{47}[A-Za-z0-9_]\b|[A-Za-z0-9_-]{47}-)",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
