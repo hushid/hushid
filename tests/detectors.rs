@@ -9870,3 +9870,28 @@ fn ideographic_space_in_a_postal_code_is_shielded() {
     assert_eq!(audit.postal, 0, "{out}");
     assert_eq!(out, doubled, "{out}");
 }
+
+#[test]
+fn fullwidth_letters_in_a_postal_code_and_health_number_are_shielded() {
+    let postal = "postal code \u{FF28}\u{FF12}\u{FF38}\u{3000}\u{FF11}\u{FF39}\u{FF14}";
+    let (vault, out, audit) = shield(postal);
+    assert_eq!(audit.postal, 1, "{out}");
+    assert!(hidden(&out, "\u{FF28}\u{FF12}\u{FF38}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), postal);
+
+    let unused = "postal code \u{FF24}\u{FF12}\u{FF38}\u{3000}\u{FF11}\u{FF39}\u{FF14}";
+    let (_vault, out, audit) = shield(unused);
+    assert_eq!(audit.postal, 0, "{out}");
+    assert_eq!(out, unused, "{out}");
+
+    let health = "\u{FF22}\u{FF2F}\u{FF35}\u{FF26} \u{FF19}\u{FF14}\u{FF15}\u{FF11} \u{FF11}\u{FF14}\u{FF11}\u{FF19}";
+    let (vault, out, audit) = shield(health);
+    assert_eq!(audit.ramq, 1, "{out}");
+    assert!(hidden(&out, "\u{FF19}\u{FF14}\u{FF15}\u{FF11}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), health);
+
+    let bad_month = "\u{FF22}\u{FF2F}\u{FF35}\u{FF26} \u{FF19}\u{FF14}\u{FF11}\u{FF13} \u{FF10}\u{FF11}\u{FF11}\u{FF19}";
+    let (_vault, out, audit) = shield(bad_month);
+    assert_eq!(audit.ramq, 0, "{out}");
+    assert_eq!(out, bad_month, "{out}");
+}

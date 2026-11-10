@@ -135,6 +135,46 @@ const DOT: &str = r"(?:\.|\u{FF0E})";
 /// letters only, so a digit glued to it is still outside the address.
 const DIGIT: &str = r"0-9\u{FF10}-\u{FF19}";
 
+/// ASCII letters from a class body, plus the fullwidth Latin letters.
+///
+/// `(?i)` folds ASCII case only. A wide keyboard writes `Ｈ` where the
+/// pattern already allows `H`. Leaving that letter out sends the code.
+fn with_fullwidth_letters(class: &str) -> String {
+    let mut out = String::new();
+    let bytes = class.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let start = bytes[index];
+        let end = if index + 2 < bytes.len() && bytes[index + 1] == b'-' {
+            let end = bytes[index + 2];
+            index += 3;
+            end
+        } else {
+            index += 1;
+            start
+        };
+        for byte in start..=end {
+            let ch = byte as char;
+            out.push(ch);
+            let upper = u32::from(ch.to_ascii_uppercase());
+            let lower = u32::from(ch.to_ascii_lowercase());
+            if let Some(wide) = char::from_u32(upper - u32::from('A') + 0xFF21) {
+                out.push(wide);
+            }
+            if let Some(wide) = char::from_u32(lower - u32::from('a') + 0xFF41) {
+                out.push(wide);
+            }
+        }
+    }
+    out
+}
+
+fn latin_letter(ch: char) -> bool {
+    ch.is_ascii_alphabetic()
+        || ('\u{FF21}'..='\u{FF3A}').contains(&ch)
+        || ('\u{FF41}'..='\u{FF5A}').contains(&ch)
+}
+
 fn push_emails(text: &str, out: &mut Vec<RawHit>) {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         // `'` , U+2019, and U+2018 belong in the local part (`o'brien@`).
@@ -435,8 +475,9 @@ fn push_ramq(text: &str, out: &mut Vec<RawHit>) {
         // is the same number as `BOUF 9451 1419`. The original case
         // is what gets restored.
         let digit = DIGIT;
+        let letters = with_fullwidth_letters("A-Z");
         Regex::new(&format!(
-            r"(?i)\b[A-Z]{{4}}(?:[ \t\u{{FF0D}}-]+[{digit}]{{4}}){{2}}\b|\b[A-Z]{{4}}[{digit}]{{8}}\b"
+            r"(?i)\b[{letters}]{{4}}(?:[ \t\u{{FF0D}}-]+[{digit}]{{4}}){{2}}\b|\b[{letters}]{{4}}[{digit}]{{8}}\b"
         ))
         .expect("ramq pattern")
     });
@@ -457,7 +498,7 @@ fn push_ramq(text: &str, out: &mut Vec<RawHit>) {
 }
 
 fn ramq_layout_ok(text: &str) -> bool {
-    let letters = text.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
+    let letters = text.chars().filter(|ch| latin_letter(*ch)).count();
     let digits = digits_of(text);
     if letters != 4 || digits.len() != 8 {
         return false;
@@ -493,8 +534,10 @@ fn push_postal(text: &str, out: &mut Vec<RawHit>) {
     // as written. The value is restored.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         let digit = DIGIT;
+        let first = with_fullwidth_letters("ABCEGHJ-NPRSTVXY");
+        let other = with_fullwidth_letters("ABCEGHJ-NPRSTV-Z");
         Regex::new(&format!(
-            r"(?i)\b[ABCEGHJ-NPRSTVXY][{digit}][ABCEGHJ-NPRSTV-Z][ \t\u{{00A0}}\u{{3000}}\u{{FF0D}}-]?[{digit}][ABCEGHJ-NPRSTV-Z][{digit}]\b"
+            r"(?i)\b[{first}][{digit}][{other}][ \t\u{{00A0}}\u{{3000}}\u{{FF0D}}-]?[{digit}][{other}][{digit}]\b"
         ))
         .expect("postal code")
     });
