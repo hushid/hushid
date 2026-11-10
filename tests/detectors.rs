@@ -8208,3 +8208,44 @@ fn defined_networking_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn atlassian_api_token_is_masked() {
+    // An Atlassian API token is `ATATT3` plus 186 characters. The
+    // value is not stored. A shorter body stays as written.
+    let body = "a".repeat(186);
+    let token = format!("ATATT3{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "ATATT3"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let dashed = format!("ATATT3{}=", "b".repeat(185));
+    let (vault, out, audit) = shield(&dashed);
+    assert_eq!(audit.secret, 1, "{dashed} -> {out}");
+    assert_eq!(out, "h1_secret", "{dashed} -> {out}");
+    assert!(hidden(&out, "ATATT3"), "{dashed} -> {out}");
+    assert!(hidden(&out, &"b".repeat(185)), "{dashed} -> {out}");
+    assert!(!vault.holds_surface(dashed.as_bytes()), "{dashed}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next");
+    assert!(hidden(&out, "ATATT3"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("ATATT3{}", "a".repeat(185)),
+        format!("ATATT3{}", "a".repeat(187)),
+        format!("atatt3{body}"),
+        format!("x{token}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
