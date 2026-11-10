@@ -658,6 +658,10 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // The prefix may be any case. The value is not stored. A
             // shorter body and a longer body stay as written.
             r"(?i)\bCLOJARS_[a-z0-9]{60}\b",
+            // An Infracost token is `ico-` plus 32 letters or digits.
+            // The value is not stored. A shorter body and a longer
+            // body stay as written.
+            r"\bico-[A-Za-z0-9]{32}\b",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
