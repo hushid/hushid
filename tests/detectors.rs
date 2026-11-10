@@ -7480,3 +7480,59 @@ fn settlemint_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn flyio_access_token_is_masked() {
+    // A Fly.io deploy token is `fo1_` plus 43 token characters. A
+    // macaroon token is `fm1a_`, `fm1r_`, or `fm2_` plus at least 100
+    // base64 characters. The value is not stored. A shorter `fo1_`
+    // body stays as written.
+    let body = format!("{}b", "A".repeat(42));
+    assert_eq!(body.len(), 43);
+    let token = format!("fo1_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "fo1"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed_body = format!("{}xY9", "a1BcDe_-".repeat(5));
+    assert_eq!(mixed_body.len(), 43);
+    let mixed = format!("fo1_{mixed_body}");
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "fo1"), "{out}");
+    assert!(hidden(&out, "a1Bc"), "{out}");
+    assert!(hidden(&out, "xY9"), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let mac_body = "A".repeat(100);
+    let mac = format!("fm2_{mac_body}");
+    let (vault, out, audit) = shield(&mac);
+    assert_eq!(audit.secret, 1, "{mac} -> {out}");
+    assert_eq!(out, "h1_secret", "{mac} -> {out}");
+    assert!(hidden(&out, "fm2"), "{mac} -> {out}");
+    assert!(hidden(&out, &mac_body), "{mac} -> {out}");
+    assert!(!vault.holds_surface(mac.as_bytes()), "{mac}");
+    assert!(vault.restore_write(&out).is_err(), "{mac}");
+
+    let padded = format!("{mac}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, "fm2"), "{out}");
+    assert!(hidden(&out, &mac_body), "{out}");
+    assert!(hidden(&out, "="), "{out}");
+    assert!(!vault.holds_surface(padded.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [format!("fo1_{}", "A".repeat(42)), format!("wordfo1_{body}")] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}

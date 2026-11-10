@@ -666,6 +666,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // plus 16 letters or digits. The value is not stored. A
             // shorter body stays as written.
             r"\bsm_(?:aat|pat|sat)_[A-Za-z0-9]{16}\b",
+            // A Fly.io deploy token is `fo1_` plus 43 token
+            // characters. A macaroon token is `fm1a_`, `fm1r_`, or
+            // `fm2_` plus at least 100 base64 characters. The macaroon
+            // tail may end in `+`, `/`, or `=`, so that rule has no
+            // trailing word boundary. The value is not stored. A
+            // shorter `fo1_` body stays as written.
+            r"\bfo1_[A-Za-z0-9_-]{42}[A-Za-z0-9_]\b",
+            r"\bfm(?:1[ar]|2)_[A-Za-z0-9+/]{100,}={0,2}",
             // A Groq API key is `gsk_` and 52 letters or digits. The
             // API keys page is where those credentials are issued.
             // The rules above do not see that prefix, so the key stays
