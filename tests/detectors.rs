@@ -8471,3 +8471,36 @@ fn yandex_iam_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn airtable_access_token_is_masked() {
+    // An Airtable token is `pat`, 14 characters, a dot, and 64 hex
+    // characters. The value is not stored. A shorter group stays
+    // as written.
+    let token = format!("pat{}.{}", "a".repeat(14), "b".repeat(64));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "pat"), "{token} -> {out}");
+    assert!(hidden(&out, &"b".repeat(64)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, &"b".repeat(64)), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("pat{}.{}", "a".repeat(13), "b".repeat(64)),
+        format!("pat{}.{}", "a".repeat(14), "b".repeat(63)),
+        format!("pat{}.{}", "a".repeat(14), "B".repeat(64)),
+        format!("xpat{}.{}", "a".repeat(14), "b".repeat(64)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
