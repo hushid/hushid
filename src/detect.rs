@@ -486,14 +486,15 @@ fn push_postal(text: &str, out: &mut Vec<RawHit>) {
     // space or hyphen, digit, letter, digit. A fullwidth digit is that
     // same digit. The letters D, F, I, O,
     // Q, and U are not used. W and Z are not used first. A no-break
-    // space is that same space. The shape alone is not enough. A
+    // space and an ideographic space are that same space. The shape
+    // alone is not enough. A
     // street in the same 40-character window, or a `postal code` /
     // `code postal` cue, has to sit next to it. A bare example stays
     // as written. The value is restored.
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         let digit = DIGIT;
         Regex::new(&format!(
-            r"(?i)\b[ABCEGHJ-NPRSTVXY][{digit}][ABCEGHJ-NPRSTV-Z][ \t\u{{00A0}}\u{{FF0D}}-]?[{digit}][ABCEGHJ-NPRSTV-Z][{digit}]\b"
+            r"(?i)\b[ABCEGHJ-NPRSTVXY][{digit}][ABCEGHJ-NPRSTV-Z][ \t\u{{00A0}}\u{{3000}}\u{{FF0D}}-]?[{digit}][ABCEGHJ-NPRSTV-Z][{digit}]\b"
         ))
         .expect("postal code")
     });
