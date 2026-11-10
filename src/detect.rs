@@ -781,6 +781,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // be any case. The word is not required. A shorter
             // segment stays as written. The value is not stored.
             r"(?i)\bpk\.[a-z0-9]{60}\.[a-z0-9]{22}\b",
+            // A Cloudflare Origin CA key is `v1.0-`, 24 hex
+            // characters, a hyphen, and 146 more hex characters.
+            // gitleaks cloudflare-origin-ca-key. The word is not
+            // required. A shorter group stays as written. Uppercase
+            // hex stays as written. The value is not stored.
+            r"\bv1\.0-[a-f0-9]{24}-[a-f0-9]{146}\b",
             // A Yandex IAM token is `t1.`, a token segment, optional
             // `=` padding, a dot, and 86 more token characters.
             // gitleaks yandex-access-token. The prefix may be any

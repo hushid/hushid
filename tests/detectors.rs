@@ -8541,3 +8541,36 @@ fn mapbox_api_token_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn cloudflare_origin_ca_key_is_masked() {
+    // A Cloudflare Origin CA key is `v1.0-`, 24 hex characters, a
+    // hyphen, and 146 more hex characters. The value is not stored.
+    // A shorter group stays as written.
+    let token = format!("v1.0-{}-{}", "a".repeat(24), "b".repeat(146));
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "v1.0-"), "{token} -> {out}");
+    assert!(hidden(&out, &"b".repeat(146)), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let sentence = format!("see {token}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "v1.0-"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+
+    for bare in [
+        format!("v1.0-{}-{}", "a".repeat(23), "b".repeat(146)),
+        format!("v1.0-{}-{}", "a".repeat(24), "b".repeat(145)),
+        format!("v1.0-{}-{}", "A".repeat(24), "B".repeat(146)),
+        format!("xv1.0-{}-{}", "a".repeat(24), "b".repeat(146)),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
