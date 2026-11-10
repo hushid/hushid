@@ -527,11 +527,12 @@ fn push_births(text: &str, out: &mut Vec<RawHit>) {
         let months = month_alt();
         // `\d{1,2}` takes both digits when they are there. A shorter
         // alternative would stop after `1994-03-1` and leave the `5`.
-        let iso = r"(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}";
-        let dmy = r"\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}";
-        let french = format!(r"\d{{1,2}}\s+(?:{months})\.?\s*,?\s*(?:19|20)\d{{2}}");
-        let english =
-            format!(r"(?:{months})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\s*,?\s*(?:19|20)\d{{2}}");
+        // Four decimal digits, not a literal ASCII 19 or 20. A fullwidth
+        // year is still `\d`. The calendar check keeps 1900 through 2099.
+        let iso = r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}";
+        let dmy = r"\d{1,2}[-/.]\d{1,2}[-/.]\d{4}";
+        let french = format!(r"\d{{1,2}}\s+(?:{months})\.?\s*,?\s*\d{{4}}");
+        let english = format!(r"(?:{months})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\s*,?\s*\d{{4}}");
         [iso, dmy]
             .into_iter()
             .map(str::to_string)
@@ -709,9 +710,13 @@ fn birth_numbers(text: &str) -> Vec<u16> {
     let mut numbers = Vec::new();
     let mut current: Option<u16> = None;
     for ch in text.chars() {
-        if let Some(digit) = ch.to_digit(10) {
+        // `\d` matches every decimal block. `to_digit` keeps only ASCII,
+        // so a fullwidth month would match and then stay in the clear.
+        if let Some(digit) = narrow_digit(ch) {
             let slot = current.get_or_insert(0);
-            *slot = slot.saturating_mul(10).saturating_add(digit as u16);
+            *slot = slot
+                .saturating_mul(10)
+                .saturating_add(u16::from(digit - b'0'));
         } else if let Some(value) = current.take() {
             numbers.push(value);
         }

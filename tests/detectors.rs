@@ -9753,3 +9753,26 @@ fn ca_direct_id_birth_date_is_shielded_and_restored() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn fullwidth_birth_digits_are_shielded() {
+    // The year prefix stays ASCII so the pattern matches. The month and
+    // the day are fullwidth digits, which `\d` already accepts.
+    let wide = "DOB 1994-\u{FF10}\u{FF13}-\u{FF11}\u{FF15}";
+    let (vault, out, audit) = shield(wide);
+    assert_eq!(audit.birth, 1, "{out}");
+    assert!(hidden(&out, "1994"), "{out}");
+    assert!(hidden(&out, "\u{FF10}\u{FF13}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), wide);
+
+    let bad = "DOB 1994-\u{FF10}\u{FF12}-\u{FF13}\u{FF11}";
+    let (_vault, out, audit) = shield(bad);
+    assert_eq!(audit.birth, 0, "{out}");
+    assert_eq!(out, bad, "{out}");
+
+    let year = "DOB \u{FF11}\u{FF19}\u{FF19}\u{FF14}-\u{FF10}\u{FF13}-\u{FF11}\u{FF15}";
+    let (vault, out, audit) = shield(year);
+    assert_eq!(audit.birth, 1, "{out}");
+    assert!(hidden(&out, "\u{FF11}\u{FF19}\u{FF19}\u{FF14}"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), year);
+}
