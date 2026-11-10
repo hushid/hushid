@@ -5997,3 +5997,39 @@ fn groq_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn linear_api_key_is_masked() {
+    // Working with the GraphQL API sends a personal API key. The key
+    // is `lin_api_` plus 40 characters. A shorter body stays as
+    // written. The value is not stored.
+    let body = "a".repeat(40);
+    let token = format!("lin_api_{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "lin_api"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let mixed = format!("lin_api_a1B{}", "c".repeat(37));
+    let (vault, out, audit) = shield(&format!("see {mixed}.next"));
+    assert_eq!(audit.secret, 1, "{mixed} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{mixed} -> {out}");
+    assert!(hidden(&out, "lin_api"), "{out}");
+    assert!(hidden(&out, "a1B"), "{out}");
+    assert!(hidden(&out, &"c".repeat(37)), "{out}");
+    assert!(!vault.holds_surface(mixed.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("lin_api_{}", "a".repeat(39)),
+        format!("wordlin_api_{body}"),
+        "not a token".to_string(),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
