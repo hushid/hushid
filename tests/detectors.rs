@@ -8749,3 +8749,49 @@ fn harness_api_key_is_masked() {
         assert_eq!(out, bare, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn sidekiq_sensitive_url_is_masked() {
+    // A Sidekiq gem URL embeds 8 hex characters, a colon, and 8 more
+    // on contribsys.com. The value is not stored. A shorter group
+    // is not this secret. The password and host are still an address.
+    let url = "https://0123abcd:fedcba98@gems.contribsys.com";
+    let (vault, out, audit) = shield(url);
+    assert_eq!(audit.secret, 1, "{url} -> {out}");
+    assert_eq!(out, "h1_secret", "{url} -> {out}");
+    assert!(hidden(&out, "0123abcd"), "{url} -> {out}");
+    assert!(hidden(&out, "fedcba98"), "{url} -> {out}");
+    assert!(hidden(&out, "gems.contribsys.com"), "{url} -> {out}");
+    assert!(!vault.holds_surface(url.as_bytes()), "{url}");
+    assert!(vault.restore_write(&out).is_err(), "{url}");
+
+    let enterprise = "http://aaaaaaaa:bbbbbbbb@enterprise.contribsys.com/path";
+    let (vault, out, audit) = shield(enterprise);
+    assert_eq!(audit.secret, 1, "{enterprise} -> {out}");
+    assert_eq!(out, "h1_secret/path", "{enterprise} -> {out}");
+    assert!(hidden(&out, "aaaaaaaa"), "{out}");
+    assert!(!vault.holds_surface(enterprise.as_bytes()), "{enterprise}");
+
+    let sentence = format!("see {url}.next");
+    let (vault, out, audit) = shield(&sentence);
+    assert_eq!(audit.secret, 1, "{sentence} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{sentence} -> {out}");
+    assert!(hidden(&out, "gems.contribsys.com"), "{out}");
+    assert!(!vault.holds_surface(url.as_bytes()));
+
+    // Eight uppercase hex characters are this secret. The miss is a
+    // 7-character group. A wrong host is not this secret either.
+    for bare in [
+        "https://0123abc:fedcba98@gems.contribsys.com",
+        "https://0123abcd:fedcba98@example.com",
+        "https://0123ABC:FEDCBA98@gems.contribsys.com",
+    ] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert!(out.contains("h1_email_"), "{bare} -> {out}");
+        assert!(!out.contains("h1_secret"), "{bare} -> {out}");
+        assert!(hidden(&out, "fedcba98"), "{bare} -> {out}");
+        assert!(hidden(&out, "FEDCBA98"), "{bare} -> {out}");
+        assert!(!out.contains('@'), "{bare} -> {out}");
+    }
+}
