@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.7 95.1 515.4 329.0" width="515.4" height="329.0">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5c463c"/>
+      <stop offset="0.42" stop-color="#3a2c26"/>
+      <stop offset="1" stop-color="#1c1613"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="card-clip">
+      <rect x="4.3" y="101.1" width="503.4" height="309.8" rx="32.0"/>
+    </clipPath>
+  </defs>
+  <rect x="14.0" y="118.1" width="484.0" height="300.1" rx="32.0" fill="#1a1210" opacity="0.16"/>
+  <rect x="4.3" y="101.1" width="503.4" height="309.8" rx="32.0" fill="url(#card)"/>
+  <g clip-path="url(#card-clip)">
+    <rect x="4.3" y="101.1" width="503.4" height="87.1" fill="url(#sheen)"/>
+  </g>
+  <g fill="#f8f1e8">
+    <rect x="40.6" y="139.8" width="48.4" height="232.3"/>
+    <path fill-rule="evenodd" d="M 125.3 139.8 h 53.2 a 116.2 116.2 0 0 1 0 232.3 h -53.2 z M 178.6 183.4 a 72.6 72.6 0 0 1 0 145.2 z"/>
+  </g>
+  <g opacity="0.72">
+    <rect x="212.4" y="139.8" width="82.3" height="50.8" rx="2.0" fill="#f0c9a4"/>
+    <rect x="304.4" y="139.8" width="82.3" height="50.8" rx="2.0" fill="#c4623c"/>
+    <rect x="396.4" y="139.8" width="82.3" height="50.8" rx="2.0" fill="#8e3e28"/>
+    <rect x="212.4" y="200.3" width="36.3" height="50.8" rx="2.0" fill="#e09468"/>
+    <rect x="258.4" y="200.3" width="82.3" height="50.8" rx="2.0" fill="#f0c9a4"/>
+    <rect x="350.4" y="200.3" width="82.3" height="50.8" rx="2.0" fill="#8e3e28"/>
+    <rect x="442.3" y="200.3" width="36.3" height="50.8" rx="2.0" fill="#c4623c"/>
+    <rect x="212.4" y="260.8" width="82.3" height="50.8" rx="2.0" fill="#c4623c"/>
+    <rect x="304.4" y="260.8" width="82.3" height="50.8" rx="2.0" fill="#e09468"/>
+    <rect x="396.4" y="260.8" width="82.3" height="50.8" rx="2.0" fill="#f0c9a4"/>
+    <rect x="212.4" y="321.3" width="36.3" height="50.8" rx="2.0" fill="#8e3e28"/>
+    <rect x="258.4" y="321.3" width="82.3" height="50.8" rx="2.0" fill="#c4623c"/>
+    <rect x="350.4" y="321.3" width="82.3" height="50.8" rx="2.0" fill="#f0c9a4"/>
+    <rect x="442.3" y="321.3" width="36.3" height="50.8" rx="2.0" fill="#e09468"/>
+  </g>
+</svg>
