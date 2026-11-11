@@ -7,6 +7,27 @@ use std::fs;
 use std::path::Path;
 
 #[test]
+fn abbreviated_birth_month_is_shielded_and_a_bare_date_stays() {
+    for text in [
+        "DOB Jan 2, 1990",
+        "born 2 Jan 1990",
+        "DOB Sep 4, 1990",
+        "né le 2 févr. 1990",
+    ] {
+        let mut vault = Vault::new();
+        let (out, audit) = shield_text(&mut vault, &Glossary::empty(), text).unwrap();
+        assert_eq!(audit.birth, 1, "{text} -> {out}");
+        assert!(!out.contains("1990"), "{text} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), text);
+    }
+    let mut vault = Vault::new();
+    let bare = "Jan 2, 1990";
+    let (out, audit) = shield_text(&mut vault, &Glossary::empty(), bare).unwrap();
+    assert_eq!(audit.birth, 0);
+    assert_eq!(out, bare);
+}
+
+#[test]
 fn replay_returns_the_stored_projection_and_thinking_is_untouched() {
     let mut session = Session::new(Glossary::empty());
     let index = session.shield_message("a@b.co").unwrap();
