@@ -18,11 +18,16 @@ struct Entry {
     surface: Vec<u8>,
     /// The surface was a JSON number. Restore writes it back without quotes.
     json_number: bool,
+    /// Digit stand-in that appears in the shielded text. The map key stays
+    /// the token so an older vault file still loads.
+    digits: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct Vault {
     entries: BTreeMap<String, Entry>,
+    /// Stand-in text to the original surface. Restore walks this before `h1_`.
+    digits: BTreeMap<String, String>,
 }
 
 impl fmt::Debug for Vault {
@@ -91,6 +96,7 @@ impl Vault {
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
+            digits: BTreeMap::new(),
         }
     }
 
@@ -103,7 +109,7 @@ impl Vault {
     }
 
     pub fn issue(&mut self, kind: Kind, surface: &[u8]) -> Result<String, TokenError> {
-        self.insert(kind, surface, false)
+        self.insert(kind, surface, false, None)
     }
 
     pub(crate) fn issue_json_number(
@@ -111,7 +117,19 @@ impl Vault {
         kind: Kind,
         surface: &[u8],
     ) -> Result<String, TokenError> {
-        self.insert(kind, surface, true)
+        self.insert(kind, surface, true, None)
+    }
+
+    pub(crate) fn issue_digits(
+        &mut self,
+        kind: Kind,
+        surface: &[u8],
+        stand_in: &str,
+    ) -> Result<String, TokenError> {
+        if stand_in.is_empty() || self.digits.contains_key(stand_in) {
+            return Err(TokenError::Digits);
+        }
+        self.insert(kind, surface, false, Some(stand_in.to_string()))
     }
 
     fn insert(
@@ -119,16 +137,23 @@ impl Vault {
         kind: Kind,
         surface: &[u8],
         json_number: bool,
+        digits: Option<String>,
     ) -> Result<String, TokenError> {
         let token = random_token(kind)?;
+        if let Some(stand_in) = &digits {
+            let text = std::str::from_utf8(surface).map_err(|_| TokenError::Payload)?;
+            self.digits.insert(stand_in.clone(), text.to_string());
+        }
+        let shown = digits.clone().unwrap_or_else(|| token.clone());
         self.entries.insert(
-            token.clone(),
+            token,
             Entry {
                 surface: surface.to_vec(),
                 json_number,
+                digits,
             },
         );
-        Ok(token)
+        Ok(shown)
     }
 
     /// Insert a caller-chosen payload. Tests and hosts use this when the
@@ -144,6 +169,7 @@ impl Vault {
         self.entries.entry(token.clone()).or_insert_with(|| Entry {
             surface: surface.to_vec(),
             json_number: false,
+            digits: None,
         });
         Ok(token)
     }
@@ -197,6 +223,10 @@ impl Vault {
             if entry.json_number {
                 body.push_str(" n");
             }
+            if let Some(stand_in) = &entry.digits {
+                body.push_str(" d ");
+                body.push_str(&hex_encode(stand_in.as_bytes()));
+            }
             body.push('\n');
         }
         write_private(path, body.as_bytes())?;
@@ -217,6 +247,7 @@ impl Vault {
             return Err(VaultError::Corrupt);
         }
         let mut entries = BTreeMap::new();
+        let mut digits = BTreeMap::new();
         for line in lines {
             if line.is_empty() {
                 continue;
@@ -224,35 +255,91 @@ impl Vault {
             let mut parts = line.split(' ');
             let token = parts.next().ok_or(VaultError::Corrupt)?;
             let hex = parts.next().ok_or(VaultError::Corrupt)?;
-            let json_number = match parts.next() {
-                None => false,
-                Some("n") => true,
-                Some(_) => return Err(VaultError::Corrupt),
-            };
-            if parts.next().is_some() {
-                return Err(VaultError::Corrupt);
+            let mut json_number = false;
+            let mut stand_in = None;
+            while let Some(flag) = parts.next() {
+                match flag {
+                    "n" => json_number = true,
+                    "d" => {
+                        if stand_in.is_some() {
+                            return Err(VaultError::Corrupt);
+                        }
+                        let encoded = parts.next().ok_or(VaultError::Corrupt)?;
+                        let bytes = hex_decode(encoded).ok_or(VaultError::Corrupt)?;
+                        let text = String::from_utf8(bytes).map_err(|_| VaultError::Corrupt)?;
+                        if text.is_empty() {
+                            return Err(VaultError::Corrupt);
+                        }
+                        stand_in = Some(text);
+                    }
+                    _ => return Err(VaultError::Corrupt),
+                }
             }
             let parsed = parse_token_at(token, 0).ok_or(VaultError::Corrupt)?;
             if parsed.end != token.len() || !parsed.check_ok || parsed.canonical != token {
                 return Err(VaultError::Corrupt);
             }
             let surface = hex_decode(hex).ok_or(VaultError::Corrupt)?;
+            if let Some(stand_in) = &stand_in {
+                let text = std::str::from_utf8(&surface).map_err(|_| VaultError::Corrupt)?;
+                if digits.insert(stand_in.clone(), text.to_string()).is_some() {
+                    return Err(VaultError::Corrupt);
+                }
+            }
             entries.insert(
                 token.to_string(),
                 Entry {
                     surface,
                     json_number,
+                    digits: stand_in,
                 },
             );
         }
-        Ok(Self { entries })
+        Ok(Self { entries, digits })
     }
+}
+
+fn next_digit(vault: &Vault, text: &str, index: usize) -> Option<usize> {
+    let rest = text.get(index..)?;
+    let mut best = None;
+    for stand_in in vault.digits.keys() {
+        if let Some(found) = rest.find(stand_in) {
+            let at = index + found;
+            best = Some(best.map_or(at, |earlier: usize| earlier.min(at)));
+        }
+    }
+    best
+}
+
+fn digit_match<'a>(vault: &'a Vault, text: &str, index: usize) -> Option<(usize, &'a str)> {
+    let rest = text.get(index..)?;
+    let mut best: Option<(&str, &str)> = None;
+    for (stand_in, surface) in &vault.digits {
+        if rest.starts_with(stand_in) {
+            let longer = best.is_none_or(|(previous, _)| stand_in.len() > previous.len());
+            if longer {
+                best = Some((stand_in.as_str(), surface.as_str()));
+            }
+        }
+    }
+    best.map(|(stand_in, surface)| (index + stand_in.len(), surface))
 }
 
 fn walk(text: &str, vault: &Vault, strict: bool) -> Result<String, RestoreError> {
     let mut out = String::with_capacity(text.len());
     let mut index = 0;
     while index < text.len() {
+        if let Some(digit_at) = next_digit(vault, text, index) {
+            let h1_at = find_h1(text, index);
+            if h1_at.is_none_or(|at| digit_at < at) {
+                out.push_str(&text[index..digit_at]);
+                let (end, surface) = digit_match(vault, text, digit_at)
+                    .ok_or(RestoreError::Unresolved { at: digit_at })?;
+                out.push_str(surface);
+                index = end;
+                continue;
+            }
+        }
         let Some(at) = find_h1(text, index) else {
             out.push_str(&text[index..]);
             break;

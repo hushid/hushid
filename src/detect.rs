@@ -1780,16 +1780,21 @@ const DECIMAL_DIGIT_ZERO: [u32; 76] = [
     0x1D7E2, 0x1D7EC, 0x1D7F6, 0x1E140, 0x1E2F0, 0x1E4F0, 0x1E5F1, 0x1E950, 0x1FBF0,
 ];
 
-fn narrow_digit(ch: char) -> Option<u8> {
+pub(crate) fn decimal_digit(ch: char) -> Option<(u8, u32)> {
     let code = ch as u32;
     let found = DECIMAL_DIGIT_ZERO.partition_point(|&zero| zero <= code);
     let index = found.checked_sub(1)?;
-    let value = code - DECIMAL_DIGIT_ZERO[index];
+    let zero = DECIMAL_DIGIT_ZERO[index];
+    let value = code - zero;
     if value < 10 {
-        Some(b'0' + value as u8)
+        Some((value as u8, zero))
     } else {
         None
     }
+}
+
+fn narrow_digit(ch: char) -> Option<u8> {
+    decimal_digit(ch).map(|(value, _)| b'0' + value)
 }
 
 fn digits_of(text: &str) -> Vec<u8> {
