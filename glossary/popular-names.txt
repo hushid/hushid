@@ -26,6 +26,10 @@
 # accent, such as Éloï, Maël, Mathéo, or Océane, is not that row
 # and is not listed.
 # https://www.retraitequebec.gouv.qc.ca/fr/communiques-de-presse/2026/prenoms-plus-populaires-nouveau-nes-et-nouveaux-retraites-rrq-2025
+# Quebec surnames: Institut de la statistique du Quebec, top 100 by rank.
+# The table prints the accent. The unaccented spelling is listed too
+# when the letters differ.
+# https://statistique.quebec.ca/fr/produit/tableau/les-1-000-premiers-noms-de-famille-selon-le-rang-quebec
 
 # United States given names
 James
@@ -586,3 +590,111 @@ Raphaëlle
 Léonard
 Léon
 Clément
+
+# Quebec surnames, top 100
+Tremblay
+Gagnon
+Roy
+Côté
+Cote
+Bouchard
+Gauthier
+Morin
+Lavoie
+Fortin
+Gagné
+Gagne
+Ouellet
+Pelletier
+Bélanger
+Belanger
+Lévesque
+Levesque
+Bergeron
+Leblanc
+Paquette
+Girard
+Simard
+Boucher
+Caron
+Beaulieu
+Cloutier
+Dubé
+Dube
+Poirier
+Fournier
+Lapointe
+Leclerc
+Lefebvre
+Poulin
+Thibault
+St-Pierre
+Nadeau
+Landry
+Martel
+Bédard
+Bedard
+Grenier
+Lessard
+Bernier
+Michaud
+Hébert
+Hebert
+Desjardins
+Couture
+Turcotte
+Lachance
+Parent
+Blais
+Gosselin
+Savard
+Proulx
+Beaudoin
+Demers
+Perreault
+Boudreau
+Lemieux
+Cyr
+Perron
+Dufour
+Dion
+Mercier
+Bolduc
+Bérubé
+Berube
+Boisvert
+Langlois
+Ménard
+Menard
+Therrien
+Plante
+Bilodeau
+Blanchette
+Dubois
+Champagne
+Paradis
+Fortier
+Arsenault
+Dupuis
+Gaudreault
+Hamel
+Houle
+Villeneuve
+Rousseau
+Gravel
+Thériault
+Theriault
+Lemay
+Allard
+Deschênes
+Deschenes
+Giroux
+Guay
+Leduc
+Boivin
+Charbonneau
+Lambert
+Vachon
+Gilbert
+Audet
+Larouche

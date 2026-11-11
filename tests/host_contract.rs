@@ -578,6 +578,26 @@ fn vault_file_is_mode_0600_and_round_trips() {
 }
 
 #[test]
+fn quebec_surnames_are_shielded() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("glossary/popular-names.txt");
+    let glossary = Glossary::load(&path).expect("published glossary");
+    let sample = "Tremblay a vu Côté, Gagnon et St-Pierre";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, sample).unwrap();
+    assert_eq!(audit.glossary, 4, "{out}");
+    assert!(!out.contains("Tremblay"), "{out}");
+    assert!(!out.contains("Côté"), "{out}");
+    assert!(!out.contains("St-Pierre"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sample);
+
+    let plain = "Cote a vu Belanger";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, plain).unwrap();
+    assert_eq!(audit.glossary, 2, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), plain);
+}
+
+#[test]
 fn popular_names_are_opt_in() {
     let glossary = Glossary::popular_names();
     let sample = "Olivia met Léo";
