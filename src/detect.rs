@@ -588,10 +588,13 @@ fn push_births(text: &str, out: &mut Vec<RawHit>) {
         let comma = r"[,\u{FF0C}]";
         let iso = format!(r"\d{{4}}{sep}\d{{1,2}}{sep}\d{{1,2}}");
         let dmy = format!(r"\d{{1,2}}{sep}\d{{1,2}}{sep}\d{{4}}");
-        let french = format!(r"\d{{1,2}}\s+(?:{months}){dot}?\s*{comma}?\s*\d{{4}}");
-        let english =
-            format!(r"(?:{months}){dot}?\s+\d{{1,2}}(?:st|nd|rd|th)?\s*{comma}?\s*\d{{4}}");
-        [iso, dmy, french, english]
+        let day = r"\d{1,2}(?:st|nd|rd|th|er|e)?";
+        let gap = format!(r"(?:{sep}|\s+)");
+        let french =
+            format!(r"{day}(?:\s+of)?{gap}(?:{months}){dot}?(?:{sep}|\s*{comma}?\s*)\d{{4}}");
+        let english = format!(r"(?:{months}){dot}?{gap}{day}(?:{sep}|\s*{comma}?\s*)\d{{4}}");
+        let year_first = format!(r"\d{{4}}{gap}(?:{months}){dot}?{gap}{day}");
+        [iso, dmy, french, english, year_first]
             .into_iter()
             .map(|body| Regex::new(&format!(r"(?i)\b{body}")).expect("birth date"))
             .collect()
@@ -736,7 +739,7 @@ fn birth_layout_ok(text: &str) -> bool {
     let numbers = birth_numbers(text);
     if let Some(month) = month_in(text) {
         return match numbers.as_slice() {
-            [day, year] => birth_named(*year, month, *day),
+            [day, year] => birth_named(*year, month, *day) || birth_named(*day, month, *year),
             _ => false,
         };
     }
