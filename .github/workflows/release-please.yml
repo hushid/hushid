@@ -91,7 +91,7 @@ jobs:
 
       - name: Refresh the fuzz lock
         if: steps.pr.outputs.skip != 'true'
-        run: cargo check --manifest-path fuzz/Cargo.toml
+        run: cargo update --manifest-path fuzz/Cargo.toml -p hushid
 
       - name: Commit the fuzz lock
         if: steps.pr.outputs.skip != 'true'
