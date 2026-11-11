@@ -91,3 +91,40 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/hushid-msrv
         run: cargo test --locked
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Nightly toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: nightly
+
+      - name: Prepend nightly toolchain to PATH
+        run: dirname "$(rustup which --toolchain nightly cargo)" >> "$GITHUB_PATH"
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        with:
+          tool: cargo-fuzz
+
+      - name: Build fuzz targets
+        run: cargo fuzz build
+
+      - name: Fuzz the token parser
+        run: cargo fuzz run token -- -max_total_time=10
+
+      - name: Fuzz JSON restore
+        run: cargo fuzz run json_restore -- -max_total_time=10

@@ -225,10 +225,13 @@ pub fn parse_token_at(text: &str, at: usize) -> Option<ParsedToken> {
 /// End byte of `h1_secret` when it sits on a boundary at `at`.
 pub fn secret_mark_at(text: &str, at: usize) -> Option<usize> {
     let rest = text.get(at..)?;
-    if rest.len() < SECRET_MARK.len() {
+    let rest_bytes = rest.as_bytes();
+    if rest_bytes.len() < SECRET_MARK.len() {
         return None;
     }
-    if !rest[..SECRET_MARK.len()].eq_ignore_ascii_case(SECRET_MARK) {
+    // The mark is ASCII. Compare bytes so a multibyte character that
+    // straddles the end of that window does not panic.
+    if !rest_bytes[..SECRET_MARK.len()].eq_ignore_ascii_case(SECRET_MARK.as_bytes()) {
         return None;
     }
     let end = at + SECRET_MARK.len();

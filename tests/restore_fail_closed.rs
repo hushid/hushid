@@ -231,3 +231,14 @@ fn rescan_of_a_projection_does_not_issue_new_tokens() {
     assert_eq!(audit.email, 0);
     assert_eq!(vault.len(), before);
 }
+
+#[test]
+fn secret_mark_that_splits_a_multibyte_character_does_not_panic() {
+    let split = "h1_secre\u{3394}";
+    assert!(Vault::new().restore_write(split).is_err());
+    let crash = [
+        107, 101, 0, 104, 48, 95, 115, 101, 227, 142, 148, 116, 10, 116, 10,
+    ];
+    let text = std::str::from_utf8(&crash).unwrap();
+    let _ = Vault::new().restore_write(text);
+}

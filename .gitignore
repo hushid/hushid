@@ -3,3 +3,5 @@
 .DS_Store
 .bline/
 __pycache__/
+fuzz/target/
+fuzz/artifacts/

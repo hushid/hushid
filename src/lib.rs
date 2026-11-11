@@ -31,5 +31,7 @@ pub use session::{Session, SessionError, StoredMessage};
 pub use shield::{shield_text, shield_text_with, Operator};
 pub use sink::{classify, judge, permissions_view, Ephemeral, Judgment, Sink};
 pub use stream::{ArgumentBuffer, HeldStream};
+#[cfg(fuzzing)]
+pub use token::{find_h1, parse_token_at, secret_mark_at, ParsedToken};
 pub use token::{format_token, Kind, TokenError, SECRET_MARK};
 pub use vault::{RestoreError, Vault, VaultError};
