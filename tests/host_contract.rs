@@ -583,6 +583,35 @@ fn canada_top_100_names_are_shielded() {
 }
 
 #[test]
+fn glossary_matches_a_name_with_every_accent_left_off() {
+    let glossary = Glossary::from_terms(["Élodie", "Éloi", "Côté", "Jean-Léon"]);
+    let typed = "Elodie met Eloi, Cote et Jean-Leon";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, typed).unwrap();
+    assert_eq!(audit.glossary, 4, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), typed);
+
+    let exact = "Élodie";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, exact).unwrap();
+    assert_eq!(audit.glossary, 1, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), exact);
+
+    let decomposed = "E\u{0301}lodie";
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &glossary, decomposed).unwrap();
+    assert_eq!(audit.glossary, 1, "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), decomposed);
+
+    for unchanged in ["Èlodie", "elodie", "Éloï", "Côte", "Océane"] {
+        let mut vault = Vault::new();
+        let (out, audit) = shield_text(&mut vault, &glossary, unchanged).unwrap();
+        assert_eq!(audit.glossary, 0, "{unchanged} -> {out}");
+        assert_eq!(out, unchanged);
+    }
+}
+
+#[test]
 fn published_name_glossary_shields_accented_quebec_names() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("glossary/popular-names.txt");
     let glossary = Glossary::load(&path).expect("published glossary");

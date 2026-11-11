@@ -1,6 +1,8 @@
 # Optional hushid glossary of popular given names and surnames.
 # One entry per line. Blank lines and lines starting with # are ignored.
-# A match uses the spelling and case on the line, and a word boundary.
+# A match uses the case on the line and a word boundary.
+# The same letters with every accent left off match too.
+# A different accent does not match.
 # A capitalized word that is also an ordinary word is still matched.
 #
 # United States given names: Social Security Administration, top 100
