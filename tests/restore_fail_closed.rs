@@ -1,5 +1,10 @@
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
+
 use hushid::{
-    classify, judge, permissions_view, shield_text, Glossary, Judgment, Sink, Vault, VaultError,
+    classify, judge, known_tool_sinks, permissions_view, shield_text, Glossary, Judgment, Sink,
+    Vault, VaultError,
 };
 
 fn shielded_email() -> (Vault, String) {
@@ -230,6 +235,109 @@ fn rescan_of_a_projection_does_not_issue_new_tokens() {
     assert_eq!(again, projection);
     assert_eq!(audit.email, 0);
     assert_eq!(vault.len(), before);
+}
+
+#[test]
+fn every_listed_tool_judges_its_sink() {
+    let (vault, token) = shielded_email();
+    let body = format!(r#"{{"content":"{token}"}}"#);
+    let mut seen = BTreeSet::new();
+    for (name, sink) in known_tool_sinks() {
+        assert!(seen.insert(*name), "duplicate tool {name}");
+        assert_eq!(classify(name, false), *sink, "{name}");
+        match sink {
+            Sink::LocalWrite => match judge(&vault, name, &body, false) {
+                Judgment::RestoreAndRun {
+                    sink: Sink::LocalWrite,
+                    restored,
+                } => assert!(
+                    restored.contains("marie+tag@example.com"),
+                    "{name} {restored}"
+                ),
+                other => panic!("{name} expected a local restore, got {other:?}"),
+            },
+            Sink::LocalRead => assert!(
+                matches!(
+                    judge(&vault, name, &body, false),
+                    Judgment::Run {
+                        sink: Sink::LocalRead
+                    }
+                ),
+                "{name}"
+            ),
+            Sink::Display => match judge(&vault, name, &body, false) {
+                Judgment::RestoreAndRun {
+                    sink: Sink::Display,
+                    restored,
+                } => assert!(restored.contains("marie+tag@example.com"), "{name}"),
+                other => panic!("{name} expected a display restore, got {other:?}"),
+            },
+            Sink::Shell | Sink::LeavesMachine => {
+                assert!(
+                    matches!(judge(&vault, name, &body, false), Judgment::Refuse { .. }),
+                    "{name} should refuse a token"
+                );
+                assert!(
+                    matches!(judge(&vault, name, "plain", false), Judgment::Run { .. }),
+                    "{name} should run plain text"
+                );
+            }
+        }
+    }
+    assert_eq!(classify("not_a_tool", false), Sink::LeavesMachine);
+}
+
+#[test]
+fn bline_builtin_tools_are_in_the_judge_list() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bline/crates/bline-tools/src/builtin");
+    if !dir.is_dir() {
+        return;
+    }
+    let mut found = BTreeSet::new();
+    collect_tool_names(&dir, &mut found);
+    let known: BTreeSet<&str> = known_tool_sinks().iter().map(|(name, _)| *name).collect();
+    let missing: Vec<_> = found
+        .iter()
+        .filter(|name| !known.contains(name.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "Bline tools missing from judge: {missing:?}"
+    );
+}
+
+fn collect_tool_names(dir: &Path, found: &mut BTreeSet<String>) {
+    let entries = fs::read_dir(dir).unwrap();
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            collect_tool_names(&path, found);
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        for line in text.lines() {
+            if let Some(name) = tool_name_on_line(line) {
+                found.insert(name);
+            }
+        }
+    }
+}
+
+fn tool_name_on_line(line: &str) -> Option<String> {
+    let rest = line.trim().strip_prefix("name:")?;
+    let rest = rest.trim().strip_prefix('"')?;
+    let name = rest.split('"').next()?;
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+    {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 #[test]

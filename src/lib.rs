@@ -29,7 +29,7 @@ pub use glossary::Glossary;
 pub use json::{restore_json_write, shield_json_strings, JsonError};
 pub use session::{Session, SessionError, StoredMessage};
 pub use shield::{shield_text, shield_text_with, Operator};
-pub use sink::{classify, judge, permissions_view, Ephemeral, Judgment, Sink};
+pub use sink::{classify, judge, known_tool_sinks, permissions_view, Ephemeral, Judgment, Sink};
 pub use stream::{ArgumentBuffer, HeldStream};
 #[cfg(fuzzing)]
 pub use token::{find_h1, parse_token_at, secret_mark_at, ParsedToken};
