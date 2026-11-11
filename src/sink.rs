@@ -32,7 +32,7 @@ pub fn classify(name: &str, mcp: bool) -> Sink {
     match name {
         "read_file" | "list_dir" | "search" | "semantic_search" | "task_output"
         | "get_task_output" | "git_status" | "git_diff" | "git_log" | "git_show" | "git_blame"
-        | "git_ls_files" => Sink::LocalRead,
+        | "git_ls_files" | "think" => Sink::LocalRead,
         "edit_file" | "notebook_edit" | "apply_fragment" | "replace_in_symbol" | "ast_rename"
         | "write_file" | "hashline_edit" | "apply_patch" | "apply_patch_file"
         | "patchloom_plan" | "delete_file" | "rename_file" | "tidy" | "undo" | "manage_skill"
