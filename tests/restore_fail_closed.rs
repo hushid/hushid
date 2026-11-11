@@ -104,6 +104,59 @@ fn network_github_image_video_and_mcp_refuse_when_a_token_is_present() {
 }
 
 #[test]
+fn local_file_tools_restore_a_token() {
+    let (vault, token) = shielded_email();
+    let body = format!(r#"{{"content":"{token}"}}"#);
+    for name in [
+        "write_file",
+        "hashline_edit",
+        "apply_patch",
+        "apply_patch_file",
+        "delete_file",
+        "rename_file",
+        "tidy",
+        "undo",
+        "manage_skill",
+        "manage_memory",
+        "plan",
+        "todo",
+        "update_goal",
+        "md_replace_section",
+        "md_upsert_bullet",
+        "md_table_append",
+        "md_insert_after",
+        "md_insert_before",
+        "md_move_section",
+        "doc_set",
+        "doc_ensure",
+        "doc_delete",
+        "doc_merge",
+        "doc_append",
+        "doc_prepend",
+        "doc_update",
+        "doc_move",
+        "doc_delete_where",
+    ] {
+        match judge(&vault, name, &body, false) {
+            Judgment::RestoreAndRun {
+                sink: Sink::LocalWrite,
+                restored,
+            } => {
+                assert_eq!(restored, r#"{"content":"marie+tag@example.com"}"#, "{name}");
+            }
+            other => panic!("{name} expected a local restore, got {other:?}"),
+        }
+    }
+    assert!(matches!(
+        judge(&vault, "write_file", "keep h1_secret", false),
+        Judgment::WriteRejected {
+            sink: Sink::LocalWrite,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn local_read_keeps_arguments_and_display_restores() {
     let (vault, token) = shielded_email();
     assert!(matches!(
