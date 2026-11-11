@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      pr: ${{ steps.rp.outputs.pr }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Release Please
+        id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-fuzz-lock:
+    name: Sync fuzz lock
+    needs: release-please
+    if: >-
+      needs.release-please.result == 'success' &&
+      needs.release-please.outputs.release_created != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Find the release pull
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_JSON: ${{ needs.release-please.outputs.pr }}
+        run: |
+          set -euo pipefail
+          branch=""
+          if [ -n "${PR_JSON}" ] && [ "${PR_JSON}" != "null" ]; then
+            branch=$(printf '%s' "${PR_JSON}" | jq -r '.headBranchName // empty')
+          fi
+          if [ -z "${branch}" ]; then
+            branch=$(gh pr list --repo "${GITHUB_REPOSITORY}" --label "autorelease: pending" --state open --json headRefName --jq '.[0].headRefName // empty')
+          fi
+          if [ -z "${branch}" ]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout the release pull
+        if: steps.pr.outputs.skip != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.branch }}
+          persist-credentials: false
+
+      - name: Rust stable
+        if: steps.pr.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Refresh the fuzz lock
+        if: steps.pr.outputs.skip != 'true'
+        run: cargo check --manifest-path fuzz/Cargo.toml
+
+      - name: Commit the fuzz lock
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- fuzz/Cargo.lock; then
+            echo "fuzz lock already matches"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fuzz/Cargo.lock
+          git commit -s -m "chore: sync the fuzz lock with the release version"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${BRANCH}"

@@ -107,24 +107,34 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Release pull stand-in
+        if: startsWith(github.head_ref, 'release-please')
+        run: echo "Release pull. The nightly fuzz compile is skipped."
+
       - name: Nightly toolchain
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: nightly
 
       - name: Prepend nightly toolchain to PATH
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: dirname "$(rustup which --toolchain nightly cargo)" >> "$GITHUB_PATH"
 
       - name: Install cargo-fuzz
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
           tool: cargo-fuzz
 
       - name: Build fuzz targets
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: cargo fuzz build --target x86_64-unknown-linux-gnu
 
       - name: Fuzz the token parser
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: cargo fuzz run token --target x86_64-unknown-linux-gnu -- -max_total_time=10
 
       - name: Fuzz JSON restore
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: cargo fuzz run json_restore --target x86_64-unknown-linux-gnu -- -max_total_time=10

@@ -22,4 +22,6 @@ cargo +1.85.0 test --locked
 cargo deny check
 
 CI also runs the `token` and `json_restore` fuzz targets on nightly for 10 seconds each. Locally, put nightly first on `PATH`, then `cargo fuzz run token -- -max_total_time=10` and the same for `json_restore`.
+
+release-please opens the version pull. Do not merge that pull unless this chat names it and says yes. The crate stays unpublished.
 ```
