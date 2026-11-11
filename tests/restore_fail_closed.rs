@@ -158,6 +158,24 @@ fn local_file_tools_restore_a_token() {
 }
 
 #[test]
+fn think_runs_without_restoring_a_token() {
+    let (vault, token) = shielded_email();
+    let thought = format!("note {token}");
+    assert!(matches!(
+        judge(&vault, "think", &thought, false),
+        Judgment::Run {
+            sink: Sink::LocalRead
+        }
+    ));
+    assert!(matches!(
+        judge(&vault, "think", "note h1_secret", false),
+        Judgment::Run {
+            sink: Sink::LocalRead
+        }
+    ));
+}
+
+#[test]
 fn local_read_keeps_arguments_and_display_restores() {
     let (vault, token) = shielded_email();
     assert!(matches!(
