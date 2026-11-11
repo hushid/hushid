@@ -121,10 +121,10 @@ jobs:
           tool: cargo-fuzz
 
       - name: Build fuzz targets
-        run: cargo fuzz build
+        run: cargo fuzz build --target x86_64-unknown-linux-gnu
 
       - name: Fuzz the token parser
-        run: cargo fuzz run token -- -max_total_time=10
+        run: cargo fuzz run token --target x86_64-unknown-linux-gnu -- -max_total_time=10
 
       - name: Fuzz JSON restore
-        run: cargo fuzz run json_restore -- -max_total_time=10
+        run: cargo fuzz run json_restore --target x86_64-unknown-linux-gnu -- -max_total_time=10
