@@ -1,7 +1,7 @@
 use crate::audit::AuditRecord;
 use crate::detect::{assignment_secret_prefix, find_hits, Hit};
 use crate::glossary::Glossary;
-use crate::shield::shield_in_context;
+use crate::shield::{shield_in_context, Operator};
 use crate::token::{find_h1, parse_token_at, secret_mark_at, TokenError, SECRET_MARK};
 use crate::vault::{RestoreError, Vault};
 use std::fmt;
@@ -147,8 +147,15 @@ fn mask_assignment_value(
 ) -> Result<String, JsonError> {
     let mut mapped = SECRET_MARK.to_string();
     if secret_end < decoded.len() {
-        let (rest, part) = shield_in_context(vault, glossary, "", &decoded[secret_end..], "")
-            .map_err(JsonError::Token)?;
+        let (rest, part) = shield_in_context(
+            vault,
+            glossary,
+            "",
+            &decoded[secret_end..],
+            "",
+            Operator::Token,
+        )
+        .map_err(JsonError::Token)?;
         mapped.push_str(&rest);
         audit.merge(&part);
     }
@@ -170,7 +177,8 @@ fn shield_decoded(
     }
     let (before, after) = context;
     let (shielded, part) =
-        shield_in_context(vault, glossary, before, decoded, after).map_err(JsonError::Token)?;
+        shield_in_context(vault, glossary, before, decoded, after, Operator::Token)
+            .map_err(JsonError::Token)?;
     audit.merge(&part);
     Ok(shielded)
 }

@@ -79,6 +79,7 @@ impl fmt::Display for Kind {
 pub enum TokenError {
     Payload,
     Entropy,
+    Digits,
 }
 
 impl fmt::Display for TokenError {
@@ -88,6 +89,7 @@ impl fmt::Display for TokenError {
                 write!(f, "token payload must be 8 Crockford base32 symbols")
             }
             TokenError::Entropy => write!(f, "operating system random source failed"),
+            TokenError::Digits => write!(f, "digit stand-in collided"),
         }
     }
 }
