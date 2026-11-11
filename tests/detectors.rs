@@ -7884,6 +7884,66 @@ fn bedrock_long_lived_key_is_masked() {
 }
 
 #[test]
+fn bedrock_short_lived_key_is_masked() {
+    // A Bedrock short-lived key is `bedrock-api-key-` plus the base64
+    // form of a presigned `bedrock.amazonaws.com` URL. The host, the
+    // action, and `X-Amz-Credential=` are fixed. The long-lived `ABSK`
+    // rule does not see this prefix. The value is not stored. A shorter
+    // body stays as written. A final `=` stays inside the mark.
+    let token = "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29tLz9BY3Rpb249Q2FsbFdpdGhCZWFyZXJUb2tlbiZYLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFTSUFFWEFNUExFS0VZMTJFWCUyRjIwMjYxMTEwJTJGdXMtZWFzdC0xJTJGYmVkcm9jayUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYxMTEwVDEyMDAwMFomWC1BbXotRXhwaXJlcz00MzIwMCZYLUFtei1TaWduZWRIZWFkZXJzPWhvc3QmWC1BbXotU2lnbmF0dXJlPTAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYmVmVyc2lvbj0x";
+    let (vault, out, audit) = shield(token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "bedrock-api-key-"), "{token} -> {out}");
+    assert!(hidden(&out, "UFTSUFFWEFNUExFS0VZ"), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "bedrock-api-key-"), "{out}");
+    assert!(hidden(&out, "UFTSUFFWEFNUExFS0VZ"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    let padded = format!("{token}=");
+    let (vault, out, audit) = shield(&padded);
+    assert_eq!(audit.secret, 1, "{padded} -> {out}");
+    assert_eq!(out, "h1_secret", "{padded} -> {out}");
+    assert!(hidden(&out, "bedrock-api-key-"), "{padded} -> {out}");
+    assert!(hidden(&out, "UFTSUFFWEFNUExFS0VZ"), "{padded} -> {out}");
+    assert!(hidden(&out, "="), "{padded} -> {out}");
+    assert!(!vault.holds_surface(padded.as_bytes()), "{padded}");
+    assert!(vault.restore_write(&out).is_err(), "{padded}");
+
+    let plus = "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29tLz9BY3Rpb249Q2FsbFdpdGhCZWFyZXJUb2tlbiZYLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    let (vault, out, audit) = shield(plus);
+    assert_eq!(audit.secret, 1, "{plus} -> {out}");
+    assert_eq!(out, "h1_secret", "{plus} -> {out}");
+    assert!(hidden(&out, "bedrock-api-key-"), "{plus} -> {out}");
+    assert!(hidden(&out, "+/"), "{plus} -> {out}");
+    assert!(hidden(&out, "BBBB"), "{plus} -> {out}");
+    assert!(!vault.holds_surface(plus.as_bytes()), "{plus}");
+    assert!(vault.restore_write(&out).is_err(), "{plus}");
+
+    let fixed = "YmVkcm9jay5hbWF6b25hd3MuY29tLz9BY3Rpb249Q2FsbFdpdGhCZWFyZXJUb2tlbiZYLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsP";
+    for bare in [
+        format!("bedrock-api-key-{fixed}{}", "C".repeat(99)),
+        "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t".to_string(),
+        format!(
+            "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29x{}",
+            "A".repeat(200)
+        ),
+        format!("word{token}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn onepassword_a3_secret_is_masked() {
     // A 1Password secret key starts with `A3-` and then the published
     // groups of uppercase letters and digits. The value is not stored.
