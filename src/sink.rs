@@ -50,6 +50,25 @@ pub fn classify(name: &str, mcp: bool) -> Sink {
     }
 }
 
+/// Decide whether a finished tool call may run.
+///
+/// A local file tool gets the original bytes back. The token in the
+/// arguments is not what the tool should write.
+///
+/// ```
+/// use hushid::{judge, shield_text, Glossary, Judgment, Sink, Vault};
+///
+/// let mut vault = Vault::new();
+/// let (token, _) = shield_text(&mut vault, &Glossary::empty(), "a@b.co").unwrap();
+/// let judgment = judge(&vault, "write_file", &token, false);
+/// assert!(matches!(
+///     judgment,
+///     Judgment::RestoreAndRun {
+///         sink: Sink::LocalWrite,
+///         ref restored,
+///     } if restored == "a@b.co"
+/// ));
+/// ```
 pub fn judge(vault: &Vault, name: &str, arguments: &str, mcp: bool) -> Judgment {
     let sink = classify(name, mcp);
     match sink {
