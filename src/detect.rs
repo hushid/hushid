@@ -1169,6 +1169,12 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // in the clear. The value is not stored. A shorter body
             // stays as written. A final `=` stays inside the mark.
             r"\bbedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29tLz9BY3Rpb249Q2FsbFdpdGhCZWFyZXJUb2tlbiZYLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsP[A-Za-z0-9+/]{100,}={0,2}",
+            // A ClickHouse Cloud API secret is `4b1d` plus 38 letters
+            // or digits. gitleaks clickhouse-cloud-api-secret-key.
+            // The rules above do not see that prefix, so the secret
+            // stays in the clear. A shorter body and a longer body
+            // stay as written. The value is not stored.
+            r"\b4b1d[A-Za-z0-9]{38}\b",
             // A 1Password secret key starts with `A3-` and then the
             // published groups of uppercase letters and digits. The
             // value is not stored. A shorter group stays as written.
