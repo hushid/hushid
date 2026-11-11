@@ -112,6 +112,7 @@ fn local_file_tools_restore_a_token() {
         "hashline_edit",
         "apply_patch",
         "apply_patch_file",
+        "patchloom_plan",
         "delete_file",
         "rename_file",
         "tidy",
