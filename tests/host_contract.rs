@@ -28,6 +28,38 @@ fn replay_returns_the_stored_projection_and_thinking_is_untouched() {
 }
 
 #[test]
+fn shield_message_keeps_an_audit_the_host_can_read() {
+    let mut session = Session::new(Glossary::empty());
+    session.shield_message("a@b.co").unwrap();
+    assert_eq!(session.audits().len(), 1);
+    assert_eq!(session.audits()[0].email, 1);
+    assert_eq!(session.audits()[0].phone, 0);
+    assert_eq!(session.audits()[0].secret, 0);
+    session.shield_message("415-555-0134").unwrap();
+    assert_eq!(session.audits().len(), 2);
+    assert_eq!(session.audits()[0].email, 1);
+    assert_eq!(session.audits()[0].phone, 0);
+    assert_eq!(session.audits()[1].phone, 1);
+    assert_eq!(session.audits()[1].email, 0);
+}
+
+#[test]
+fn session_save_vault_writes_the_session_vault() {
+    let dir = std::env::temp_dir().join(format!("hushid-session-vault-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir(&dir).unwrap();
+    let path = dir.join("vault");
+    let mut session = Session::new(Glossary::empty());
+    session.shield_message("a@b.co").unwrap();
+    let projection = session.replay()[0].projection.clone();
+    session.save_vault(&path).unwrap();
+    let loaded = Vault::load(&path).unwrap();
+    assert_eq!(loaded.restore_write(&projection).unwrap(), "a@b.co");
+    fs::remove_file(&path).unwrap();
+    fs::remove_dir(&dir).unwrap();
+}
+
+#[test]
 fn json_strings_are_shielded_and_numbers_stay() {
     let input = r#"{"email":"a@b.co","n":4111111111111111,"note":"call 415-555-0134"}"#;
     let mut vault = Vault::new();
