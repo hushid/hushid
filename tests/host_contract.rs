@@ -13,6 +13,11 @@ fn abbreviated_birth_month_is_shielded_and_a_bare_date_stays() {
         "born 2 Jan 1990",
         "DOB Sep 4, 1990",
         "né le 2 févr. 1990",
+        "DOB 02-Jan-1990",
+        "DOB 02/Jan/1990",
+        "DOB Jan-02-1990",
+        "DOB 1990-Jan-02",
+        "born 2nd of January 1990",
     ] {
         let mut vault = Vault::new();
         let (out, audit) = shield_text(&mut vault, &Glossary::empty(), text).unwrap();
