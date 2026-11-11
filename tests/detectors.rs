@@ -7944,6 +7944,45 @@ fn bedrock_short_lived_key_is_masked() {
 }
 
 #[test]
+fn clickhouse_cloud_api_secret_is_masked() {
+    // A ClickHouse Cloud API secret is `4b1d` plus 38 letters or
+    // digits. gitleaks clickhouse-cloud-api-secret-key. The rules
+    // above do not see that prefix, so the secret stays in the
+    // clear. A shorter body and a longer body stay as written.
+    // The value is not stored.
+    let body = format!("{}{}", "a1B2c3D4".repeat(4), "e5F6g7");
+    assert_eq!(body.len(), 38);
+    let token = format!("4b1d{body}");
+    let (vault, out, audit) = shield(&token);
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "h1_secret", "{token} -> {out}");
+    assert!(hidden(&out, "4b1d"), "{token} -> {out}");
+    assert!(hidden(&out, &body), "{token} -> {out}");
+    assert!(!vault.holds_surface(token.as_bytes()), "{token}");
+    assert!(vault.restore_write(&out).is_err(), "{token}");
+
+    let (vault, out, audit) = shield(&format!("see {token}.next"));
+    assert_eq!(audit.secret, 1, "{token} -> {out}");
+    assert_eq!(out, "see h1_secret.next", "{token} -> {out}");
+    assert!(hidden(&out, "4b1d"), "{out}");
+    assert!(hidden(&out, "a1B2"), "{out}");
+    assert!(hidden(&out, "e5F6g7"), "{out}");
+    assert!(!vault.holds_surface(token.as_bytes()));
+    assert!(vault.restore_write(&out).is_err());
+
+    for bare in [
+        format!("4b1d{}", "a1B2c3D4".repeat(4) + "e5F6g"),
+        format!("4b1d{body}Z"),
+        format!("4B1D{body}"),
+        format!("word4b1d{body}"),
+    ] {
+        let (_vault, out, audit) = shield(&bare);
+        assert_eq!(audit.secret, 0, "{bare} -> {out}");
+        assert_eq!(out, bare, "{bare} -> {out}");
+    }
+}
+
+#[test]
 fn onepassword_a3_secret_is_masked() {
     // A 1Password secret key starts with `A3-` and then the published
     // groups of uppercase letters and digits. The value is not stored.
