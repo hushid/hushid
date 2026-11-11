@@ -24,6 +24,16 @@ pub enum Operator {
 ///
 /// Each reversible surface gets its own token, even when the bytes repeat.
 /// Secret-shaped spans become [`SECRET_MARK`] and are not stored.
+///
+/// ```
+/// use hushid::{shield_text, Glossary, Vault};
+///
+/// let mut vault = Vault::new();
+/// let (out, audit) = shield_text(&mut vault, &Glossary::empty(), "a@b.co").unwrap();
+/// assert_eq!(audit.email, 1);
+/// assert!(!out.contains("a@b.co"));
+/// assert_eq!(vault.restore_write(&out).unwrap(), "a@b.co");
+/// ```
 pub fn shield_text(
     vault: &mut Vault,
     glossary: &Glossary,

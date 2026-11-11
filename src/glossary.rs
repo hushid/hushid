@@ -8,6 +8,17 @@ use std::path::Path;
 /// A match uses a word boundary and the case on the line. The same
 /// letters with every accent left off match too. A different accent
 /// does not match.
+///
+/// ```
+/// use hushid::{shield_text, Glossary, Vault};
+///
+/// let glossary = Glossary::from_terms(["Élodie"]);
+/// let mut vault = Vault::new();
+/// let (out, audit) = shield_text(&mut vault, &glossary, "Elodie").unwrap();
+/// assert_eq!(audit.glossary, 1);
+/// assert!(!out.contains("Elodie"));
+/// assert_eq!(vault.restore_write(&out).unwrap(), "Elodie");
+/// ```
 #[derive(Clone, Debug)]
 pub struct Glossary {
     terms: Vec<String>,

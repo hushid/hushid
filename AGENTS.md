@@ -18,5 +18,6 @@ Library crate. It replaces direct identifiers it recognizes with typed tokens. A
 cargo fmt --all -- --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
+cargo +1.85.0 test --locked
 cargo deny check
 ```
