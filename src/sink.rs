@@ -34,12 +34,14 @@ pub fn classify(name: &str, mcp: bool) -> Sink {
         | "get_task_output" | "git_status" | "git_diff" | "git_log" | "git_show" | "git_blame"
         | "git_ls_files" => Sink::LocalRead,
         "edit_file" | "notebook_edit" | "apply_fragment" | "replace_in_symbol" | "ast_rename"
-        | "write_file" | "hashline_edit" | "apply_patch" | "apply_patch_file" | "delete_file"
-        | "rename_file" | "tidy" | "undo" | "manage_skill" | "manage_memory" | "plan" | "todo"
-        | "update_goal" | "md_replace_section" | "md_upsert_bullet" | "md_table_append"
-        | "md_insert_after" | "md_insert_before" | "md_move_section" | "doc_set" | "doc_ensure"
-        | "doc_delete" | "doc_merge" | "doc_append" | "doc_prepend" | "doc_update" | "doc_move"
-        | "doc_delete_where" => Sink::LocalWrite,
+        | "write_file" | "hashline_edit" | "apply_patch" | "apply_patch_file"
+        | "patchloom_plan" | "delete_file" | "rename_file" | "tidy" | "undo" | "manage_skill"
+        | "manage_memory" | "plan" | "todo" | "update_goal" | "md_replace_section"
+        | "md_upsert_bullet" | "md_table_append" | "md_insert_after" | "md_insert_before"
+        | "md_move_section" | "doc_set" | "doc_ensure" | "doc_delete" | "doc_merge"
+        | "doc_append" | "doc_prepend" | "doc_update" | "doc_move" | "doc_delete_where" => {
+            Sink::LocalWrite
+        }
         "ask_user" => Sink::Display,
         "run_command" | "run_background" | "code_mode" => Sink::Shell,
         "web_search" | "web_fetch" | "create_issue" | "git_commit" | "image_gen" | "image_edit"
