@@ -1161,6 +1161,14 @@ fn push_secrets(text: &str, out: &mut Vec<RawHit>) {
             // base64 characters, with optional `=` padding. The value
             // is not stored. A shorter body stays as written.
             r"\bABSK[A-Za-z0-9+/]{109,269}={0,2}",
+            // A Bedrock short-lived key is `bedrock-api-key-` plus the
+            // base64 form of a presigned `bedrock.amazonaws.com` URL.
+            // The host, the action, and `X-Amz-Credential=` are fixed.
+            // The long-lived `ABSK` rule does not see this prefix.
+            // Matching only the constant prefix leaves the credential
+            // in the clear. The value is not stored. A shorter body
+            // stays as written. A final `=` stays inside the mark.
+            r"\bbedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29tLz9BY3Rpb249Q2FsbFdpdGhCZWFyZXJUb2tlbiZYLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsP[A-Za-z0-9+/]{100,}={0,2}",
             // A 1Password secret key starts with `A3-` and then the
             // published groups of uppercase letters and digits. The
             // value is not stored. A shorter group stays as written.
