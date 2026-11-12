@@ -52,15 +52,19 @@ jobs:
 
       - name: Release pull check
         if: startsWith(github.head_ref, 'release-please')
-        run: cargo check --locked
+        run: cargo check --workspace --locked
 
       - name: Clippy
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
-        run: cargo test --locked
+        run: cargo test --workspace --locked
+
+      - name: Name model
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
+        run: cargo test --workspace --locked --features ner
 
       - name: Deny
         run: cargo deny check
@@ -100,7 +104,7 @@ jobs:
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/hushid-msrv
-        run: cargo test --locked
+        run: cargo test --workspace --locked && cargo test --workspace --locked --features ner
 
   fuzz:
     name: Fuzz

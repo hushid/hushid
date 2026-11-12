@@ -13,6 +13,9 @@ pub enum Mode {
 pub struct IdentifiersConfig {
     pub mode: Mode,
     pub glossary: Option<PathBuf>,
+    /// Path of the local name model. The default build stores the path
+    /// and does not open the file.
+    pub ner: Option<PathBuf>,
 }
 
 impl Default for IdentifiersConfig {
@@ -20,6 +23,7 @@ impl Default for IdentifiersConfig {
         Self {
             mode: Mode::Off,
             glossary: None,
+            ner: None,
         }
     }
 }
@@ -87,6 +91,14 @@ pub fn parse_identifiers_config(text: &str) -> Result<IdentifiersConfig, ConfigE
                     config.glossary = None;
                 } else {
                     config.glossary = Some(PathBuf::from(value));
+                }
+            }
+            "ner" => {
+                let value = unquote(value).ok_or(ConfigError::Syntax { line: line_no })?;
+                if value.is_empty() {
+                    config.ner = None;
+                } else {
+                    config.ner = Some(PathBuf::from(value));
                 }
             }
             _ => return Err(ConfigError::UnknownKey { line: line_no }),

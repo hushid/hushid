@@ -9,9 +9,19 @@ description = "Replace recognized direct identifiers with tokens."
 repository = "https://github.com/hushid/hushid"
 
 [dependencies]
+chacha20poly1305 = "0.10"
 getrandom = "0.4"
 regex = "1"
 zeroize = "1"
+
+[features]
+default = []
+ner = []
+
+[workspace]
+members = [".", "hushid-proxy"]
+exclude = ["fuzz"]
+resolver = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

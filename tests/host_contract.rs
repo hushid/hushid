@@ -528,6 +528,11 @@ fn config_accepts_off_and_cloud_only() {
     .unwrap();
     assert_eq!(config.mode, Mode::Cloud);
     assert_eq!(config.glossary.unwrap().as_os_str(), "identifiers.txt");
+    assert!(config.ner.is_none());
+    let with_model =
+        parse_identifiers_config("[identifiers]\nmode = \"cloud\"\nner = \"models/person.onnx\"\n")
+            .unwrap();
+    assert_eq!(with_model.ner.unwrap().as_os_str(), "models/person.onnx");
     assert!(shielding_active(Mode::Cloud, false));
     assert!(!shielding_active(Mode::Cloud, true));
     assert!(!shielding_active(Mode::Off, false));

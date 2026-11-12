@@ -154,6 +154,7 @@ fn mask_assignment_value(
             &decoded[secret_end..],
             "",
             Operator::Token,
+            crate::shield::Names::Off,
         )
         .map_err(JsonError::Token)?;
         mapped.push_str(&rest);
@@ -176,9 +177,16 @@ fn shield_decoded(
         return shield_document(vault, glossary, decoded, audit, depth + 1, context);
     }
     let (before, after) = context;
-    let (shielded, part) =
-        shield_in_context(vault, glossary, before, decoded, after, Operator::Token)
-            .map_err(JsonError::Token)?;
+    let (shielded, part) = shield_in_context(
+        vault,
+        glossary,
+        before,
+        decoded,
+        after,
+        Operator::Token,
+        crate::shield::Names::Off,
+    )
+    .map_err(JsonError::Token)?;
     audit.merge(&part);
     Ok(shielded)
 }

@@ -1,8 +1,11 @@
 use crate::audit::AuditRecord;
 use crate::glossary::Glossary;
-use crate::shield::shield_text;
+use crate::shield::{shield_in_context, Names, Operator};
 use crate::token::TokenError;
 use crate::vault::{Vault, VaultError};
+
+#[cfg(feature = "ner")]
+use crate::ner::Ner;
 use std::fmt;
 use std::path::Path;
 
@@ -32,6 +35,8 @@ pub struct Session {
     glossary: Glossary,
     messages: Vec<StoredMessage>,
     audits: Vec<AuditRecord>,
+    #[cfg(feature = "ner")]
+    ner: Option<Ner>,
 }
 
 impl fmt::Debug for Session {
@@ -65,7 +70,17 @@ impl Session {
             glossary,
             messages: Vec::new(),
             audits: Vec::new(),
+            #[cfg(feature = "ner")]
+            ner: None,
         }
+    }
+
+    /// Cloud mode uses the name model only when the host passes one.
+    /// The default build has no name model.
+    #[cfg(feature = "ner")]
+    pub fn with_ner(mut self, ner: Ner) -> Self {
+        self.ner = Some(ner);
+        self
     }
 
     pub fn vault(&self) -> &Vault {
@@ -81,7 +96,23 @@ impl Session {
     }
 
     pub fn shield_message(&mut self, text: &str) -> Result<usize, TokenError> {
-        let (projection, audit) = shield_text(&mut self.vault, &self.glossary, text)?;
+        #[cfg(feature = "ner")]
+        if let Some(ner) = self.ner.clone() {
+            return self.store_projection(text, Names::On(&ner));
+        }
+        self.store_projection(text, Names::Off)
+    }
+
+    fn store_projection(&mut self, text: &str, names: Names<'_>) -> Result<usize, TokenError> {
+        let (projection, audit) = shield_in_context(
+            &mut self.vault,
+            &self.glossary,
+            "",
+            text,
+            "",
+            Operator::Token,
+            names,
+        )?;
         self.audits.push(audit);
         self.messages.push(StoredMessage {
             projection,

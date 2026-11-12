@@ -13,6 +13,8 @@ mod detect;
 mod digits;
 mod glossary;
 mod json;
+mod rewrite;
+mod seal;
 mod session;
 mod shield;
 mod sink;
@@ -21,6 +23,9 @@ mod surrogate;
 mod token;
 mod vault;
 
+#[cfg(feature = "ner")]
+mod ner;
+
 pub use audit::{AuditRecord, DETECTOR_VERSION};
 pub use config::{
     accept_non_text, non_text_allowed, parse_identifiers_config, shielding_active, ConfigError,
@@ -28,6 +33,9 @@ pub use config::{
 };
 pub use glossary::Glossary;
 pub use json::{restore_json_write, shield_json_strings, JsonError};
+#[cfg(feature = "ner")]
+pub use ner::{Ner, NerError};
+pub use seal::{open as open_sealed, seal as seal_transcript, SealError};
 pub use session::{Session, SessionError, StoredMessage};
 pub use shield::{shield_text, shield_text_with, Operator};
 pub use sink::{classify, judge, known_tool_sinks, permissions_view, Ephemeral, Judgment, Sink};

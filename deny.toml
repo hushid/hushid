@@ -7,6 +7,8 @@ version = 2
 allow = [
     "Apache-2.0",
     "MIT",
+    # RustCrypto's subtle crate, pulled in by the seal cipher.
+    "BSD-3-Clause",
 ]
 confidence-threshold = 0.8
 
