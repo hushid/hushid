@@ -64,7 +64,7 @@ jobs:
 
       - name: Generate coverage
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
-        run: cargo llvm-cov --locked --cobertura --output-path coverage.xml
+        run: cargo llvm-cov --locked --workspace --cobertura --output-path coverage.xml
 
       - name: Record coverage
         if: ${{ !startsWith(github.head_ref, 'release-please') }}

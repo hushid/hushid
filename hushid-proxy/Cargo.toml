@@ -1,0 +1,19 @@
+[package]
+name = "hushid-proxy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+publish = false
+description = "OpenAI-compatible chat proxy."
+repository = "https://github.com/hushid/hushid"
+
+[features]
+default = []
+ner = ["hushid/ner"]
+
+[dependencies]
+hushid = { path = ".." }
+
+[lints.rust]
+unsafe_code = "forbid"

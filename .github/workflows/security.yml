@@ -8,6 +8,11 @@ on:
   pull_request:
     branches: [main]
   merge_group:
+  # CodeQL rejects a workflow that cannot see the default branch.
+  # The job does not analyze a push. The pull request already did,
+  # and Monday scans main.
+  push:
+    branches: [main]
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -75,6 +80,7 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language }})
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

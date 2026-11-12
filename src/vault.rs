@@ -215,6 +215,26 @@ impl Vault {
     /// Write the map to `path` as mode `0600` on Unix.
     /// The host leaves this file out of support bundles and share exports.
     pub fn save(&self, path: &Path) -> Result<(), VaultError> {
+        write_private(path, self.encode().as_bytes())?;
+        Ok(())
+    }
+
+    pub fn load(path: &Path) -> Result<Self, VaultError> {
+        let text = fs::read_to_string(path)?;
+        Self::decode(&text)
+    }
+
+    pub(crate) fn known_surfaces(&self) -> Vec<(String, String)> {
+        self.entries
+            .iter()
+            .filter_map(|(token, entry)| {
+                let text = String::from_utf8(entry.surface.clone()).ok()?;
+                Some((token.clone(), text))
+            })
+            .collect()
+    }
+
+    pub(crate) fn encode(&self) -> String {
         let mut body = String::from(HEADER);
         body.push('\n');
         for (token, entry) in &self.entries {
@@ -230,12 +250,10 @@ impl Vault {
             }
             body.push('\n');
         }
-        write_private(path, body.as_bytes())?;
-        Ok(())
+        body
     }
 
-    pub fn load(path: &Path) -> Result<Self, VaultError> {
-        let text = fs::read_to_string(path)?;
+    pub(crate) fn decode(text: &str) -> Result<Self, VaultError> {
         // Every record ends with a newline. A torn write has no final
         // newline, and an even-length hex fragment would otherwise load
         // as a shorter surface.
