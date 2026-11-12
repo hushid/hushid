@@ -1,6 +1,9 @@
 name: Security
 
 on:
+  pull_request:
+    branches: [main]
+  merge_group:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -15,6 +18,7 @@ concurrency:
 jobs:
   deny:
     name: Deny
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -60,6 +64,94 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DENY_RESULT: ${{ needs.deny.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          ASSIGNEE: ${{ vars.NIGHTLY_FAILURE_ASSIGNEE || 'SebTardif' }}
+        run: python3 .github/scripts/weekly-deny-report.py
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Rust analysis uses build-mode none. CodeQL extracts the crate
+          # with rust-analyzer. Manual cargo build is not a Rust mode.
+          - language: rust
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Release pull stand-in
+        if: startsWith(github.head_ref, 'release-please')
+        run: echo 'Release pull. CodeQL is skipped.'
+
+      - name: Checkout
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        if: matrix.language == 'rust' && !startsWith(github.head_ref, 'release-please')
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - name: Initialize CodeQL
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+
+      - name: Analyze
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  codeql-report:
+    name: CodeQL report
+    needs: codeql
+    if: always() && github.event_name == 'schedule' && needs.codeql.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open or close the CodeQL issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RESULT: ${{ needs.codeql.result }}
+          CHECK_SIGNATURE: codeql
+          CHECK_TITLE: Weekly CodeQL red
+          CHECK_LEAD: Weekly CodeQL analysis failed.
+          CHECK_GREEN: Weekly CodeQL is green
+          CHECK_SUPERSEDE: Superseded by a new weekly CodeQL failure
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO: ${{ github.repository }}
           ASSIGNEE: ${{ vars.NIGHTLY_FAILURE_ASSIGNEE || 'SebTardif' }}

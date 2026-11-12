@@ -1,0 +1,111 @@
+name: Scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Publish to the Scorecard API can fail after results.sarif is written.
+      # A Docker run under harden-runner can also leave that file empty.
+      # Retry once, then fail only when analysis wrote nothing.
+      - name: Run Scorecard
+        id: scorecard
+        continue-on-error: true
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Retry Scorecard after empty results
+        id: scorecard_retry
+        if: hashFiles('results.sarif') == ''
+        continue-on-error: true
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fail if Scorecard produced no results
+        if: hashFiles('results.sarif') == ''
+        env:
+          FIRST_OUTCOME: ${{ steps.scorecard.outcome }}
+          RETRY_OUTCOME: ${{ steps.scorecard_retry.outcome }}
+        run: |
+          echo "Scorecard analysis did not write results.sarif after retry"
+          echo "first outcome=${FIRST_OUTCOME} retry outcome=${RETRY_OUTCOME}"
+          exit 1
+
+      - name: Upload SARIF
+        if: hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          sarif_file: results.sarif
+
+  report:
+    name: Scorecard report
+    needs: scorecard
+    if: always() && github.event_name == 'schedule' && needs.scorecard.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open or close the Scorecard issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RESULT: ${{ needs.scorecard.result }}
+          CHECK_SIGNATURE: scorecard
+          CHECK_TITLE: Weekly Scorecard red
+          CHECK_LEAD: Weekly OpenSSF Scorecard failed.
+          CHECK_GREEN: Weekly Scorecard is green
+          CHECK_SUPERSEDE: Superseded by a new weekly Scorecard failure
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          ASSIGNEE: ${{ vars.NIGHTLY_FAILURE_ASSIGNEE || 'SebTardif' }}
+        run: python3 .github/scripts/weekly-deny-report.py

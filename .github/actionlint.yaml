@@ -1,0 +1,4 @@
+paths:
+  .github/workflows/coverage.yml:
+    ignore:
+      - 'unknown permission scope "code-quality"'
