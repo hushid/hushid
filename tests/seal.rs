@@ -6,7 +6,8 @@ fn seal_round_trips_the_vault_and_the_clear_transcript() {
     let (projection, _) =
         shield_text(&mut vault, &Glossary::empty(), "Write to ada@example.com.").unwrap();
     let clear = vec!["Write to ada@example.com.".to_string(), projection.clone()];
-    let key = [7u8; 32];
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).unwrap();
     let sealed = seal_transcript(&vault, &clear, &key).unwrap();
     assert!(!sealed
         .windows(email_bytes().len())

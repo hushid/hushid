@@ -26,8 +26,8 @@ fn proxy_round_trip_hides_the_email_from_upstream() {
     let upstream_body = br#"{"choices":[{"message":{"content":"TOKEN"}}]}"#;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let seen = std::env::temp_dir().join(format!("hushid-upstream-{port}.txt"));
-    let seen_path = seen.clone();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_body = std::sync::Arc::clone(&seen);
     std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
@@ -67,7 +67,7 @@ fn proxy_round_trip_hides_the_email_from_upstream() {
                     buf.extend_from_slice(&chunk[..read]);
                 }
                 let body = &buf[header_end + 4..header_end + 4 + length];
-                std::fs::write(&seen_path, body).unwrap();
+                *seen_body.lock().unwrap() = body.to_vec();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     upstream_body.len(),
@@ -103,12 +103,11 @@ fn proxy_round_trip_hides_the_email_from_upstream() {
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
-    let upstream = std::fs::read_to_string(&seen).unwrap();
+    let upstream = String::from_utf8(seen.lock().unwrap().clone()).unwrap();
     assert!(!upstream.contains("ada@example.com"), "{upstream}");
     assert!(upstream.contains("h1_email_"), "{upstream}");
     assert!(response.contains("TOKEN"), "{response}");
     let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_file(&seen);
 }
 
 #[test]

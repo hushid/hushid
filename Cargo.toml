@@ -18,6 +18,9 @@ zeroize = "1"
 default = []
 ner = []
 
+[dev-dependencies]
+getrandom = "0.4"
+
 [workspace]
 members = [".", "hushid-proxy"]
 exclude = ["fuzz"]
