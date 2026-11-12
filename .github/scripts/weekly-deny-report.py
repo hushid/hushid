@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Open, replace, or close the weekly cargo-deny issue."""
+"""Open, replace, or close one scheduled check issue.
+
+The default check is weekly cargo deny. Another workflow can set
+CHECK_SIGNATURE and the title lines. A green deny run closes only deny
+issues, including older issues that have no signature yet.
+"""
 
 import json
 import os
@@ -10,7 +15,27 @@ from datetime import date, datetime, timezone
 
 LABEL = "nightly-failure"
 SIGNATURE = "cargo deny check"
+TITLE_PREFIX = "Weekly deny red"
+FAILURE_LEAD = "Weekly `cargo deny check` failed."
+GREEN_LEAD = "Weekly deny is green"
+SUPERSEDE_LEAD = "Superseded by a new weekly deny failure"
 STATE_RE = re.compile(r"<!-- nightly-failure-state: (\{.*?\}) -->")
+
+
+def load_config():
+    global SIGNATURE, TITLE_PREFIX, FAILURE_LEAD, GREEN_LEAD, SUPERSEDE_LEAD
+    SIGNATURE = os.environ.get("CHECK_SIGNATURE", SIGNATURE)
+    TITLE_PREFIX = os.environ.get("CHECK_TITLE", TITLE_PREFIX)
+    FAILURE_LEAD = os.environ.get("CHECK_LEAD", FAILURE_LEAD)
+    GREEN_LEAD = os.environ.get("CHECK_GREEN", GREEN_LEAD)
+    SUPERSEDE_LEAD = os.environ.get("CHECK_SUPERSEDE", SUPERSEDE_LEAD)
+
+
+def is_this_check(issue):
+    found = state_of(issue.get("body")).get("signature")
+    if found == SIGNATURE:
+        return True
+    return not found and SIGNATURE == "cargo deny check"
 
 
 def gh(args, check=True, input_text=None):
@@ -118,11 +143,11 @@ def body_for(run_url, first_failed_on, day):
     }
     title_days = f" ({days} consecutive days)" if days > 1 else ""
     body = (
-        "Weekly `cargo deny check` failed.\n\n"
+        f"{FAILURE_LEAD}\n\n"
         f"Run: {run_url}\n\n"
         f"<!-- nightly-failure-state: {json.dumps(state, separators=(',', ':'))} -->\n"
     )
-    return f"Weekly deny red{title_days}", body
+    return f"{TITLE_PREFIX}{title_days}", body
 
 
 def create_issue(repo, assignee, title, body):
@@ -153,21 +178,24 @@ def create_issue(repo, assignee, title, body):
 
 
 def main():
-    result = os.environ["DENY_RESULT"]
+    load_config()
+    result = os.environ.get("CHECK_RESULT", os.environ.get("DENY_RESULT", ""))
+    if not result:
+        raise SystemExit("CHECK_RESULT is unset")
     repo = os.environ["REPO"]
     run_url = os.environ["RUN_URL"]
     assignee = os.environ.get("ASSIGNEE", "")
     day = datetime.now(timezone.utc).date().isoformat()
-    print(f"PLAN: deny result {result} on {day}")
+    print(f"PLAN: {SIGNATURE} result {result} on {day}")
     if result == "cancelled":
         print("OK: cancelled")
         return
     ensure_labels(repo)
-    issues = open_issues(repo)
+    issues = [issue for issue in open_issues(repo) if is_this_check(issue)]
     if result == "success":
-        print(f"DO: close {len(issues)} open deny issues")
+        print(f"DO: close {len(issues)} open issues for {SIGNATURE}")
         for issue in issues:
-            close_issue(repo, issue["number"], f"Weekly deny is green: {run_url}")
+            close_issue(repo, issue["number"], f"{GREEN_LEAD}: {run_url}")
         print("OK: green")
         return
     if result != "failure":
@@ -215,11 +243,11 @@ def main():
                     "--reason",
                     "not planned",
                     "--comment",
-                    f"Superseded by a new weekly deny failure: {run_url}",
+                    f"{SUPERSEDE_LEAD}: {run_url}",
                 ]
             )
     title, body = body_for(run_url, first, day)
-    print("DO: create deny issue")
+    print(f"DO: create {SIGNATURE} issue")
     create_issue(repo, assignee, title, body)
     print("OK: filed")
 
