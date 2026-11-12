@@ -1,16 +1,9 @@
 name: FOSSA
 
+# A squash of an up-to-date pull request is the same tree, so this
+# workflow does not run again on push to main. Monday scans the
+# default branch in case a later revision is flagged.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Cargo.*"
-      - "fuzz/Cargo.toml"
-      - "fuzz/Cargo.lock"
-      - "src/**"
-      - "scripts/fossa-filter.py"
-      - "scripts/test_fossa_filter.py"
-      - ".github/workflows/fossa.yml"
   pull_request:
     branches: [main]
     paths:
@@ -22,6 +15,8 @@ on:
       - "scripts/test_fossa_filter.py"
       - ".github/workflows/fossa.yml"
   merge_group:
+  schedule:
+    - cron: "15 7 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -127,10 +122,11 @@ jobs:
             local attempt=1
             local rc=0
             while [ "$attempt" -le 3 ]; do
+              # Leave errexit off. Turning it back on makes a non-zero
+              # return exit the step before the caller can filter.
               set +e
               "$@" >"$out" 2>"$err"
               rc=$?
-              set -e
               if [ "$rc" -eq 0 ]; then
                 return 0
               fi
@@ -162,3 +158,37 @@ jobs:
           echo "FOSSA test found issues. Filtering known false positives."
           head -c 2000 fossa-stderr.txt
           python3 scripts/fossa-filter.py fossa-results.json fossa-stderr.txt
+
+  report:
+    name: FOSSA report
+    needs: fossa
+    if: always() && github.event_name == 'schedule' && needs.fossa.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open or close the FOSSA issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RESULT: ${{ needs.fossa.result }}
+          CHECK_SIGNATURE: fossa
+          CHECK_TITLE: Weekly FOSSA red
+          CHECK_LEAD: Weekly FOSSA license check failed.
+          CHECK_GREEN: Weekly FOSSA is green
+          CHECK_SUPERSEDE: Superseded by a new weekly FOSSA failure
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          ASSIGNEE: ${{ vars.NIGHTLY_FAILURE_ASSIGNEE || 'SebTardif' }}
+        run: python3 .github/scripts/weekly-deny-report.py

@@ -1,5 +1,9 @@
 name: Security
 
+# CodeQL runs on the pull request. A squash onto main is the same
+# tree, so this workflow does not analyze again on push. Monday
+# scans the default branch. cargo deny on that schedule is the
+# advisory check, not a second test suite.
 on:
   pull_request:
     branches: [main]

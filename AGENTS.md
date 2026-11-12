@@ -23,7 +23,7 @@ cargo deny check
 
 CI also runs the `token` and `json_restore` fuzz targets on nightly for 10 seconds each. Locally, put nightly first on `PATH`, then `cargo fuzz run token -- -max_total_time=10` and the same for `json_restore`.
 
-Pull requests also run CodeQL for Rust and Actions, and `cargo llvm-cov`. FOSSA runs when the lockfile, the sources, or its workflow change. It skips the scan when `FOSSA_API_KEY` is unset. Scorecard runs on the default branch. Do not add a badge for any of these.
+Pull requests also run CodeQL for Rust and Actions, and `cargo llvm-cov`. Those checks do not run again when the pull request is merged. Scorecard and release-please still run on the default branch. FOSSA runs on a pull request that changes the lockfile, the sources, or its workflow, and again on Monday. A release pull keeps the required check names and skips the test suite, the fuzzer, coverage, and CodeQL. Do not add a badge for any of these.
 
 release-please opens the version pull. Do not merge that pull unless this chat names it and says yes. The crate stays unpublished.
 ```

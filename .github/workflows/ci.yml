@@ -1,5 +1,7 @@
 name: CI
 
+# Tests run on the pull request. A squash onto main is the same tree,
+# so this workflow does not run on push.
 on:
   pull_request:
     branches: [main]
@@ -48,10 +50,16 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      - name: Release pull check
+        if: startsWith(github.head_ref, 'release-please')
+        run: cargo check --locked
+
       - name: Clippy
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Test
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: cargo test --locked
 
       - name: Deny
@@ -83,11 +91,13 @@ jobs:
         run: grep -q '^rust-version = "1.85"$' Cargo.toml
 
       - name: Rust 1.85
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.85.0
 
       - name: Test on Rust 1.85
+        if: ${{ !startsWith(github.head_ref, 'release-please') }}
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/hushid-msrv
         run: cargo test --locked
