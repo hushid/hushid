@@ -122,10 +122,11 @@ jobs:
             local attempt=1
             local rc=0
             while [ "$attempt" -le 3 ]; do
+              # Leave errexit off. Turning it back on makes a non-zero
+              # return exit the step before the caller can filter.
               set +e
               "$@" >"$out" 2>"$err"
               rc=$?
-              set -e
               if [ "$rc" -eq 0 ]; then
                 return 0
               fi
