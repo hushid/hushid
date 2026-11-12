@@ -80,6 +80,7 @@ pub enum TokenError {
     Payload,
     Entropy,
     Digits,
+    Surrogate,
 }
 
 impl fmt::Display for TokenError {
@@ -90,6 +91,7 @@ impl fmt::Display for TokenError {
             }
             TokenError::Entropy => write!(f, "operating system random source failed"),
             TokenError::Digits => write!(f, "digit stand-in collided"),
+            TokenError::Surrogate => write!(f, "surrogate stand-in collided"),
         }
     }
 }
