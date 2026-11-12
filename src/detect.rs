@@ -235,9 +235,10 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
         // is not this shape. A phone separator may sit between that
         // prefix and the trunk (`00-1416-555-0123`). Whitespace already
         // may. Leaving the mark out sends the number. `011` is that
-        // same prefix.
+        // same prefix. Square brackets are that same area-code mark
+        // (`[416] 555-0123`). Leaving them out sends the number.
         phone_pattern(
-            r"(?:{plus}\s*1{sep}*|{idd}{sep}*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
+            r"(?:{plus}\s*1{sep}*|{idd}{sep}*1{sep}*|1{sep}+)?(?:{open}\s*\d{3}\s*{close}{sep}*\d{3}{sep}+\d{4}|{bracket_open}\s*\d{3}\s*{bracket_close}{sep}*\d{3}{sep}+\d{4}|\d{3}{sep}+\d{3}{sep}+\d{4})",
         )
     });
     // `1(416)555-0123`, including spaces inside the parentheses. A bare
@@ -1622,7 +1623,9 @@ fn phone_pattern(body: &str) -> Regex {
             .replace("{plus}", PLUS)
             .replace("{idd}", IDD)
             .replace("{open}", OPEN_PAREN)
-            .replace("{close}", CLOSE_PAREN),
+            .replace("{close}", CLOSE_PAREN)
+            .replace("{bracket_open}", r"\[")
+            .replace("{bracket_close}", r"\]"),
     )
     .expect("phone pattern")
 }

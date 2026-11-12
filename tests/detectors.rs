@@ -10012,3 +10012,38 @@ fn fullwidth_letters_in_a_postal_code_and_health_number_are_shielded() {
     assert_eq!(audit.ramq, 0, "{out}");
     assert_eq!(out, bad_month, "{out}");
 }
+
+#[test]
+fn square_brackets_around_a_canadian_area_code_still_shield_the_number() {
+    // `(416) 555-0123` is already a phone. Square brackets are that
+    // same area-code mark. A citation `[416]` and a longer tail stay.
+    for phone in ["[416] 555-0123", "[416]555-0123"] {
+        let (vault, out, audit) = shield(phone);
+        assert_eq!(audit.phone, 1, "{phone} -> {out}");
+        assert!(out.starts_with("h1_phone_"), "{out}");
+        assert!(hidden(&out, "416"), "{out}");
+        assert!(hidden(&out, "0123"), "{out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), phone);
+    }
+
+    let sentence = "call [416] 555-0123 today";
+    let (vault, out, audit) = shield(sentence);
+    assert_eq!(audit.phone, 1, "{sentence} -> {out}");
+    assert!(out.starts_with("call h1_phone_"), "{out}");
+    assert!(out.ends_with(" today"), "{out}");
+    assert!(hidden(&out, "555"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), sentence);
+
+    let raw = r#"{"tel":"[416] 555-0123"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), raw).unwrap();
+    assert_eq!(audit.phone, 1, "{raw} -> {out}");
+    assert!(hidden(&out, "416"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), raw);
+
+    for bare in ["[416]", "[416] 555", "[416] 555-01234", "416] 555-0123"] {
+        let (_vault, out, audit) = shield(bare);
+        assert_eq!(out, bare, "{bare} -> {out}");
+        assert_eq!(audit.phone, 0, "{bare} -> {out}");
+    }
+}

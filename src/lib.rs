@@ -17,6 +17,7 @@ mod session;
 mod shield;
 mod sink;
 mod stream;
+mod surrogate;
 mod token;
 mod vault;
 

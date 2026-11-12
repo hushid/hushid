@@ -18,8 +18,9 @@ struct Entry {
     surface: Vec<u8>,
     /// The surface was a JSON number. Restore writes it back without quotes.
     json_number: bool,
-    /// Digit stand-in that appears in the shielded text. The map key stays
-    /// the token so an older vault file still loads.
+    /// Stand-in that appears in the shielded text. The map key stays
+    /// the token so an older vault file still loads. Digit and surrogate
+    /// stand-ins share this field.
     digits: Option<String>,
 }
 
@@ -299,13 +300,45 @@ impl Vault {
     }
 }
 
+fn stand_in_bounded(text: &str, start: usize, end: usize) -> bool {
+    if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+        return false;
+    }
+    if text[..start]
+        .chars()
+        .next_back()
+        .is_some_and(|ch| ch.is_alphanumeric())
+    {
+        return false;
+    }
+    if text[end..]
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_alphanumeric())
+    {
+        return false;
+    }
+    true
+}
+
 fn next_digit(vault: &Vault, text: &str, index: usize) -> Option<usize> {
-    let rest = text.get(index..)?;
     let mut best = None;
     for stand_in in vault.digits.keys() {
-        if let Some(found) = rest.find(stand_in) {
-            let at = index + found;
-            best = Some(best.map_or(at, |earlier: usize| earlier.min(at)));
+        let mut from = index;
+        while let Some(rest) = text.get(from..) {
+            let Some(found) = rest.find(stand_in) else {
+                break;
+            };
+            let at = from + found;
+            let end = at + stand_in.len();
+            if stand_in_bounded(text, at, end) {
+                best = Some(best.map_or(at, |earlier: usize| earlier.min(at)));
+                break;
+            }
+            if end <= from {
+                break;
+            }
+            from = end;
         }
     }
     best
@@ -315,7 +348,8 @@ fn digit_match<'a>(vault: &'a Vault, text: &str, index: usize) -> Option<(usize,
     let rest = text.get(index..)?;
     let mut best: Option<(&str, &str)> = None;
     for (stand_in, surface) in &vault.digits {
-        if rest.starts_with(stand_in) {
+        let end = index + stand_in.len();
+        if rest.starts_with(stand_in) && stand_in_bounded(text, index, end) {
             let longer = best.is_none_or(|(previous, _)| stand_in.len() > previous.len());
             if longer {
                 best = Some((stand_in.as_str(), surface.as_str()));
