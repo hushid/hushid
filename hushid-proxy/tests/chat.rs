@@ -241,6 +241,43 @@ fn mcp_shield_and_restore() {
 }
 
 #[test]
+fn mcp_session_is_the_top_level_field() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-session-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let glossary = Glossary::empty();
+    let nested = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shield","arguments":{"note":{"session":"victim"},"session":"alice","text":"ada@example.com"}}}"#,
+    )
+    .unwrap();
+    assert!(nested.contains("h1_email_"), "{nested}");
+    assert!(!nested.contains("isError"), "{nested}");
+    assert!(dir.join("alice.vault").is_file(), "{nested}");
+    assert!(!dir.join("victim.vault").exists(), "{nested}");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let last = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shield","arguments":{"session":"victim","text":"ada@example.com","session":"alice"}}}"#,
+    )
+    .unwrap();
+    assert!(last.contains("h1_email_"), "{last}");
+    assert!(dir.join("alice.vault").is_file(), "{last}");
+    assert!(!dir.join("victim.vault").exists(), "{last}");
+    let word = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"shield","arguments":{"text":"session","session":"alice"}}}"#,
+    )
+    .unwrap();
+    assert!(!word.contains("isError"), "{word}");
+    assert!(word.contains("session"), "{word}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn mcp_tool_text_decodes_json_escapes() {
     let dir = std::env::temp_dir().join(format!("hushid-mcp-json-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

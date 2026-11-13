@@ -179,6 +179,12 @@ pub fn forward(
             return Err(ProxyError::Upstream);
         }
     }
+    if upstream
+        .bytes()
+        .any(|byte| byte == b'\r' || byte == b'\n' || byte == 0)
+    {
+        return Err(ProxyError::Upstream);
+    }
     let url = completions_url(upstream)?;
     let (https, rest) = if let Some(rest) = url.strip_prefix("https://") {
         (true, rest)
@@ -417,25 +423,21 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
+        let name = name.trim();
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
             saw_length = true;
-            if is_response {
-                length = value
-                    .parse()
-                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "length"))?;
-            } else {
-                length = value.parse().unwrap_or(0);
-            }
-        } else if is_response
-            && name.eq_ignore_ascii_case("transfer-encoding")
+            length = value
+                .parse()
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "length"))?;
+        } else if name.eq_ignore_ascii_case("transfer-encoding")
             && value.to_ascii_lowercase().contains("chunked")
         {
             chunked = true;
         }
         headers.push((name.to_string(), value.to_string()));
     }
-    if is_response && (!saw_length || chunked) {
+    if chunked || (is_response && !saw_length) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "length",
@@ -698,9 +700,50 @@ fn json_object_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
     }
 }
 
+fn json_key_at(json: &str, needle: &str) -> Option<usize> {
+    let bytes = json.as_bytes();
+    let needle = needle.as_bytes();
+    let mut index = 0;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut found = None;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            if depth == 1 && bytes[index..].starts_with(needle) {
+                let rest = json[index + needle.len()..].trim_start();
+                if rest.starts_with(':') {
+                    found = Some(index);
+                }
+            }
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'{' || byte == b'[' {
+            depth += 1;
+        } else if byte == b'}' || byte == b']' {
+            depth -= 1;
+        }
+        index += 1;
+    }
+    found
+}
+
 fn json_raw_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
     let needle = format!("\"{field}\"");
-    let start = json.find(&needle)?;
+    let start = json_key_at(json, &needle)?;
     let after = json[start + needle.len()..].trim_start();
     let after = after.strip_prefix(':')?.trim_start();
     if let Some(rest) = after.strip_prefix('"') {
@@ -838,6 +881,40 @@ mod auth_header_tests {
             !sent.contains("X: y"),
             "a newline in authorization was sent upstream: {sent}"
         );
+    }
+
+    #[test]
+    fn forward_rejects_a_newline_in_the_upstream_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let upstream = format!("http://127.0.0.1:{port}/v1?x=1\r\nX-Injected: z");
+        let err = forward(&upstream, "{}", None);
+        assert!(err.is_err());
+        assert!(listener.accept().is_err());
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::read_http;
+
+    #[test]
+    fn a_space_before_the_colon_still_rejects_chunked() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\nTransfer-Encoding : chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+        assert!(read_http(&mut &raw[..]).is_err());
+    }
+
+    #[test]
+    fn a_chunked_request_is_rejected() {
+        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+        assert!(read_http(&mut &raw[..]).is_err());
+    }
+
+    #[test]
+    fn a_bad_request_length_is_rejected() {
+        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: no\r\n\r\n";
+        assert!(read_http(&mut &raw[..]).is_err());
     }
 }
 
