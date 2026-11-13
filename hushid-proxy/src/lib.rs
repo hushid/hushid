@@ -8,6 +8,7 @@
 //! body. A redirect is not followed. A streamed response is not forwarded.
 
 use hushid::{Glossary, JsonError, Vault};
+use std::fmt;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -28,6 +29,18 @@ pub enum ProxyError {
     Upstream,
     Vault(hushid::VaultError),
     Json(JsonError),
+}
+
+impl fmt::Display for ProxyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProxyError::Session => write!(f, "session"),
+            ProxyError::Body => write!(f, "body"),
+            ProxyError::Upstream => write!(f, "upstream"),
+            ProxyError::Vault(err) => write!(f, "vault: {err}"),
+            ProxyError::Json(err) => write!(f, "body: {err}"),
+        }
+    }
 }
 
 pub fn shield_chat(
@@ -754,6 +767,21 @@ fn json_escape(text: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod proxy_error_tests {
+    use super::ProxyError;
+
+    #[test]
+    fn proxy_error_includes_the_vault_io_error() {
+        let err = ProxyError::Vault(hushid::VaultError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "vault-file",
+        )));
+        let text = err.to_string();
+        assert!(text.contains("vault-file"), "{text}");
+    }
 }
 
 #[cfg(test)]

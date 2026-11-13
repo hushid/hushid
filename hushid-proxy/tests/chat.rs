@@ -658,3 +658,110 @@ fn proxy_returns_a_redirect_instead_of_following_it() {
     assert!(response.contains("slow"), "{response}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn proxy_bin() -> String {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_hushid_proxy") {
+        return path.to_string();
+    }
+    if let Some(path) = option_env!("CARGO_BIN_EXE_hushid-proxy") {
+        return path.to_string();
+    }
+    std::env::var("CARGO_BIN_EXE_hushid-proxy")
+        .or_else(|_| std::env::var("CARGO_BIN_EXE_hushid_proxy"))
+        .expect("CARGO_BIN_EXE_hushid_proxy")
+}
+
+fn proxy_cmd() -> std::process::Command {
+    let mut cmd = std::process::Command::new(proxy_bin());
+    cmd.env_remove("HUSHID_VAULT_DIR");
+    cmd.env_remove("HUSHID_GLOSSARY");
+    cmd
+}
+
+fn proxy_cli_text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[test]
+fn proxy_cli_help() {
+    for flag in ["--help", "-h"] {
+        let output = proxy_cmd().arg(flag).output().unwrap();
+        let stdout = proxy_cli_text(&output.stdout);
+        let stderr = proxy_cli_text(&output.stderr);
+        assert!(
+            output.status.success(),
+            "{flag} code={:?} stdout={stdout} stderr={stderr}",
+            output.status.code()
+        );
+        for name in ["--upstream", "--vault-dir", "--listen", "--glossary"] {
+            assert!(stdout.contains(name), "{flag} stdout={stdout}");
+        }
+        assert!(!stdout.contains("missing value"), "{flag} stdout={stdout}");
+        assert!(!stderr.contains("missing value"), "{flag} stderr={stderr}");
+    }
+}
+
+#[test]
+fn proxy_cli_unknown() {
+    let output = proxy_cmd().arg("--nope").output().unwrap();
+    let stderr = proxy_cli_text(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout={} stderr={stderr}",
+        proxy_cli_text(&output.stdout)
+    );
+    assert!(stderr.contains("unknown argument --nope"), "{stderr}");
+    assert!(stderr.contains("--upstream"), "{stderr}");
+}
+
+#[test]
+fn proxy_cli_missing_glossary() {
+    let dir =
+        std::env::temp_dir().join(format!("hushid-proxy-cli-glossary-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("missing-glossary.txt");
+    let _ = std::fs::remove_file(&missing);
+    let output = proxy_cmd()
+        .arg("--upstream")
+        .arg("http://127.0.0.1:9")
+        .arg("--vault-dir")
+        .arg(&dir)
+        .arg("--glossary")
+        .arg(&missing)
+        .output()
+        .unwrap();
+    let stderr = proxy_cli_text(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout={} stderr={stderr}",
+        proxy_cli_text(&output.stdout)
+    );
+    assert!(stderr.contains(&missing.display().to_string()), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn proxy_cli_bad_listen() {
+    let dir = std::env::temp_dir().join(format!("hushid-proxy-cli-listen-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let output = proxy_cmd()
+        .arg("--listen")
+        .arg("not-a-socket")
+        .arg("--upstream")
+        .arg("http://127.0.0.1:9")
+        .arg("--vault-dir")
+        .arg(&dir)
+        .output()
+        .unwrap();
+    let stderr = proxy_cli_text(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout={} stderr={stderr}",
+        proxy_cli_text(&output.stdout)
+    );
+    assert!(stderr.contains("not-a-socket"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
