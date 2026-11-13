@@ -28,7 +28,7 @@ fn surrogate_email_reads_as_an_email_and_restores() {
 fn surrogate_kinds_hide_the_original_bytes() {
     let glossary = Glossary::from_terms(["Elodie"]);
     let samples = [
-        ("416-555-0123", "555-555-"),
+        ("416-555-0123", "-"),
         ("4111 1111 1111 1111", " "),
         ("SIN 130 692 544", "SIN "),
         ("born Jan 2, 1990", "born "),
@@ -61,6 +61,39 @@ fn surrogate_kinds_hide_the_original_bytes() {
     assert!(out.starts_with("Ask "), "{out}");
     assert!(out.ends_with(" today."), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), "Ask Elodie today.");
+}
+
+#[test]
+fn surrogate_digits_keep_the_detected_shape() {
+    for surface in [
+        "4111.1111.1111.1111",
+        "3782 822463 10005",
+        "SIN 130.692.544",
+        "+44 20 7946 0958",
+    ] {
+        let mut vault = Vault::new();
+        let (out, _) =
+            shield_text_with(&mut vault, &Glossary::empty(), surface, Operator::Surrogate).unwrap();
+        let marks = |text: &str| {
+            text.chars()
+                .filter(|ch| !ch.is_ascii_digit())
+                .collect::<String>()
+        };
+        let digits = |text: &str| {
+            text.chars()
+                .filter(|ch| ch.is_ascii_digit())
+                .collect::<String>()
+        };
+        assert_eq!(marks(&out), marks(surface), "{surface} -> {out}");
+        assert_eq!(
+            digits(&out).len(),
+            digits(surface).len(),
+            "{surface} -> {out}"
+        );
+        assert_ne!(digits(&out), digits(surface), "{surface} -> {out}");
+        assert!(!out.contains("555-555-"), "{surface} -> {out}");
+        assert_eq!(vault.restore_write(&out).unwrap(), surface);
+    }
 }
 
 #[test]

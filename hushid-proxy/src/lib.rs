@@ -2,7 +2,10 @@
 //!
 //! The session id arrives on `X-Hushid-Session`. Message strings use the
 //! same vault rules as the library. The clear request is not written beside
-//! the vault file.
+//! the vault file. The upstream may be `http` or `https`. A URL with no
+//! port uses 80 or 443. A query string stays on the chat path, and a
+//! fragment is dropped. The upstream status is returned with a restored
+//! body. A redirect is not followed.
 
 use hushid::{Glossary, JsonError, Vault};
 use std::fs;
@@ -125,62 +128,135 @@ impl Proxy {
             return http_response(500, br#"{"error":"vault"}"#);
         }
         let upstream = match forward(&self.upstream, &shielded, request.header("authorization")) {
-            Ok(body) => body,
+            Ok(reply) => reply,
             Err(_) => return http_response(502, br#"{"error":"upstream"}"#),
         };
-        let restored = match std::str::from_utf8(&upstream) {
+        let restored = match std::str::from_utf8(&upstream.body) {
             Ok(text) => restore_chat(text, &vault).unwrap_or_else(|_| text.to_string()),
-            Err(_) => return http_response(502, br#"{"error":"upstream"}"#),
+            Err(_) => String::from_utf8_lossy(&upstream.body).into_owned(),
         };
-        http_response(200, restored.as_bytes())
+        http_response(upstream.status, restored.as_bytes())
     }
+}
+
+pub struct UpstreamReply {
+    pub status: u16,
+    pub body: Vec<u8>,
 }
 
 pub fn forward(
     upstream: &str,
     body: &str,
     authorization: Option<&str>,
-) -> Result<Vec<u8>, ProxyError> {
-    let rest = upstream
-        .strip_prefix("http://")
-        .ok_or(ProxyError::Upstream)?;
-    let (host, path_prefix) = rest.split_once('/').unwrap_or((rest, ""));
-    let path = if path_prefix.is_empty() {
-        "/v1/chat/completions".to_string()
-    } else {
-        format!("/{path_prefix}/v1/chat/completions")
+) -> Result<UpstreamReply, ProxyError> {
+    let url = completions_url(upstream)?;
+    let request = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(30))
+        .redirects(0)
+        .build()
+        .post(&url)
+        .set("Content-Type", "application/json");
+    let request = match authorization {
+        Some(value) => request.set("Authorization", value),
+        None => request,
     };
-    let mut stream = TcpStream::connect(host).map_err(|_| ProxyError::Upstream)?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+    let response = match request.send_string(body) {
+        Ok(response) => response,
+        Err(ureq::Error::Status(_, response)) => response,
+        Err(_) => return Err(ProxyError::Upstream),
+    };
+    let status = response.status();
+    let mut body = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_BODY as u64)
+        .read_to_end(&mut body)
         .map_err(|_| ProxyError::Upstream)?;
-    let mut headers = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
-        body.len()
-    );
-    if let Some(authorization) = authorization {
-        headers.push_str("Authorization: ");
-        headers.push_str(authorization);
-        headers.push_str("\r\n");
-    }
-    headers.push_str("\r\n");
-    stream
-        .write_all(headers.as_bytes())
-        .map_err(|_| ProxyError::Upstream)?;
-    stream
-        .write_all(body.as_bytes())
-        .map_err(|_| ProxyError::Upstream)?;
-    let response = read_http(&mut stream).map_err(|_| ProxyError::Upstream)?;
-    if response.status != 200 {
+    Ok(UpstreamReply { status, body })
+}
+
+pub(crate) fn completions_url(upstream: &str) -> Result<String, ProxyError> {
+    let (scheme, rest, default_port) = if let Some(rest) = upstream.strip_prefix("https://") {
+        ("https", rest, 443)
+    } else if let Some(rest) = upstream.strip_prefix("http://") {
+        ("http", rest, 80)
+    } else {
+        return Err(ProxyError::Upstream);
+    };
+    if rest.is_empty() || rest.starts_with('/') {
         return Err(ProxyError::Upstream);
     }
-    Ok(response.body)
+    let (rest, query) = split_query(rest);
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err(ProxyError::Upstream);
+    }
+    let (hostport, prefix) = match rest.split_once('/') {
+        Some((host, path)) => (host, path),
+        None => (rest, ""),
+    };
+    let hostport = host_with_port(hostport, default_port)?;
+    let mut url = format!("{scheme}://{hostport}{}", chat_path(prefix));
+    if let Some(query) = query {
+        url.push('?');
+        url.push_str(query);
+    }
+    Ok(url)
+}
+
+fn split_query(rest: &str) -> (&str, Option<&str>) {
+    let without_fragment = rest.split('#').next().unwrap_or(rest);
+    match without_fragment.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (without_fragment, None),
+    }
+}
+
+fn host_with_port(hostport: &str, default_port: u16) -> Result<String, ProxyError> {
+    if hostport.is_empty() {
+        return Err(ProxyError::Upstream);
+    }
+    if let Some(rest) = hostport.strip_prefix('[') {
+        if let Some((host, port)) = rest.rsplit_once("]:") {
+            parse_port(port)?;
+            return Ok(format!("[{host}]:{port}"));
+        }
+        let host = rest.trim_end_matches(']');
+        if host.is_empty() {
+            return Err(ProxyError::Upstream);
+        }
+        return Ok(format!("[{host}]:{default_port}"));
+    }
+    if let Some((host, port)) = hostport.rsplit_once(':') {
+        if !host.is_empty() && parse_port(port).is_ok() {
+            return Ok(hostport.to_string());
+        }
+    }
+    Ok(format!("{hostport}:{default_port}"))
+}
+
+fn parse_port(port: &str) -> Result<u16, ProxyError> {
+    port.parse().map_err(|_| ProxyError::Upstream)
+}
+
+fn chat_path(prefix: &str) -> String {
+    let prefix = prefix.trim_matches('/');
+    if prefix.is_empty() {
+        return "/v1/chat/completions".to_string();
+    }
+    let path = format!("/{prefix}");
+    let path = path.trim_end_matches('/');
+    if path.ends_with("/v1/chat/completions") {
+        return path.to_string();
+    }
+    if path.ends_with("/v1") {
+        return format!("{path}/chat/completions");
+    }
+    format!("{path}/v1/chat/completions")
 }
 
 struct HttpRequest {
     method: String,
     path: String,
-    status: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
@@ -222,11 +298,10 @@ fn read_http(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
     let mut parts = start.split(' ');
     let first = parts.next().unwrap_or("");
     let second = parts.next().unwrap_or("");
-    let (method, path, status) = if first.starts_with("HTTP/") {
-        let status = second.parse().unwrap_or(0);
-        (String::new(), String::new(), status)
+    let (method, path) = if first.starts_with("HTTP/") {
+        (String::new(), String::new())
     } else {
-        (first.to_string(), second.to_string(), 0)
+        (first.to_string(), second.to_string())
     };
     let mut headers = Vec::new();
     let mut length = 0usize;
@@ -258,7 +333,6 @@ fn read_http(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
     Ok(HttpRequest {
         method,
         path,
-        status,
         headers,
         body,
     })
@@ -436,4 +510,54 @@ fn json_escape(text: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::completions_url;
+
+    #[test]
+    fn default_ports_and_chat_path() {
+        assert_eq!(
+            completions_url("http://example.com").unwrap(),
+            "http://example.com:80/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("https://example.com").unwrap(),
+            "https://example.com:443/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("http://127.0.0.1:9").unwrap(),
+            "http://127.0.0.1:9/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("http://127.0.0.1:9/v1").unwrap(),
+            "http://127.0.0.1:9/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("https://api.example/v1/chat/completions").unwrap(),
+            "https://api.example:443/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("https://api.example/v1/chat/completions?stream=false").unwrap(),
+            "https://api.example:443/v1/chat/completions?stream=false"
+        );
+        assert_eq!(
+            completions_url("http://127.0.0.1:9/v1?x=1").unwrap(),
+            "http://127.0.0.1:9/v1/chat/completions?x=1"
+        );
+        assert_eq!(
+            completions_url("http://example.com?x=1").unwrap(),
+            "http://example.com:80/v1/chat/completions?x=1"
+        );
+        assert_eq!(
+            completions_url("https://api.example/v1/chat/completions#frag").unwrap(),
+            "https://api.example:443/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("http://[::1]:9/v1").unwrap(),
+            "http://[::1]:9/v1/chat/completions"
+        );
+        assert!(completions_url("ftp://example.com").is_err());
+    }
 }
