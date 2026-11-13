@@ -112,7 +112,13 @@ impl Proxy {
     }
 
     fn handle(&self, request: &HttpRequest) -> String {
-        if request.method != "POST" || request.path != "/v1/chat/completions" {
+        let path = request
+            .path
+            .split_once('?')
+            .map(|(path, _)| path)
+            .unwrap_or(&request.path);
+        let path = path.split_once('#').map(|(path, _)| path).unwrap_or(path);
+        if request.method != "POST" || path != "/v1/chat/completions" {
             return http_response(404, br#"{"error":"not found"}"#);
         }
         let Some(session) = request.header(SESSION_HEADER) else {

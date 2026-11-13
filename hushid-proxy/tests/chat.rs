@@ -111,6 +111,96 @@ fn proxy_round_trip_hides_the_email_from_upstream() {
 }
 
 #[test]
+#[allow(clippy::while_let_loop)]
+fn proxy_round_trip_hides_the_email_when_the_path_has_a_query() {
+    let upstream_body = br#"{"choices":[{"message":{"content":"TOKEN"}}]}"#;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_body = std::sync::Arc::clone(&seen);
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let Ok(read) = stream.read(&mut chunk) else {
+                break;
+            };
+            if read == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..read]);
+            if buf.windows(4).any(|window| window == b"\r\n\r\n") {
+                let header_end = buf
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .unwrap();
+                let header = std::str::from_utf8(&buf[..header_end]).unwrap_or("");
+                let length = header
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or(0);
+                while buf.len() < header_end + 4 + length {
+                    let read = stream.read(&mut chunk).unwrap_or(0);
+                    if read == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..read]);
+                }
+                let body = &buf[header_end + 4..header_end + 4 + length];
+                *seen_body.lock().unwrap() = body.to_vec();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    upstream_body.len(),
+                    std::str::from_utf8(upstream_body).unwrap()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                break;
+            }
+        }
+    });
+    let dir = std::env::temp_dir().join(format!("hushid-proxy-query-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let proxy = Proxy::bind(
+        "127.0.0.1:0",
+        &format!("http://127.0.0.1:{port}"),
+        &dir,
+        Glossary::empty(),
+    )
+    .unwrap();
+    let proxy_port = proxy.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let _ = proxy.serve_one();
+    });
+    let body = r#"{"model":"local","messages":[{"role":"user","content":"ada@example.com"}]}"#;
+    let request = format!(
+        "POST /v1/chat/completions?stream=false HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Hushid-Session: demo\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let upstream = String::from_utf8(seen.lock().unwrap().clone()).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(!upstream.contains("ada@example.com"), "{upstream}");
+    assert!(upstream.contains("h1_email_"), "{upstream}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn mcp_shield_and_restore() {
     let dir = std::env::temp_dir().join(format!("hushid-mcp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
