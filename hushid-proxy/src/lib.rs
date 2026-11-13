@@ -5,7 +5,7 @@
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
 //! fragment is dropped. The upstream status is returned with a restored
-//! body. A redirect is not followed.
+//! body. A redirect is not followed. A streamed response is not forwarded.
 
 use hushid::{Glossary, JsonError, Vault};
 use std::fs;
@@ -14,6 +14,9 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
+
+#[cfg(test)]
+static TEST_TLS_ROOT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
 
 const SESSION_HEADER: &str = "x-hushid-session";
 const MAX_BODY: usize = 1024 * 1024;
@@ -168,7 +171,7 @@ pub fn forward(
         .map_err(|_| ProxyError::Upstream)?;
     if https {
         let name = tls_dns_name(hostport)?;
-        let connector = native_tls::TlsConnector::new().map_err(|_| ProxyError::Upstream)?;
+        let connector = tls_connector()?;
         let mut stream = connector
             .connect(&name, stream)
             .map_err(|_| ProxyError::Upstream)?;
@@ -210,6 +213,21 @@ fn exchange(
         status: response.status,
         body: response.body,
     })
+}
+
+fn tls_connector() -> Result<native_tls::TlsConnector, ProxyError> {
+    #[cfg(test)]
+    if let Some(pem) = TEST_TLS_ROOT
+        .lock()
+        .map_err(|_| ProxyError::Upstream)?
+        .clone()
+    {
+        let cert = native_tls::Certificate::from_pem(&pem).map_err(|_| ProxyError::Upstream)?;
+        let mut builder = native_tls::TlsConnector::builder();
+        builder.add_root_certificate(cert);
+        return builder.build().map_err(|_| ProxyError::Upstream);
+    }
+    native_tls::TlsConnector::new().map_err(|_| ProxyError::Upstream)
 }
 
 fn tls_dns_name(hostport: &str) -> Result<String, ProxyError> {
@@ -617,5 +635,174 @@ mod url_tests {
             "http://[::1]:9/v1/chat/completions"
         );
         assert!(completions_url("ftp://example.com").is_err());
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::{forward, Proxy, TEST_TLS_ROOT};
+    use hushid::Glossary;
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::path::Path;
+    use std::process::Command;
+    use std::time::Duration;
+
+    struct ClearRoot;
+
+    impl Drop for ClearRoot {
+        fn drop(&mut self) {
+            if let Ok(mut root) = TEST_TLS_ROOT.lock() {
+                *root = None;
+            }
+        }
+    }
+
+    fn local_tls_material(dir: &Path) -> (Vec<u8>, Vec<u8>) {
+        let cert = dir.join("cert.pem");
+        let key = dir.join("key.pem");
+        let p12 = dir.join("identity.p12");
+        let req = Command::new("openssl")
+            .args(["req", "-x509", "-newkey", "rsa:2048", "-keyout"])
+            .arg(&key)
+            .arg("-out")
+            .arg(&cert)
+            .args([
+                "-days",
+                "1",
+                "-nodes",
+                "-subj",
+                "/CN=localhost",
+                "-addext",
+                "subjectAltName=DNS:localhost",
+                "-addext",
+                "basicConstraints=critical,CA:TRUE",
+                "-addext",
+                "keyUsage=digitalSignature,keyEncipherment,keyCertSign",
+                "-addext",
+                "extendedKeyUsage=serverAuth",
+            ])
+            .status()
+            .expect("openssl req");
+        assert!(req.success(), "openssl req");
+        let export = Command::new("openssl")
+            .args(["pkcs12", "-export", "-passout", "pass:test"])
+            .arg("-out")
+            .arg(&p12)
+            .arg("-inkey")
+            .arg(&key)
+            .arg("-in")
+            .arg(&cert)
+            .status()
+            .expect("openssl pkcs12");
+        assert!(export.success(), "openssl pkcs12");
+        (std::fs::read(&cert).unwrap(), std::fs::read(&p12).unwrap())
+    }
+
+    #[test]
+    fn https_upstream_does_not_use_cleartext() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut buf = [0u8; 8];
+            let _ = stream.read(&mut buf);
+            if buf.starts_with(b"POST") {
+                let body = br#"{"ok":true}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+        assert!(forward(&format!("https://127.0.0.1:{port}/v1"), "{}", None).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::while_let_loop)]
+    fn proxy_completes_a_tls_handshake() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-tls-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (cert_pem, p12) = local_tls_material(&dir);
+        let identity = native_tls::Identity::from_pkcs12(&p12, "test").unwrap();
+        let acceptor = native_tls::TlsAcceptor::new(identity).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_body = std::sync::Arc::clone(&seen);
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut stream = acceptor.accept(stream).unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 2048];
+            loop {
+                let Ok(read) = stream.read(&mut chunk) else {
+                    break;
+                };
+                if read == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..read]);
+                if buf.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let header_end = buf
+                        .windows(4)
+                        .position(|window| window == b"\r\n\r\n")
+                        .unwrap();
+                    let headers = String::from_utf8_lossy(&buf[..header_end]);
+                    let length = headers.lines().find_map(|line| {
+                        line.split_once(':')
+                            .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                    });
+                    if length.is_some_and(|length| buf.len() >= header_end + 4 + length) {
+                        break;
+                    }
+                }
+            }
+            *seen_body.lock().unwrap() = buf;
+            let body = r#"{"ok":true}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        *TEST_TLS_ROOT.lock().unwrap() = Some(cert_pem);
+        let _clear = ClearRoot;
+        let vault_dir = dir.join("vault");
+        std::fs::create_dir_all(&vault_dir).unwrap();
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("https://localhost:{port}/v1"),
+            &vault_dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let proxy_port = proxy.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let _ = proxy.serve_one();
+        });
+        let body = r#"{"model":"local","messages":[{"role":"user","content":"ada@example.com"}]}"#;
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Hushid-Session: demo\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        let upstream = String::from_utf8(seen.lock().unwrap().clone()).unwrap();
+        assert!(!upstream.contains("ada@example.com"), "{upstream}");
+        assert!(upstream.contains("h1_email_"), "{upstream}");
+        assert!(response.starts_with("HTTP/1.1 200"), "{response:?}");
+        assert!(response.contains("ok"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
