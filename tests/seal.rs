@@ -17,11 +17,17 @@ fn seal_round_trips_the_vault_and_the_clear_transcript() {
     assert_eq!(opened.restore_write(&projection).unwrap(), clear[0]);
     let mut wrong = key;
     wrong[0] ^= 1;
-    assert!(hushid::open_sealed(&sealed, &wrong).is_err());
+    let wrong_open = hushid::open_sealed(&sealed, &wrong).unwrap_err();
+    assert_eq!(wrong_open.to_string(), "sealed transcript cannot be opened");
     let mut torn = sealed.clone();
     let last = torn.len() - 1;
     torn[last] ^= 1;
-    assert!(hushid::open_sealed(&torn, &key).is_err());
+    let torn_open = hushid::open_sealed(&torn, &key).unwrap_err();
+    assert_eq!(torn_open.to_string(), "sealed transcript cannot be opened");
+    let short = hushid::open_sealed(&[], &key).unwrap_err();
+    assert_eq!(short.to_string(), "sealed transcript cannot be opened");
+    let bare = hushid::open_sealed(b"not-a-seal", &key).unwrap_err();
+    assert_eq!(bare.to_string(), "sealed transcript cannot be opened");
 }
 
 fn email_bytes() -> &'static [u8] {

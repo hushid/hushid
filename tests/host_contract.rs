@@ -1,7 +1,7 @@
 use hushid::{
     accept_non_text, format_token, parse_identifiers_config, restore_json_write,
     shield_json_strings, shield_text, shielding_active, ArgumentBuffer, Glossary, HeldStream,
-    Judgment, Kind, Mode, Session, Sink, Vault,
+    JsonError, Judgment, Kind, Mode, RestoreError, Session, Sink, Vault,
 };
 use std::fs;
 use std::path::Path;
@@ -93,13 +93,12 @@ fn json_strings_are_shielded_and_numbers_stay() {
     assert!(out.contains("\"email\""), "{out}");
     assert!(out.contains("4111111111111111"), "{out}");
     assert!(!out.contains("a@b.co"), "{out}");
+    assert!(!out.contains("415-555-0134"), "{out}");
     assert_eq!(audit.email, 1);
     assert_eq!(audit.phone, 1);
     assert_eq!(audit.card, 0);
     let restored = restore_json_write(&vault, &out).unwrap();
-    assert!(restored.contains("a@b.co"), "{restored}");
-    assert!(restored.contains("415-555-0134"), "{restored}");
-    assert!(restored.contains("4111111111111111"), "{restored}");
+    assert_eq!(restored, input);
 }
 
 #[test]
@@ -110,8 +109,12 @@ fn json_key_token_restores_and_a_mangled_key_fails() {
         .unwrap();
     let input = format!(r#"{{"{token}":"ok"}}"#);
     let restored = restore_json_write(&vault, &input).unwrap();
-    assert!(restored.contains("a@b.co"), "{restored}");
-    assert!(restore_json_write(&vault, r#"{"h1_nope":"ok"}"#).is_err());
+    assert_eq!(restored, r#"{"a@b.co":"ok"}"#);
+    let err = restore_json_write(&vault, r#"{"h1_nope":"ok"}"#).unwrap_err();
+    assert!(
+        matches!(err, JsonError::Restore(RestoreError::Unresolved { .. })),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -138,8 +141,7 @@ fn json_number_sin_and_nested_document_round_trip() {
     assert_eq!(audit.email, 1, "{out}");
     assert!(!out.contains("a@b.co"), "{out}");
     let restored = restore_json_write(&vault, &out).unwrap();
-    assert!(restored.contains("a@b.co"), "{restored}");
-    assert!(!restored.contains("h1_"), "{restored}");
+    assert_eq!(restored, nested);
 }
 
 #[test]
@@ -157,7 +159,7 @@ fn deeply_nested_json_string_stays_plain_text() {
     assert_eq!(audit.email, 1, "{out}");
     assert!(!out.contains("a@b.co"), "{out}");
     let restored = restore_json_write(&vault, &out).unwrap();
-    assert!(restored.contains("a@b.co"), "{restored}");
+    assert_eq!(restored, input);
 }
 
 #[test]
