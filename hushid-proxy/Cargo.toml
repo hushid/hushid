@@ -14,7 +14,7 @@ ner = ["hushid/ner"]
 
 [dependencies]
 hushid = { path = ".." }
-ureq = { version = "2.12.1", default-features = false, features = ["native-tls"] }
+native-tls = "0.2.18"
 
 [lints.rust]
 unsafe_code = "forbid"

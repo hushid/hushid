@@ -150,29 +150,84 @@ pub fn forward(
     authorization: Option<&str>,
 ) -> Result<UpstreamReply, ProxyError> {
     let url = completions_url(upstream)?;
-    let request = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(30))
-        .redirects(0)
-        .build()
-        .post(&url)
-        .set("Content-Type", "application/json");
-    let request = match authorization {
-        Some(value) => request.set("Authorization", value),
-        None => request,
+    let (https, rest) = if let Some(rest) = url.strip_prefix("https://") {
+        (true, rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        (false, rest)
+    } else {
+        return Err(ProxyError::Upstream);
     };
-    let response = match request.send_string(body) {
-        Ok(response) => response,
-        Err(ureq::Error::Status(_, response)) => response,
-        Err(_) => return Err(ProxyError::Upstream),
-    };
-    let status = response.status();
-    let mut body = Vec::new();
-    response
-        .into_reader()
-        .take(MAX_BODY as u64)
-        .read_to_end(&mut body)
+    let (hostport, path) = rest.split_once('/').ok_or(ProxyError::Upstream)?;
+    let path = format!("/{path}");
+    let stream = TcpStream::connect(hostport).map_err(|_| ProxyError::Upstream)?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .map_err(|_| ProxyError::Upstream)?;
-    Ok(UpstreamReply { status, body })
+    stream
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|_| ProxyError::Upstream)?;
+    if https {
+        let name = tls_dns_name(hostport)?;
+        let connector = native_tls::TlsConnector::new().map_err(|_| ProxyError::Upstream)?;
+        let mut stream = connector
+            .connect(&name, stream)
+            .map_err(|_| ProxyError::Upstream)?;
+        exchange(&mut stream, &path, hostport, body, authorization)
+    } else {
+        let mut stream = stream;
+        exchange(&mut stream, &path, hostport, body, authorization)
+    }
+}
+
+fn exchange(
+    stream: &mut (impl Read + Write),
+    path: &str,
+    hostport: &str,
+    body: &str,
+    authorization: Option<&str>,
+) -> Result<UpstreamReply, ProxyError> {
+    let mut headers = format!(
+        "POST {path} HTTP/1.1\r\nHost: {hostport}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
+    if let Some(authorization) = authorization {
+        headers.push_str("Authorization: ");
+        headers.push_str(authorization);
+        headers.push_str("\r\n");
+    }
+    headers.push_str("\r\n");
+    stream
+        .write_all(headers.as_bytes())
+        .map_err(|_| ProxyError::Upstream)?;
+    stream
+        .write_all(body.as_bytes())
+        .map_err(|_| ProxyError::Upstream)?;
+    let response = read_http(stream).map_err(|_| ProxyError::Upstream)?;
+    if response.status == 0 {
+        return Err(ProxyError::Upstream);
+    }
+    Ok(UpstreamReply {
+        status: response.status,
+        body: response.body,
+    })
+}
+
+fn tls_dns_name(hostport: &str) -> Result<String, ProxyError> {
+    let host = if let Some(rest) = hostport.strip_prefix('[') {
+        rest.split_once("]:")
+            .map(|(host, _)| host)
+            .unwrap_or(rest.trim_end_matches(']'))
+    } else {
+        hostport
+            .rsplit_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(hostport)
+    };
+    let host = host.rsplit_once('@').map(|(_, host)| host).unwrap_or(host);
+    if host.is_empty() {
+        return Err(ProxyError::Upstream);
+    }
+    Ok(host.to_string())
 }
 
 pub(crate) fn completions_url(upstream: &str) -> Result<String, ProxyError> {
@@ -257,6 +312,7 @@ fn chat_path(prefix: &str) -> String {
 struct HttpRequest {
     method: String,
     path: String,
+    status: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
@@ -270,7 +326,7 @@ impl HttpRequest {
     }
 }
 
-fn read_http(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
+fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
     loop {
@@ -298,10 +354,11 @@ fn read_http(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
     let mut parts = start.split(' ');
     let first = parts.next().unwrap_or("");
     let second = parts.next().unwrap_or("");
-    let (method, path) = if first.starts_with("HTTP/") {
-        (String::new(), String::new())
+    let (method, path, status) = if first.starts_with("HTTP/") {
+        let status = second.parse().unwrap_or(0);
+        (String::new(), String::new(), status)
     } else {
-        (first.to_string(), second.to_string())
+        (first.to_string(), second.to_string(), 0)
     };
     let mut headers = Vec::new();
     let mut length = 0usize;
@@ -333,6 +390,7 @@ fn read_http(stream: &mut TcpStream) -> std::io::Result<HttpRequest> {
     Ok(HttpRequest {
         method,
         path,
+        status,
         headers,
         body,
     })
