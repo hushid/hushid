@@ -5,9 +5,12 @@ Exit 0 when every listed issue is one of these crates. Exit 1 when a
 real issue remains, or when a failed scan passed a stderr file and
 listed nothing to filter.
 
-The allowlist is the Rust toolchain set FOSSA misreads: the LLVM
-exception on compiler crates, LGPL on r-efi type definitions, the
-historical SSLeay marker in ring, and GPL test vectors in aws-lc-sys.
+The allowlist is the set FOSSA misreads: the LLVM exception on
+compiler crates and on dual-licensed crates that also offer plain
+Apache-2.0 or MIT, LGPL on r-efi type definitions, the historical
+SSLeay marker in ring, GPL test vectors in aws-lc-sys, and the Apple
+header marker in security-framework. That crate declares MIT or
+Apache-2.0.
 """
 
 import json
@@ -21,6 +24,9 @@ LLVM_EXCEPTION_CRATES = {
     "wit-bindgen-core",
     "wit-bindgen-rust",
     "wit-bindgen-rust-macro",
+    # Also Apache-2.0 OR MIT. FOSSA reports only the exception form.
+    "linux-raw-sys",
+    "rustix",
 }
 
 LLVM_EXCEPTION_LICENSES = {
@@ -44,6 +50,8 @@ def is_false_positive(pkg, lic):
     if pkg == "ring" and "ssleay" in lic.lower():
         return True
     if pkg == "aws-lc-sys" and lic.startswith("GPL-"):
+        return True
+    if pkg == "security-framework" and lic == "APSL-2.0":
         return True
     return False
 

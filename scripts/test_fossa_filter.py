@@ -71,6 +71,29 @@ def test_ring_and_aws_lc_filtered():
     assert rc == 0, out
 
 
+def test_proxy_tls_deps_filtered():
+    issues = [
+        {
+            "revisionId": "cargo+linux-raw-sys$0.12.1",
+            "license": "apache-2.0 WITH llvm-exception",
+            "type": "policy_flag",
+        },
+        {
+            "revisionId": "cargo+rustix$1.1.6",
+            "license": "apache-2.0 WITH llvm-exception",
+            "type": "policy_flag",
+        },
+        {
+            "revisionId": "cargo+security-framework$3.7.0",
+            "license": "APSL-2.0",
+            "type": "policy_conflict",
+        },
+    ]
+    rc, out = run_filter(issues)
+    assert rc == 0, out
+    assert "3 issue(s)" in out
+
+
 def test_unknown_crate_not_filtered():
     issues = [
         {"revisionId": "cargo+mystery-crate$0.1.0", "license": "apache-2.0 WITH llvm-exception", "type": "policy_conflict"},

@@ -1,11 +1,13 @@
 //! A reversible stand-in of the same kind.
 //!
 //! A token such as `h1_email_` breaks a sentence. This stand-in reads as
-//! that kind and is not the original bytes. The vault stores those bytes.
+//! that kind and is not the original bytes. A phone, a card, and a SIN
+//! keep the original separators and the original digit count. The vault
+//! stores those bytes.
 //! A secret still becomes `h1_secret` and is not stored. The stand-in is
 //! minted only for a finished span.
 
-use crate::digits::same_shape;
+use crate::digits::{luhn_kind, same_shape};
 use crate::token::{Kind, TokenError};
 
 const MONTHS: [&str; 12] = [
@@ -30,7 +32,7 @@ const NAME_VOWELS: &[u8] = b"AEIOU";
 pub(crate) fn mint(kind: Kind, surface: &str) -> Result<String, TokenError> {
     for _ in 0..16 {
         let raw = random_bytes(8)?;
-        let stand_in = match paint(kind, &raw) {
+        let stand_in = match paint(kind, surface, &raw) {
             Ok(stand_in) => stand_in,
             Err(TokenError::Digits) => continue,
             Err(err) => return Err(err),
@@ -42,12 +44,10 @@ pub(crate) fn mint(kind: Kind, surface: &str) -> Result<String, TokenError> {
     Err(TokenError::Surrogate)
 }
 
-fn paint(kind: Kind, raw: &[u8]) -> Result<String, TokenError> {
+fn paint(kind: Kind, surface: &str, raw: &[u8]) -> Result<String, TokenError> {
     match kind {
         Kind::Email => Ok(email(raw)),
-        Kind::Phone => Ok(phone(raw)),
-        Kind::Card => same_shape("0000 0000 0000 0000", true),
-        Kind::Sin => same_shape("000 000 000", true),
+        Kind::Phone | Kind::Card | Kind::Sin => same_shape(surface, luhn_kind(kind)),
         Kind::Ramq => Ok(ramq(raw)),
         Kind::Postal => Ok(postal(raw)),
         Kind::Address => Ok(address(raw)),
@@ -80,11 +80,6 @@ fn email(raw: &[u8]) -> String {
         .map(|byte| char::from(b'a' + (byte % 26)))
         .collect();
     format!("{local}@example.org")
-}
-
-fn phone(raw: &[u8]) -> String {
-    let line = (usize::from(raw[0]) << 8 | usize::from(raw[1])) % 10_000;
-    format!("555-555-{line:04}")
 }
 
 fn ramq(raw: &[u8]) -> String {

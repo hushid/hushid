@@ -285,16 +285,60 @@ fn every_listed_tool_judges_its_sink() {
         }
     }
     assert_eq!(classify("not_a_tool", false), Sink::LeavesMachine);
+    for absent in ["git_blame", "git_ls_files", "git_show"] {
+        assert_eq!(classify(absent, false), Sink::LeavesMachine, "{absent}");
+    }
+    assert!(matches!(
+        judge(&vault, "lsp_hover", &token, false),
+        Judgment::Run {
+            sink: Sink::LocalRead
+        }
+    ));
+    assert!(matches!(
+        judge(&vault, "scheduler_delete", &token, false),
+        Judgment::RestoreAndRun {
+            sink: Sink::LocalWrite,
+            ..
+        }
+    ));
+    assert!(matches!(
+        judge(&vault, "spawn_agent", &token, false),
+        Judgment::RestoreAndRun {
+            sink: Sink::LocalWrite,
+            ..
+        }
+    ));
+    assert!(matches!(
+        judge(&vault, "browser_navigate", &token, false),
+        Judgment::Refuse {
+            sink: Sink::LeavesMachine
+        }
+    ));
 }
 
 #[test]
 fn bline_builtin_tools_are_in_the_judge_list() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bline/crates/bline-tools/src/builtin");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bline");
+    let dir = root.join("crates/bline-tools/src/builtin");
     if !dir.is_dir() {
         return;
     }
     let mut found = BTreeSet::new();
     collect_tool_names(&dir, &mut found);
+    for relative in [
+        "crates/bline-lsp/src/tools.rs",
+        "crates/bline-core/src/scheduler_tools.rs",
+        "crates/bline-core/src/agent/tools.rs",
+        "crates/bline-core/src/agent/reflect_tool.rs",
+        "crates/bline-browser/src/tools.rs",
+        "crates/bline-app/src/mcp_manage_tool.rs",
+        "crates/bline-mcp/src/exposure.rs",
+    ] {
+        let path = root.join(relative);
+        if path.is_file() {
+            collect_tool_names(&path, &mut found);
+        }
+    }
     let known: BTreeSet<&str> = known_tool_sinks().iter().map(|(name, _)| *name).collect();
     let missing: Vec<_> = found
         .iter()
@@ -307,6 +351,18 @@ fn bline_builtin_tools_are_in_the_judge_list() {
 }
 
 fn collect_tool_names(dir: &Path, found: &mut BTreeSet<String>) {
+    if dir.is_file() {
+        let text = fs::read_to_string(dir).unwrap();
+        for line in text.lines() {
+            if line.trim() == "#[cfg(test)]" {
+                break;
+            }
+            if let Some(name) = tool_name_on_line(line) {
+                found.insert(name);
+            }
+        }
+        return;
+    }
     let entries = fs::read_dir(dir).unwrap();
     for entry in entries {
         let path = entry.unwrap().path();
