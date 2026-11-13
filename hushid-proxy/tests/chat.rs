@@ -214,6 +214,30 @@ fn mcp_tool_text_decodes_json_escapes() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn mcp_argument_brace_stays_in_the_string() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-brace-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let glossary = Glossary::empty();
+    let init = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+    )
+    .unwrap();
+    assert!(init.contains("2024-11-05"), "{init}");
+    let shielded = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"hello } a@b.co"}}}"#,
+    )
+    .unwrap();
+    assert!(shielded.contains("h1_email_"), "{shielded}");
+    assert!(!shielded.contains("a@b.co"), "{shielded}");
+    assert!(!shielded.contains("\"text\":\"\""), "{shielded}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn mcp_restore(dir: &std::path::Path, glossary: &Glossary, id: u32, text: &str) -> String {
     mcp_message(
         dir,

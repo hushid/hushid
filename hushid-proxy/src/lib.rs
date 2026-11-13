@@ -688,16 +688,34 @@ fn json_raw_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
         }
         None
     } else if after.starts_with('{') {
+        let bytes = after.as_bytes();
         let mut depth = 0i32;
-        for (index, ch) in after.char_indices() {
-            if ch == '{' {
+        let mut in_string = false;
+        let mut index = 0;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if byte == b'\\' {
+                    index += 2;
+                    continue;
+                }
+                if byte == b'"' {
+                    in_string = false;
+                }
+                index += 1;
+                continue;
+            }
+            if byte == b'"' {
+                in_string = true;
+            } else if byte == b'{' {
                 depth += 1;
-            } else if ch == '}' {
+            } else if byte == b'}' {
                 depth -= 1;
                 if depth == 0 {
                     return Some(&after[..=index]);
                 }
             }
+            index += 1;
         }
         None
     } else {
