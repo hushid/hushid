@@ -171,6 +171,14 @@ pub fn forward(
     body: &str,
     authorization: Option<&str>,
 ) -> Result<UpstreamReply, ProxyError> {
+    if let Some(value) = authorization {
+        if value
+            .bytes()
+            .any(|byte| byte == b'\r' || byte == b'\n' || byte == 0)
+        {
+            return Err(ProxyError::Upstream);
+        }
+    }
     let url = completions_url(upstream)?;
     let (https, rest) = if let Some(rest) = url.strip_prefix("https://") {
         (true, rest)
@@ -781,6 +789,55 @@ mod proxy_error_tests {
         )));
         let text = err.to_string();
         assert!(text.contains("vault-file"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod auth_header_tests {
+    use super::forward;
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn forward_rejects_a_newline_in_authorization() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_read = Arc::clone(&seen);
+        let reader = thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(500) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                if let Ok(read) = stream.read(&mut chunk) {
+                    buf.extend_from_slice(&chunk[..read]);
+                }
+                *seen_read.lock().unwrap() = buf;
+                return;
+            }
+        });
+        let err = forward(
+            &format!("http://127.0.0.1:{port}"),
+            "{}",
+            Some("Bearer a\nX: y"),
+        );
+        reader.join().unwrap();
+        assert!(err.is_err());
+        let sent = seen.lock().unwrap();
+        let sent = String::from_utf8_lossy(&sent);
+        assert!(
+            !sent.contains("X: y"),
+            "a newline in authorization was sent upstream: {sent}"
+        );
     }
 }
 
