@@ -340,6 +340,80 @@ fn proxy_returns_the_upstream_status_and_restores_the_body() {
 
 #[test]
 #[allow(clippy::while_let_loop)]
+fn proxy_refuses_an_upstream_response_without_content_length() {
+    let upstream_body = r#"{"completion":"not-forwarded"}"#;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 2048];
+        loop {
+            let Ok(read) = stream.read(&mut chunk) else {
+                break;
+            };
+            if read == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..read]);
+            let Some(header_end) = buf.windows(4).position(|window| window == b"\r\n\r\n") else {
+                continue;
+            };
+            let header = std::str::from_utf8(&buf[..header_end]).unwrap_or("");
+            let length = header
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            if buf.len() >= header_end + 4 + length {
+                break;
+            }
+        }
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{upstream_body}"
+        );
+        let _ = stream.write_all(response.as_bytes());
+    });
+    let dir = std::env::temp_dir().join(format!("hushid-proxy-nolen-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let proxy = Proxy::bind(
+        "127.0.0.1:0",
+        &format!("http://127.0.0.1:{port}"),
+        &dir,
+        Glossary::empty(),
+    )
+    .unwrap();
+    let proxy_port = proxy.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let _ = proxy.serve_one();
+    });
+    let body = r#"{"model":"local","messages":[{"role":"user","content":"hello"}]}"#;
+    let request = format!(
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Hushid-Session: demo\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+    assert!(response.contains("upstream"), "{response}");
+    assert!(!response.contains(upstream_body), "{response}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+#[allow(clippy::while_let_loop)]
 fn proxy_returns_a_redirect_instead_of_following_it() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();

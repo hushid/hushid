@@ -372,7 +372,8 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     let mut parts = start.split(' ');
     let first = parts.next().unwrap_or("");
     let second = parts.next().unwrap_or("");
-    let (method, path, status) = if first.starts_with("HTTP/") {
+    let is_response = first.starts_with("HTTP/");
+    let (method, path, status) = if is_response {
         let status = second.parse().unwrap_or(0);
         (String::new(), String::new(), status)
     } else {
@@ -380,6 +381,8 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     };
     let mut headers = Vec::new();
     let mut length = 0usize;
+    let mut saw_length = false;
+    let mut chunked = false;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -389,9 +392,27 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         };
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
-            length = value.parse().unwrap_or(0);
+            saw_length = true;
+            if is_response {
+                length = value
+                    .parse()
+                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "length"))?;
+            } else {
+                length = value.parse().unwrap_or(0);
+            }
+        } else if is_response
+            && name.eq_ignore_ascii_case("transfer-encoding")
+            && value.to_ascii_lowercase().contains("chunked")
+        {
+            chunked = true;
         }
         headers.push((name.to_string(), value.to_string()));
+    }
+    if is_response && (!saw_length || chunked) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "length",
+        ));
     }
     if length > MAX_BODY {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
