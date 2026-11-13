@@ -8,6 +8,7 @@
 //! body. A redirect is not followed. A streamed response is not forwarded.
 
 use hushid::{Glossary, JsonError, Vault};
+use std::fmt;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -28,6 +29,18 @@ pub enum ProxyError {
     Upstream,
     Vault(hushid::VaultError),
     Json(JsonError),
+}
+
+impl fmt::Display for ProxyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProxyError::Session => write!(f, "session"),
+            ProxyError::Body => write!(f, "body"),
+            ProxyError::Upstream => write!(f, "upstream"),
+            ProxyError::Vault(err) => write!(f, "vault: {err}"),
+            ProxyError::Json(err) => write!(f, "body: {err}"),
+        }
+    }
 }
 
 pub fn shield_chat(
@@ -112,7 +125,13 @@ impl Proxy {
     }
 
     fn handle(&self, request: &HttpRequest) -> String {
-        if request.method != "POST" || request.path != "/v1/chat/completions" {
+        let path = request
+            .path
+            .split_once('?')
+            .map(|(path, _)| path)
+            .unwrap_or(&request.path);
+        let path = path.split_once('#').map(|(path, _)| path).unwrap_or(path);
+        if request.method != "POST" || path != "/v1/chat/completions" {
             return http_response(404, br#"{"error":"not found"}"#);
         }
         let Some(session) = request.header(SESSION_HEADER) else {
@@ -152,6 +171,20 @@ pub fn forward(
     body: &str,
     authorization: Option<&str>,
 ) -> Result<UpstreamReply, ProxyError> {
+    if let Some(value) = authorization {
+        if value
+            .bytes()
+            .any(|byte| byte == b'\r' || byte == b'\n' || byte == 0)
+        {
+            return Err(ProxyError::Upstream);
+        }
+    }
+    if upstream
+        .bytes()
+        .any(|byte| byte == b'\r' || byte == b'\n' || byte == 0)
+    {
+        return Err(ProxyError::Upstream);
+    }
     let url = completions_url(upstream)?;
     let (https, rest) = if let Some(rest) = url.strip_prefix("https://") {
         (true, rest)
@@ -372,7 +405,8 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     let mut parts = start.split(' ');
     let first = parts.next().unwrap_or("");
     let second = parts.next().unwrap_or("");
-    let (method, path, status) = if first.starts_with("HTTP/") {
+    let is_response = first.starts_with("HTTP/");
+    let (method, path, status) = if is_response {
         let status = second.parse().unwrap_or(0);
         (String::new(), String::new(), status)
     } else {
@@ -380,6 +414,8 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     };
     let mut headers = Vec::new();
     let mut length = 0usize;
+    let mut saw_length = false;
+    let mut chunked = false;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -387,11 +423,25 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
+        let name = name.trim();
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
-            length = value.parse().unwrap_or(0);
+            saw_length = true;
+            length = value
+                .parse()
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "length"))?;
+        } else if name.eq_ignore_ascii_case("transfer-encoding")
+            && value.to_ascii_lowercase().contains("chunked")
+        {
+            chunked = true;
         }
         headers.push((name.to_string(), value.to_string()));
+    }
+    if chunked || (is_response && !saw_length) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "length",
+        ));
     }
     if length > MAX_BODY {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
@@ -403,6 +453,12 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
             break;
         }
         body.extend_from_slice(&chunk[..read]);
+    }
+    if is_response && body.len() < length {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "length",
+        ));
     }
     body.truncate(length);
     Ok(HttpRequest {
@@ -455,7 +511,7 @@ pub fn spawn_upstream(body: &'static [u8]) -> std::io::Result<String> {
 
 /// One MCP JSON-RPC message. `session` selects the vault file.
 pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Option<String> {
-    let method = json_string_field(message, "method")?;
+    let method = json_string_field(message, "method").ok().flatten()?;
     let id = json_raw_field(message, "id");
     if method == "notifications/initialized" {
         return None;
@@ -466,10 +522,22 @@ pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Opti
         r#"{"tools":[{"name":"shield","description":"Replace recognized identifiers.","inputSchema":{"type":"object"}},{"name":"restore","description":"Copy original bytes back for tokens this vault issued.","inputSchema":{"type":"object"}}]}"#.to_string()
     } else if method == "tools/call" {
         let params = json_object_field(message, "params").unwrap_or("");
-        let name = json_string_field(params, "name").unwrap_or_default();
+        let name = json_string_field(params, "name")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let arguments = json_object_field(params, "arguments").unwrap_or("");
-        let session = json_string_field(arguments, "session").unwrap_or_default();
-        let text = json_string_field(arguments, "text").unwrap_or_default();
+        let session = json_string_field(arguments, "session")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let text = match json_string_field(arguments, "text") {
+            Ok(value) => value.unwrap_or_default(),
+            Err(_) => {
+                let result = r#"{"content":[{"type":"text","text":"text"}],"isError":true}"#;
+                return Some(json_result(id, result));
+            }
+        };
         match mcp_tool(vault_dir, glossary, &name, &session, &text) {
             Ok(payload) => format!(r#"{{"content":[{{"type":"text","text":{payload}}}]}}"#),
             Err(err) => {
@@ -516,11 +584,110 @@ fn json_error(id: Option<&str>, message: &str) -> String {
     format!(r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"{message}"}}}}"#)
 }
 
-fn json_string_field(json: &str, field: &str) -> Option<String> {
-    let raw = json_raw_field(json, field)?;
+fn json_string_field(json: &str, field: &str) -> Result<Option<String>, &'static str> {
+    let Some(raw) = json_raw_field(json, field) else {
+        return Ok(None);
+    };
     let raw = raw.trim();
-    let raw = raw.strip_prefix('"')?.strip_suffix('"')?;
-    Some(raw.replace("\\\"", "\"").replace("\\\\", "\\"))
+    let Some(raw) = raw.strip_prefix('"').and_then(|raw| raw.strip_suffix('"')) else {
+        return Ok(None);
+    };
+    decode_json_string(raw).map(Some)
+}
+
+fn decode_json_string(raw: &str) -> Result<String, &'static str> {
+    let bytes = raw.as_bytes();
+    let mut index = 0;
+    let mut decoded = String::new();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => {
+                index += 1;
+                if index >= bytes.len() {
+                    return Err("escape");
+                }
+                match bytes[index] {
+                    b'"' => {
+                        decoded.push('"');
+                        index += 1;
+                    }
+                    b'\\' => {
+                        decoded.push('\\');
+                        index += 1;
+                    }
+                    b'/' => {
+                        decoded.push('/');
+                        index += 1;
+                    }
+                    b'b' => {
+                        decoded.push('\u{0008}');
+                        index += 1;
+                    }
+                    b'f' => {
+                        decoded.push('\u{000c}');
+                        index += 1;
+                    }
+                    b'n' => {
+                        decoded.push('\n');
+                        index += 1;
+                    }
+                    b'r' => {
+                        decoded.push('\r');
+                        index += 1;
+                    }
+                    b't' => {
+                        decoded.push('\t');
+                        index += 1;
+                    }
+                    b'u' => {
+                        index += 1;
+                        let unit = read_hex4(bytes, index)?;
+                        index += 4;
+                        let ch = if (0xD800..=0xDBFF).contains(&unit) {
+                            if bytes.get(index) != Some(&b'\\')
+                                || bytes.get(index + 1) != Some(&b'u')
+                            {
+                                return Err("escape");
+                            }
+                            index += 2;
+                            let low = read_hex4(bytes, index)?;
+                            index += 4;
+                            decode_surrogate(unit, low).ok_or("escape")?
+                        } else if (0xDC00..=0xDFFF).contains(&unit) {
+                            return Err("escape");
+                        } else {
+                            char::from_u32(u32::from(unit)).ok_or("escape")?
+                        };
+                        decoded.push(ch);
+                    }
+                    _ => return Err("escape"),
+                }
+            }
+            byte if byte < 0x20 => return Err("escape"),
+            _ => {
+                let ch = raw[index..].chars().next().ok_or("escape")?;
+                decoded.push(ch);
+                index += ch.len_utf8();
+            }
+        }
+    }
+    Ok(decoded)
+}
+
+fn read_hex4(bytes: &[u8], start: usize) -> Result<u16, &'static str> {
+    if start + 4 > bytes.len() {
+        return Err("escape");
+    }
+    let text = std::str::from_utf8(&bytes[start..start + 4]).map_err(|_| "escape")?;
+    u16::from_str_radix(text, 16).map_err(|_| "escape")
+}
+
+fn decode_surrogate(high: u16, low: u16) -> Option<char> {
+    if !(0xDC00..=0xDFFF).contains(&low) {
+        return None;
+    }
+    let value = 0x10000 + (((u32::from(high) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
+    char::from_u32(value)
 }
 
 fn json_object_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
@@ -533,9 +700,50 @@ fn json_object_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
     }
 }
 
+fn json_key_at(json: &str, needle: &str) -> Option<usize> {
+    let bytes = json.as_bytes();
+    let needle = needle.as_bytes();
+    let mut index = 0;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut found = None;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            if depth == 1 && bytes[index..].starts_with(needle) {
+                let rest = json[index + needle.len()..].trim_start();
+                if rest.starts_with(':') {
+                    found = Some(index);
+                }
+            }
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'{' || byte == b'[' {
+            depth += 1;
+        } else if byte == b'}' || byte == b']' {
+            depth -= 1;
+        }
+        index += 1;
+    }
+    found
+}
+
 fn json_raw_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
     let needle = format!("\"{field}\"");
-    let start = json.find(&needle)?;
+    let start = json_key_at(json, &needle)?;
     let after = json[start + needle.len()..].trim_start();
     let after = after.strip_prefix(':')?.trim_start();
     if let Some(rest) = after.strip_prefix('"') {
@@ -556,16 +764,34 @@ fn json_raw_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
         }
         None
     } else if after.starts_with('{') {
+        let bytes = after.as_bytes();
         let mut depth = 0i32;
-        for (index, ch) in after.char_indices() {
-            if ch == '{' {
+        let mut in_string = false;
+        let mut index = 0;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if byte == b'\\' {
+                    index += 2;
+                    continue;
+                }
+                if byte == b'"' {
+                    in_string = false;
+                }
+                index += 1;
+                continue;
+            }
+            if byte == b'"' {
+                in_string = true;
+            } else if byte == b'{' {
                 depth += 1;
-            } else if ch == '}' {
+            } else if byte == b'}' {
                 depth -= 1;
                 if depth == 0 {
                     return Some(&after[..=index]);
                 }
             }
+            index += 1;
         }
         None
     } else {
@@ -581,11 +807,115 @@ fn json_escape(text: &str) -> String {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
-            _ => out.push(ch),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => {
+                let value = u32::from(ch);
+                out.push_str(&format!("\\u{value:04x}"));
+            }
+            ch => out.push(ch),
         }
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod proxy_error_tests {
+    use super::ProxyError;
+
+    #[test]
+    fn proxy_error_includes_the_vault_io_error() {
+        let err = ProxyError::Vault(hushid::VaultError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "vault-file",
+        )));
+        let text = err.to_string();
+        assert!(text.contains("vault-file"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod auth_header_tests {
+    use super::forward;
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn forward_rejects_a_newline_in_authorization() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_read = Arc::clone(&seen);
+        let reader = thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(500) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                if let Ok(read) = stream.read(&mut chunk) {
+                    buf.extend_from_slice(&chunk[..read]);
+                }
+                *seen_read.lock().unwrap() = buf;
+                return;
+            }
+        });
+        let err = forward(
+            &format!("http://127.0.0.1:{port}"),
+            "{}",
+            Some("Bearer a\nX: y"),
+        );
+        reader.join().unwrap();
+        assert!(err.is_err());
+        let sent = seen.lock().unwrap();
+        let sent = String::from_utf8_lossy(&sent);
+        assert!(
+            !sent.contains("X: y"),
+            "a newline in authorization was sent upstream: {sent}"
+        );
+    }
+
+    #[test]
+    fn forward_rejects_a_newline_in_the_upstream_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let upstream = format!("http://127.0.0.1:{port}/v1?x=1\r\nX-Injected: z");
+        let err = forward(&upstream, "{}", None);
+        assert!(err.is_err());
+        assert!(listener.accept().is_err());
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::read_http;
+
+    #[test]
+    fn a_space_before_the_colon_still_rejects_chunked() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\nTransfer-Encoding : chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+        assert!(read_http(&mut &raw[..]).is_err());
+    }
+
+    #[test]
+    fn a_chunked_request_is_rejected() {
+        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+        assert!(read_http(&mut &raw[..]).is_err());
+    }
+
+    #[test]
+    fn a_bad_request_length_is_rejected() {
+        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: no\r\n\r\n";
+        assert!(read_http(&mut &raw[..]).is_err());
+    }
 }
 
 #[cfg(test)]
