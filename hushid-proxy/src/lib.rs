@@ -425,6 +425,12 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         }
         body.extend_from_slice(&chunk[..read]);
     }
+    if is_response && body.len() < length {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "length",
+        ));
+    }
     body.truncate(length);
     Ok(HttpRequest {
         method,
