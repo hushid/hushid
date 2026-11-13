@@ -455,7 +455,7 @@ pub fn spawn_upstream(body: &'static [u8]) -> std::io::Result<String> {
 
 /// One MCP JSON-RPC message. `session` selects the vault file.
 pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Option<String> {
-    let method = json_string_field(message, "method")?;
+    let method = json_string_field(message, "method").ok().flatten()?;
     let id = json_raw_field(message, "id");
     if method == "notifications/initialized" {
         return None;
@@ -466,10 +466,22 @@ pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Opti
         r#"{"tools":[{"name":"shield","description":"Replace recognized identifiers.","inputSchema":{"type":"object"}},{"name":"restore","description":"Copy original bytes back for tokens this vault issued.","inputSchema":{"type":"object"}}]}"#.to_string()
     } else if method == "tools/call" {
         let params = json_object_field(message, "params").unwrap_or("");
-        let name = json_string_field(params, "name").unwrap_or_default();
+        let name = json_string_field(params, "name")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let arguments = json_object_field(params, "arguments").unwrap_or("");
-        let session = json_string_field(arguments, "session").unwrap_or_default();
-        let text = json_string_field(arguments, "text").unwrap_or_default();
+        let session = json_string_field(arguments, "session")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let text = match json_string_field(arguments, "text") {
+            Ok(value) => value.unwrap_or_default(),
+            Err(_) => {
+                let result = r#"{"content":[{"type":"text","text":"text"}],"isError":true}"#;
+                return Some(json_result(id, result));
+            }
+        };
         match mcp_tool(vault_dir, glossary, &name, &session, &text) {
             Ok(payload) => format!(r#"{{"content":[{{"type":"text","text":{payload}}}]}}"#),
             Err(err) => {
@@ -516,11 +528,110 @@ fn json_error(id: Option<&str>, message: &str) -> String {
     format!(r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"{message}"}}}}"#)
 }
 
-fn json_string_field(json: &str, field: &str) -> Option<String> {
-    let raw = json_raw_field(json, field)?;
+fn json_string_field(json: &str, field: &str) -> Result<Option<String>, &'static str> {
+    let Some(raw) = json_raw_field(json, field) else {
+        return Ok(None);
+    };
     let raw = raw.trim();
-    let raw = raw.strip_prefix('"')?.strip_suffix('"')?;
-    Some(raw.replace("\\\"", "\"").replace("\\\\", "\\"))
+    let Some(raw) = raw.strip_prefix('"').and_then(|raw| raw.strip_suffix('"')) else {
+        return Ok(None);
+    };
+    decode_json_string(raw).map(Some)
+}
+
+fn decode_json_string(raw: &str) -> Result<String, &'static str> {
+    let bytes = raw.as_bytes();
+    let mut index = 0;
+    let mut decoded = String::new();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => {
+                index += 1;
+                if index >= bytes.len() {
+                    return Err("escape");
+                }
+                match bytes[index] {
+                    b'"' => {
+                        decoded.push('"');
+                        index += 1;
+                    }
+                    b'\\' => {
+                        decoded.push('\\');
+                        index += 1;
+                    }
+                    b'/' => {
+                        decoded.push('/');
+                        index += 1;
+                    }
+                    b'b' => {
+                        decoded.push('\u{0008}');
+                        index += 1;
+                    }
+                    b'f' => {
+                        decoded.push('\u{000c}');
+                        index += 1;
+                    }
+                    b'n' => {
+                        decoded.push('\n');
+                        index += 1;
+                    }
+                    b'r' => {
+                        decoded.push('\r');
+                        index += 1;
+                    }
+                    b't' => {
+                        decoded.push('\t');
+                        index += 1;
+                    }
+                    b'u' => {
+                        index += 1;
+                        let unit = read_hex4(bytes, index)?;
+                        index += 4;
+                        let ch = if (0xD800..=0xDBFF).contains(&unit) {
+                            if bytes.get(index) != Some(&b'\\')
+                                || bytes.get(index + 1) != Some(&b'u')
+                            {
+                                return Err("escape");
+                            }
+                            index += 2;
+                            let low = read_hex4(bytes, index)?;
+                            index += 4;
+                            decode_surrogate(unit, low).ok_or("escape")?
+                        } else if (0xDC00..=0xDFFF).contains(&unit) {
+                            return Err("escape");
+                        } else {
+                            char::from_u32(u32::from(unit)).ok_or("escape")?
+                        };
+                        decoded.push(ch);
+                    }
+                    _ => return Err("escape"),
+                }
+            }
+            byte if byte < 0x20 => return Err("escape"),
+            _ => {
+                let ch = raw[index..].chars().next().ok_or("escape")?;
+                decoded.push(ch);
+                index += ch.len_utf8();
+            }
+        }
+    }
+    Ok(decoded)
+}
+
+fn read_hex4(bytes: &[u8], start: usize) -> Result<u16, &'static str> {
+    if start + 4 > bytes.len() {
+        return Err("escape");
+    }
+    let text = std::str::from_utf8(&bytes[start..start + 4]).map_err(|_| "escape")?;
+    u16::from_str_radix(text, 16).map_err(|_| "escape")
+}
+
+fn decode_surrogate(high: u16, low: u16) -> Option<char> {
+    if !(0xDC00..=0xDFFF).contains(&low) {
+        return None;
+    }
+    let value = 0x10000 + (((u32::from(high) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
+    char::from_u32(value)
 }
 
 fn json_object_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
@@ -581,7 +692,13 @@ fn json_escape(text: &str) -> String {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
-            _ => out.push(ch),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => {
+                let value = u32::from(ch);
+                out.push_str(&format!("\\u{value:04x}"));
+            }
+            ch => out.push(ch),
         }
     }
     out.push('"');

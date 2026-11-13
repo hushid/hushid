@@ -151,6 +151,106 @@ fn mcp_shield_and_restore() {
 }
 
 #[test]
+fn mcp_tool_text_decodes_json_escapes() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-json-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let glossary = Glossary::empty();
+    let init = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+    )
+    .unwrap();
+    assert!(init.contains("2024-11-05"), "{init}");
+
+    let shielded = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"ada\u0040example.com"}}}"#,
+    )
+    .unwrap();
+    assert!(shielded.contains("h1_email_"), "{shielded}");
+    assert!(!shielded.contains("ada@example.com"), "{shielded}");
+    assert!(!shielded.contains("\\u0040"), "{shielded}");
+    let restored = mcp_restore(&dir, &glossary, 3, &mcp_text_content(&shielded));
+    assert_eq!(mcp_text_content(&restored), "ada@example.com");
+
+    let lined = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"ada@example.com\nnext"}}}"#,
+    )
+    .unwrap();
+    assert!(lined.contains("h1_email_"), "{lined}");
+    let token_at = lined.find("h1_email_").unwrap();
+    let next_at = lined[token_at..].find("next").unwrap() + token_at;
+    let between = &lined[token_at..next_at];
+    assert!(between.contains('\\'), "{lined}");
+    assert!(between.contains('n'), "{lined}");
+    assert!(!between.contains('\n'), "{lined:?}");
+    let lined_back = mcp_restore(&dir, &glossary, 5, &mcp_text_content(&lined));
+    assert_eq!(
+        mcp_text_content(&lined_back).replace("\\n", "\n"),
+        "ada@example.com\nnext"
+    );
+
+    let tabbed = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"line\t2"}}}"#,
+    )
+    .unwrap();
+    assert!(tabbed.contains("line\\t2"), "{tabbed}");
+    assert!(!tabbed.contains('\t'), "{tabbed:?}");
+
+    let lone = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"\uD800"}}}"#,
+    )
+    .unwrap();
+    assert!(lone.contains("isError"), "{lone}");
+    assert!(!lone.contains("h1_"), "{lone}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn mcp_restore(dir: &std::path::Path, glossary: &Glossary, id: u32, text: &str) -> String {
+    mcp_message(
+        dir,
+        glossary,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"restore","arguments":{{"session":"demo","text":"{text}"}}}}}}"#
+        ),
+    )
+    .unwrap()
+}
+
+fn mcp_text_content(json: &str) -> String {
+    let marker = "\"text\":\"";
+    let start = json.find(marker).unwrap() + marker.len();
+    let bytes = json.as_bytes();
+    let mut index = start;
+    let mut escaped = false;
+    while index < bytes.len() {
+        if escaped {
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'\\' {
+            escaped = true;
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'"' {
+            return json[start..index].to_string();
+        }
+        index += 1;
+    }
+    panic!("unterminated text in {json}");
+}
+
+#[test]
 #[allow(clippy::while_let_loop)]
 fn proxy_returns_the_upstream_status_and_restores_the_body() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
