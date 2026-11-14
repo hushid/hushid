@@ -3,8 +3,9 @@
 //! Shape: `h1_<kind>_<8 base32 chars><check>`.
 //!
 //! The payload alphabet is Crockford base32. `I` and `L` mean 1. `O` means 0.
-//! The check character is the sum of the kind's UTF-8 bytes and the eight
-//! payload values, modulo 32. A one-symbol change always changes that sum.
+//! ASCII case is the same value. The check character is the sum of the
+//! canonical kind name and the eight payload values, modulo 32. A change
+//! to a different value changes that sum.
 //! Restore accepts a token only when the check matches and this vault issued it.
 //! grok-4.7 copied this shape unchanged through Bline on 2026-11-09.
 

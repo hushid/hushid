@@ -1,4 +1,4 @@
-use hushid::{format_token, Kind, Vault};
+use hushid::{format_token, Kind, RestoreError, Vault};
 
 #[test]
 fn token_is_kind_plus_eight_symbols_and_a_check() {
@@ -60,6 +60,18 @@ fn uppercase_spelling_still_restores() {
     assert_eq!(
         vault.restore_write(&token.to_ascii_uppercase()).unwrap(),
         "a@b.co"
+    );
+}
+
+#[test]
+fn a_non_utf8_surface_names_the_token_not_the_stored_bytes() {
+    let mut vault = Vault::new();
+    let token = vault.issue(Kind::Email, &[0xff, 0xfe]).unwrap();
+    let err = vault.restore_write(&token).unwrap_err();
+    assert_eq!(err, RestoreError::NotUtf8 { at: 0 });
+    assert_eq!(
+        err.to_string(),
+        "stored surface for the token at byte 0 is not utf-8"
     );
 }
 
