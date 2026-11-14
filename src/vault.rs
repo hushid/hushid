@@ -9,10 +9,7 @@ use std::path::Path;
 
 const HEADER: &str = "hushid-vault 1";
 
-/// Maps a canonical token to the exact surface bytes.
-///
-/// Loading a missing file is an error. This type has no method that
-/// rebuilds the map by scanning a clear transcript.
+/// One issued surface. The map key on [`Vault`] is the canonical token.
 #[derive(Clone)]
 struct Entry {
     surface: Vec<u8>,
@@ -24,6 +21,10 @@ struct Entry {
     digits: Option<String>,
 }
 
+/// Maps each issued token to the exact surface bytes.
+///
+/// Loading a missing file is an error. This type has no method that
+/// rebuilds the map by scanning a clear transcript.
 #[derive(Clone)]
 pub struct Vault {
     entries: BTreeMap<String, Entry>,
@@ -86,7 +87,9 @@ impl fmt::Display for RestoreError {
         match self {
             RestoreError::Unresolved { at } => write!(f, "unresolved h1_ token at byte {at}"),
             RestoreError::SecretMark { at } => write!(f, "secret mark remains at byte {at}"),
-            RestoreError::NotUtf8 { at } => write!(f, "vault surface is not utf-8 at byte {at}"),
+            RestoreError::NotUtf8 { at } => {
+                write!(f, "stored surface for the token at byte {at} is not utf-8")
+            }
         }
     }
 }
