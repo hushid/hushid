@@ -87,10 +87,11 @@ fn ramq(raw: &[u8]) -> String {
         .iter()
         .map(|byte| char::from(b'A' + (byte % 26)))
         .collect();
-    let month = (raw[4] % 12) + 1;
-    let day = (raw[5] % 28) + 1;
-    let tail = (usize::from(raw[6]) << 8 | usize::from(raw[7])) % 10_000;
-    format!("{letters} {month:02}{day:02} {tail:04}")
+    let year = raw[4] % 100;
+    let month = (raw[5] % 12) + 1;
+    let day = (raw[6] % 28) + 1;
+    let seq = raw[7] % 100;
+    format!("{letters} {year:02}{month:02} {day:02}{seq:02}")
 }
 
 fn postal(raw: &[u8]) -> String {

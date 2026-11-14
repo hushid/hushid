@@ -8,6 +8,26 @@ fn shield(text: &str) -> (Vault, String, hushid::AuditRecord) {
 }
 
 #[test]
+fn surrogate_ramq_reads_as_a_health_number() {
+    let text = "see BOUF 9451 1419 next";
+    let (vault, out, audit) = shield(text);
+    assert_eq!(audit.ramq, 1, "{out}");
+    assert!(!out.contains("BOUF"), "{out}");
+    assert!(!out.contains("9451"), "{out}");
+    assert!(out.starts_with("see "), "{out}");
+    assert!(out.ends_with(" next"), "{out}");
+    assert_eq!(vault.restore_write(&out).unwrap(), text);
+    let stand_in = out
+        .strip_prefix("see ")
+        .unwrap()
+        .strip_suffix(" next")
+        .unwrap();
+    let (again, audit) = shield_text(&mut Vault::new(), &Glossary::empty(), stand_in).unwrap();
+    assert_eq!(audit.ramq, 1, "{stand_in} -> {again}");
+    assert!(again.starts_with("h1_ramq_"), "{again}");
+}
+
+#[test]
 fn surrogate_email_reads_as_an_email_and_restores() {
     let text = "Write to ada@example.com today.";
     let (vault, out, audit) = shield(text);
