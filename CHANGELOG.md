@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.2](https://github.com/hushid/hushid/compare/hushid-v0.1.1...hushid-v0.1.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* keep chat and MCP text intact ([#212](https://github.com/hushid/hushid/issues/212)) ([22ff985](https://github.com/hushid/hushid/commit/22ff985dbc3445c202a016ca3ce07fa50250a761))
+* keep surrogate shape, local sinks, and upstream status ([#208](https://github.com/hushid/hushid/issues/208)) ([99183b5](https://github.com/hushid/hushid/commit/99183b5b1de13757bd83944f238fd8ed3282b5c6))
+* put a RAMQ stand-in month and day in the detected slots ([#215](https://github.com/hushid/hushid/issues/215)) ([95d2aac](https://github.com/hushid/hushid/commit/95d2aac4ce04c1653529a0a726e33635c3b74f52))
+* read a chat response that closes without a length ([#217](https://github.com/hushid/hushid/issues/217)) ([8d8aa01](https://github.com/hushid/hushid/commit/8d8aa0121669e3e5f3d0539d38824c2da0bd00a3))
+* say which token has a non-UTF-8 surface ([#216](https://github.com/hushid/hushid/issues/216)) ([2dd3d63](https://github.com/hushid/hushid/commit/2dd3d63daba0d8ace843e413b47952069a35dafb))
+
 ## [0.1.1](https://github.com/hushid/hushid/compare/hushid-v0.1.0...hushid-v0.1.1) (2026-11-12)
 
 
