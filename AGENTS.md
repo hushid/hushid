@@ -19,8 +19,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo test --workspace --locked --features ner
-cargo +1.85.0 test --workspace --locked
-cargo +1.85.0 test --workspace --locked --features ner
+cargo +1.87.0 test --workspace --locked
+cargo +1.87.0 test --workspace --locked --features ner
 cargo deny check
 
 CI also runs the `token` and `json_restore` fuzz targets on nightly for 10 seconds each. Locally, put nightly first on `PATH`, then `cargo fuzz run token -- -max_total_time=10` and the same for `json_restore`.

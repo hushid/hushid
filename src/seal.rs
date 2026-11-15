@@ -37,10 +37,10 @@ pub fn seal(vault: &Vault, clear: &[String], key: &[u8; 32]) -> Result<Vec<u8>, 
     let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| SealError::Key)?;
     let mut nonce_bytes = [0u8; 24];
     getrandom::fill(&mut nonce_bytes).map_err(|_| SealError::Crypto)?;
-    let nonce = XNonce::from_slice(&nonce_bytes);
+    let nonce = XNonce::try_from(nonce_bytes.as_slice()).map_err(|_| SealError::Crypto)?;
     let ciphertext = cipher
         .encrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: &plain,
                 aad: AAD,
@@ -61,10 +61,10 @@ pub fn open(bytes: &[u8], key: &[u8; 32]) -> Result<(Vault, Vec<String>), SealEr
     let nonce_bytes = &bytes[MAGIC.len()..MAGIC.len() + 24];
     let ciphertext = &bytes[MAGIC.len() + 24..];
     let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| SealError::Key)?;
-    let nonce = XNonce::from_slice(nonce_bytes);
+    let nonce = XNonce::try_from(nonce_bytes).map_err(|_| SealError::Crypto)?;
     let plain = cipher
         .decrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad: AAD,

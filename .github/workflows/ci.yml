@@ -92,15 +92,15 @@ jobs:
         run: zizmor --persona=regular --min-severity=medium .github/workflows
 
       - name: Rust floor matches Cargo.toml
-        run: grep -q '^rust-version = "1.85"$' Cargo.toml
+        run: grep -q '^rust-version = "1.87"$' Cargo.toml
 
-      - name: Rust 1.85
+      - name: Rust 1.87
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: 1.85.0
+          toolchain: 1.87.0
 
-      - name: Test on Rust 1.85
+      - name: Test on Rust 1.87
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/hushid-msrv
