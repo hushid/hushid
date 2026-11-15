@@ -5,7 +5,10 @@
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
 //! fragment is dropped. The upstream status is returned with a restored
-//! body. A redirect is not followed. A streamed response is not forwarded.
+//! body. A response with no `Content-Length` is read until the connection
+//! closes, up to 1 MiB. A chunked body is assembled the same way. A body
+//! shorter than a declared `Content-Length` is refused. A redirect is not
+//! followed.
 
 use hushid::{Glossary, JsonError, Vault};
 use std::fmt;
@@ -437,30 +440,38 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         }
         headers.push((name.to_string(), value.to_string()));
     }
-    if chunked || (is_response && !saw_length) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "length",
-        ));
-    }
-    if length > MAX_BODY {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
-    }
-    let mut body = buf[header_end + 4..].to_vec();
-    while body.len() < length {
-        let read = stream.read(&mut chunk)?;
-        if read == 0 {
-            break;
+    let pending = buf[header_end + 4..].to_vec();
+    let body = if chunked {
+        if !is_response {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "length",
+            ));
         }
-        body.extend_from_slice(&chunk[..read]);
-    }
-    if is_response && body.len() < length {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "length",
-        ));
-    }
-    body.truncate(length);
+        decode_chunked(stream, &pending)?
+    } else if is_response && !saw_length {
+        read_until_close(stream, pending)?
+    } else {
+        if length > MAX_BODY {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
+        }
+        let mut body = pending;
+        while body.len() < length {
+            let read = stream.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..read]);
+        }
+        if is_response && body.len() < length {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "length",
+            ));
+        }
+        body.truncate(length);
+        body
+    };
     Ok(HttpRequest {
         method,
         path,
@@ -468,6 +479,108 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         headers,
         body,
     })
+}
+
+fn read_until_close(stream: &mut impl Read, mut body: Vec<u8>) -> std::io::Result<Vec<u8>> {
+    let mut chunk = [0u8; 2048];
+    loop {
+        if body.len() > MAX_BODY {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
+        }
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            return Ok(body);
+        }
+        let room = MAX_BODY.saturating_sub(body.len());
+        if read > room {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn decode_chunked(stream: &mut impl Read, pending: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut raw = pending.to_vec();
+    let mut filled = raw.len();
+    let mut pos = 0;
+    let mut decoded = Vec::new();
+    loop {
+        let line_end = loop {
+            if let Some(rel) = raw[pos..filled]
+                .windows(2)
+                .position(|window| window == b"\r\n")
+            {
+                break pos + rel;
+            }
+            if filled - pos > 64 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "chunk",
+                ));
+            }
+            if !read_more(stream, &mut raw, &mut filled)? {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "chunk",
+                ));
+            }
+        };
+        let line = std::str::from_utf8(&raw[pos..line_end])
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+        let size_text = line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_text, 16)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "chunk"))?;
+        pos = line_end + 2;
+        if size == 0 {
+            return Ok(decoded);
+        }
+        if decoded.len().saturating_add(size) > MAX_BODY {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
+        }
+        let need = pos
+            .checked_add(size)
+            .and_then(|end| end.checked_add(2))
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "chunk"))?;
+        while filled < need {
+            if !read_more(stream, &mut raw, &mut filled)? {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "chunk",
+                ));
+            }
+        }
+        decoded.extend_from_slice(&raw[pos..pos + size]);
+        if &raw[pos + size..need] != b"\r\n" {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "chunk",
+            ));
+        }
+        raw.drain(..need);
+        filled -= need;
+        pos = 0;
+    }
+}
+
+fn read_more(
+    stream: &mut impl Read,
+    raw: &mut Vec<u8>,
+    filled: &mut usize,
+) -> std::io::Result<bool> {
+    let mut chunk = [0u8; 2048];
+    let read = stream.read(&mut chunk)?;
+    if read == 0 {
+        return Ok(false);
+    }
+    if *filled + read > MAX_BODY + 64 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body"));
+    }
+    if *filled + read > raw.len() {
+        raw.resize(*filled + read, 0);
+    }
+    raw[*filled..*filled + read].copy_from_slice(&chunk[..read]);
+    *filled += read;
+    Ok(true)
 }
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {
@@ -898,11 +1011,53 @@ mod auth_header_tests {
 #[cfg(test)]
 mod header_tests {
     use super::read_http;
+    use std::io::Read;
+
+    struct ChunkFlood {
+        prefix: &'static [u8],
+        pos: usize,
+        extra: usize,
+    }
+
+    impl Read for ChunkFlood {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pos < self.prefix.len() {
+                let count = (self.prefix.len() - self.pos).min(buf.len());
+                buf[..count].copy_from_slice(&self.prefix[self.pos..self.pos + count]);
+                self.pos += count;
+                return Ok(count);
+            }
+            let count = buf.len().min(2048);
+            buf[..count].fill(b'A');
+            self.extra += count;
+            Ok(count)
+        }
+    }
 
     #[test]
-    fn a_space_before_the_colon_still_rejects_chunked() {
+    fn a_space_before_the_colon_still_decodes_chunked() {
         let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\nTransfer-Encoding : chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
-        assert!(read_http(&mut &raw[..]).is_err());
+        let response = read_http(&mut &raw[..]).unwrap();
+        assert_eq!(response.body, b"hello");
+    }
+
+    #[test]
+    fn a_response_without_content_length_is_read_until_close() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"completion\":\"kept\"}";
+        let response = read_http(&mut &raw[..]).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, br#"{"completion":"kept"}"#);
+    }
+
+    #[test]
+    fn a_chunk_size_line_without_an_end_is_refused() {
+        let mut reader = ChunkFlood {
+            prefix: b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+            pos: 0,
+            extra: 0,
+        };
+        assert!(read_http(&mut reader).is_err());
+        assert!(reader.extra < 4096, "{}", reader.extra);
     }
 
     #[test]

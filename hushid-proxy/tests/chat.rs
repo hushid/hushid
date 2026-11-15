@@ -491,7 +491,7 @@ fn proxy_returns_the_upstream_status_and_restores_the_body() {
 
 #[test]
 #[allow(clippy::while_let_loop)]
-fn proxy_refuses_an_upstream_response_without_content_length() {
+fn proxy_restores_a_close_delimited_upstream_body() {
     let upstream_body = r#"{"completion":"not-forwarded"}"#;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -557,9 +557,8 @@ fn proxy_refuses_an_upstream_response_without_content_length() {
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
-    assert!(response.starts_with("HTTP/1.1 502"), "{response}");
-    assert!(response.contains("upstream"), "{response}");
-    assert!(!response.contains(upstream_body), "{response}");
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains(upstream_body), "{response}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
