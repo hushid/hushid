@@ -780,7 +780,7 @@ fn calendar_day(year: u16, month: u8, day: u8) -> bool {
 }
 
 fn leap_year(year: u16) -> bool {
-    year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
+    year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100))
 }
 
 fn birth_numbers(text: &str) -> Vec<u16> {

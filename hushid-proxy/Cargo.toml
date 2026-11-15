@@ -2,7 +2,7 @@
 name = "hushid-proxy"
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.87"
 license = "Apache-2.0"
 publish = false
 description = "OpenAI-compatible chat proxy."
