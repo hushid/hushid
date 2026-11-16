@@ -654,8 +654,12 @@ pub fn spawn_upstream(body: &'static [u8]) -> std::io::Result<String> {
 
 /// One MCP JSON-RPC message. `session` selects the vault file.
 pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Option<String> {
-    let method = json_string_field(message, "method").ok().flatten()?;
     let id = json_raw_field(message, "id");
+    let method = match json_string_field(message, "method") {
+        Ok(Some(method)) => method,
+        Ok(None) => return None,
+        Err(_) => return Some(json_error(id, "escape")),
+    };
     if method == "notifications/initialized" {
         return None;
     }
@@ -665,15 +669,15 @@ pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Opti
         r#"{"tools":[{"name":"shield","description":"Replace recognized identifiers.","inputSchema":{"type":"object"}},{"name":"restore","description":"Copy original bytes back for tokens this vault issued.","inputSchema":{"type":"object"}}]}"#.to_string()
     } else if method == "tools/call" {
         let params = json_object_field(message, "params").unwrap_or("");
-        let name = json_string_field(params, "name")
-            .ok()
-            .flatten()
-            .unwrap_or_default();
+        let name = match json_string_field(params, "name") {
+            Ok(value) => value.unwrap_or_default(),
+            Err(_) => return Some(escape_tool_error(id)),
+        };
         let arguments = json_object_field(params, "arguments").unwrap_or("");
-        let session = json_string_field(arguments, "session")
-            .ok()
-            .flatten()
-            .unwrap_or_default();
+        let session = match json_string_field(arguments, "session") {
+            Ok(value) => value.unwrap_or_default(),
+            Err(_) => return Some(escape_tool_error(id)),
+        };
         let text = match json_string_field(arguments, "text") {
             Ok(value) => value.unwrap_or_default(),
             Err(_) => {
@@ -724,6 +728,11 @@ fn json_result(id: Option<&str>, result: &str) -> String {
         Some(id) => format!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#),
         None => format!(r#"{{"jsonrpc":"2.0","result":{result}}}"#),
     }
+}
+
+fn escape_tool_error(id: Option<&str>) -> String {
+    let result = r#"{"content":[{"type":"text","text":"escape"}],"isError":true}"#;
+    json_result(id, result)
 }
 
 fn json_error(id: Option<&str>, message: &str) -> String {
@@ -1707,6 +1716,29 @@ mod coverage_edges {
         assert!(decode_json_string(r#"\uD800\uD800"#).is_err());
         assert!(decode_json_string(r#"\"#).is_err());
         assert_eq!(decode_json_string(r#"\uD83D\uDE00"#).unwrap(), "😀");
+        let bad_method = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":9,"method":"\uDC00"}"#,
+        );
+        let bad_method = bad_method.expect("a bad method still answers");
+        assert!(bad_method.contains("escape"), "{bad_method}");
+        let bad_name = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"\q","arguments":{"session":"demo","text":"hi"}}}"#,
+        )
+        .unwrap();
+        assert!(bad_name.contains("escape"), "{bad_name}");
+        assert!(!bad_name.contains("\"tool\""), "{bad_name}");
+        let bad_session = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"shield","arguments":{"session":"\q","text":"hi"}}}"#,
+        )
+        .unwrap();
+        assert!(bad_session.contains("escape"), "{bad_session}");
+        assert!(!bad_session.contains("\"session\""), "{bad_session}");
         assert!(decode_json_string(r#"\uDC00"#).is_err());
         assert!(decode_json_string(r#"\uZZZZ"#).is_err());
         assert!(decode_json_string("\u{0001}").is_err());
