@@ -133,7 +133,8 @@ mod tests {
 
     fn sealed(plain: &[u8], key: &[u8; 32]) -> Vec<u8> {
         let cipher = XChaCha20Poly1305::new_from_slice(key).unwrap();
-        let nonce_bytes = [3u8; 24];
+        let mut nonce_bytes = [0u8; 24];
+        getrandom::fill(&mut nonce_bytes).unwrap();
         let nonce = XNonce::try_from(nonce_bytes.as_slice()).unwrap();
         let ciphertext = cipher
             .encrypt(
@@ -152,7 +153,8 @@ mod tests {
 
     #[test]
     fn a_torn_payload_and_a_bad_vault_name_their_errors() {
-        let key = [9u8; 32];
+        let mut key = [0u8; 32];
+        getrandom::fill(&mut key).unwrap();
         assert_eq!(SealError::Key.to_string(), "seal key must be 32 bytes");
         assert_eq!(
             SealError::Crypto.to_string(),
