@@ -5,10 +5,10 @@
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
 //! fragment is dropped. The upstream status is returned with a restored
-//! body. A response with no `Content-Length` is read until the connection
-//! closes, up to 1 MiB. A chunked body is assembled the same way. A body
-//! shorter than a declared `Content-Length` is refused. A redirect is not
-//! followed.
+//! body. A request with no `Content-Length` is read until the connection
+//! closes, the same as a response, up to 1 MiB. A chunked body is assembled
+//! the same way. A body shorter than a declared `Content-Length` is refused
+//! for both directions. A redirect is not followed.
 
 use hushid::{Glossary, JsonError, Vault};
 use std::fmt;
@@ -449,7 +449,7 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
             ));
         }
         decode_chunked(stream, &pending)?
-    } else if is_response && !saw_length {
+    } else if !saw_length {
         read_until_close(stream, pending)?
     } else {
         if length > MAX_BODY {
@@ -463,7 +463,7 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
             }
             body.extend_from_slice(&chunk[..read]);
         }
-        if is_response && body.len() < length {
+        if body.len() < length {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "length",
@@ -1011,7 +1011,7 @@ mod auth_header_tests {
 #[cfg(test)]
 mod header_tests {
     use super::read_http;
-    use std::io::Read;
+    use std::io::{Cursor, Read};
 
     struct ChunkFlood {
         prefix: &'static [u8],
@@ -1070,6 +1070,27 @@ mod header_tests {
     fn a_bad_request_length_is_rejected() {
         let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: no\r\n\r\n";
         assert!(read_http(&mut &raw[..]).is_err());
+    }
+
+    #[test]
+    fn a_request_without_content_length_keeps_the_buffered_json() {
+        let json = br#"{"messages":[]}"#;
+        let raw = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n{}",
+            std::str::from_utf8(json).unwrap()
+        );
+        let request = read_http(&mut Cursor::new(raw.into_bytes())).unwrap();
+        assert_eq!(request.body, json);
+    }
+
+    #[test]
+    fn a_request_shorter_than_content_length_is_refused() {
+        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: 32\r\n\r\n{\"messages\":[]}";
+        let err = read_http(&mut Cursor::new(&raw[..]))
+            .err()
+            .expect("short request body was accepted");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "length");
     }
 }
 

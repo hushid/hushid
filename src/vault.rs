@@ -302,6 +302,11 @@ impl Vault {
                 return Err(VaultError::Corrupt);
             }
             let surface = hex_decode(hex).ok_or(VaultError::Corrupt)?;
+            // A repeated token is corrupt before its stand-in is recorded.
+            // Recording it first would keep the earlier stand-in and this surface.
+            if entries.contains_key(token) {
+                return Err(VaultError::Corrupt);
+            }
             if let Some(stand_in) = &stand_in {
                 let text = std::str::from_utf8(&surface).map_err(|_| VaultError::Corrupt)?;
                 if digits.insert(stand_in.clone(), text.to_string()).is_some() {
@@ -524,5 +529,42 @@ fn write_new_file(path: &Path, data: &[u8]) -> io::Result<()> {
         file.write_all(data)?;
         file.sync_all()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hex_encode, Vault, VaultError, HEADER};
+    use crate::token::Kind;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_repeated_token_is_corrupt() {
+        let mut vault = Vault::new();
+        let token = vault.issue(Kind::Email, b"ada@example.com").unwrap();
+        let first = hex_encode(b"ada@example.com");
+        let second = hex_encode(b"bob@example.com");
+        let stand_in = hex_encode(b"111-222-3333");
+        let other = hex_encode(b"444-555-6666");
+        assert_ne!(first, second);
+        assert_ne!(stand_in, other);
+        let path = std::env::temp_dir().join(format!(
+            "hushid-repeat-token-{}-{}.vault",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let one = format!("{HEADER}\n{token} {first} d {stand_in}\n");
+        fs::write(&path, &one).unwrap();
+        let loaded = Vault::load(&path).unwrap();
+        assert_eq!(loaded.get(&token), Some(b"ada@example.com".as_slice()));
+        let two = format!("{one}{token} {second} d {other}\n");
+        fs::write(&path, two).unwrap();
+        let loaded = Vault::load(&path);
+        let _ = fs::remove_file(&path);
+        assert!(matches!(loaded, Err(VaultError::Corrupt)), "{loaded:?}");
     }
 }
