@@ -703,3 +703,59 @@ fn compose_cluster(base: char, marks: &[char]) -> Option<char> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{compose, decompose, is_mark, split_accent, strip_marks, Glossary};
+
+    #[test]
+    fn the_default_glossary_is_empty() {
+        let glossary = Glossary::default();
+        assert!(glossary.terms().is_empty());
+        assert!(glossary.find("Ada").is_empty());
+    }
+
+    #[test]
+    fn every_accent_in_the_table_folds_and_matches() {
+        let mut supported = 0usize;
+        for code in 0u32..=0x02FF {
+            let Some(ch) = char::from_u32(code) else {
+                continue;
+            };
+            let Some((base, marks)) = split_accent(ch) else {
+                continue;
+            };
+            supported += 1;
+            let mut decomposed = String::new();
+            decomposed.push(base);
+            decomposed.extend(marks.iter().copied());
+            assert_eq!(
+                decompose(&ch.to_string()),
+                decomposed,
+                "U+{code:04X} splits"
+            );
+            assert_eq!(
+                compose(&decomposed),
+                ch.to_string(),
+                "U+{code:04X} composes"
+            );
+            let plain = strip_marks(&decomposed);
+            assert!(!plain.is_empty(), "U+{code:04X}");
+            let glossary = Glossary::from_terms([ch.to_string()]);
+            assert_eq!(
+                glossary.find(&plain),
+                vec![(0, plain.len())],
+                "U+{code:04X} matches {plain}"
+            );
+        }
+        assert!(supported >= 250, "{supported} accents");
+        assert!(is_mark('\u{0300}'));
+        assert!(is_mark('\u{1ab0}'));
+        assert!(is_mark('\u{1dc0}'));
+        assert!(is_mark('\u{20d0}'));
+        assert!(is_mark('\u{fe20}'));
+        assert!(!is_mark('A'));
+        let mixed = compose("A\u{0300}\u{0301}");
+        assert!(mixed.contains('\u{0301}'), "{mixed}");
+    }
+}

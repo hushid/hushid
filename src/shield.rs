@@ -224,3 +224,40 @@ fn span_of(hit: &Hit) -> (usize, usize) {
         Hit::Reversible { start, end, .. } => (start, end),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{mask_for, mint_digits, mint_surrogate};
+    use crate::token::{Kind, TokenError};
+    use crate::vault::Vault;
+
+    #[test]
+    fn minting_retries_a_copy_and_rejects_a_shape_with_no_digits() {
+        let mut vault = Vault::new();
+        assert!(matches!(
+            mint_digits(&mut vault, Kind::Phone, ""),
+            Err(TokenError::Payload)
+        ));
+        assert!(matches!(
+            mint_surrogate(&mut vault, Kind::Phone, ""),
+            Err(TokenError::Payload)
+        ));
+        let mut issued = false;
+        for _ in 0..200 {
+            if mint_digits(&mut vault, Kind::Phone, "7").is_ok() {
+                issued = true;
+            }
+        }
+        assert!(issued);
+        assert_eq!(mask_for(Kind::Email, "ada@example.com"), "***@***");
+        assert_eq!(mask_for(Kind::Phone, "415-555-0134"), "***-***-****");
+        assert_eq!(mask_for(Kind::Card, "4111"), "**** **** **** ****");
+        assert_eq!(mask_for(Kind::Sin, "130"), "*** *** ***");
+        assert_eq!(mask_for(Kind::Ramq, "BOUF"), "**** **** ****");
+        assert_eq!(mask_for(Kind::Postal, "H2X 1Y4"), "*** ***");
+        assert_eq!(mask_for(Kind::Address, "88 Main Street"), "***");
+        assert_eq!(mask_for(Kind::Birth, "Jan 2, 1990"), "*** *** ***");
+        assert_eq!(mask_for(Kind::Glossary, "Nadine"), "***");
+        assert_eq!(mask_for(Kind::Email, "***@***"), "(***@***)");
+    }
+}

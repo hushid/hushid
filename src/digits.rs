@@ -55,3 +55,29 @@ pub(crate) fn same_shape(surface: &str, luhn: bool) -> Result<String, TokenError
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::same_shape;
+    use crate::token::TokenError;
+
+    #[test]
+    fn a_stand_in_needs_digits_and_retries_a_copy() {
+        assert!(matches!(same_shape("", false), Err(TokenError::Payload)));
+        assert!(matches!(same_shape("5", true), Err(TokenError::Payload)));
+        let mut copied = false;
+        let mut changed = false;
+        for _ in 0..200 {
+            match same_shape("5", false) {
+                Ok(stand_in) => {
+                    changed = true;
+                    assert_ne!(stand_in, "5");
+                }
+                Err(TokenError::Digits) => copied = true,
+                Err(err) => panic!("{err}"),
+            }
+        }
+        assert!(changed);
+        assert!(copied);
+    }
+}
