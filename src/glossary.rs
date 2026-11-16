@@ -719,9 +719,7 @@ mod tests {
     fn every_accent_in_the_table_folds_and_matches() {
         let mut supported = 0usize;
         for code in 0u32..=0x02FF {
-            let Some(ch) = char::from_u32(code) else {
-                continue;
-            };
+            let ch = char::from_u32(code).expect("scalar");
             let Some((base, marks)) = split_accent(ch) else {
                 continue;
             };
@@ -749,6 +747,9 @@ mod tests {
             );
         }
         assert!(supported >= 250, "{supported} accents");
+        assert!(Glossary::from_terms([""]).terms().is_empty());
+        let marks = Glossary::from_terms(["\u{0301}"]);
+        assert!(marks.terms().len() == 1);
         assert!(is_mark('\u{0300}'));
         assert!(is_mark('\u{1ab0}'));
         assert!(is_mark('\u{1dc0}'));

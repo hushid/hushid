@@ -1905,3 +1905,41 @@ pub(crate) fn luhn_ok(digits: &[u8]) -> bool {
     }
     sum % 10 == 0
 }
+
+#[cfg(test)]
+mod rest_edges {
+    use super::{
+        birth_layout_ok, born_near, edge_gap, glued_paren_tail, luhn_ok, month_in, ramq_layout_ok,
+    };
+
+    #[test]
+    fn calendar_phone_and_health_edges_stay_unmatched() {
+        assert!(!ramq_layout_ok("ABCD"));
+        assert!(!luhn_ok(&[]));
+        assert_eq!(edge_gap(0, 5, 2, 4, "hello"), 0);
+        assert!(glued_paren_tail("call )12345 now"));
+        assert!(!glued_paren_tail("call )1234 now"));
+        assert!(month_in("january").is_some());
+        assert!(month_in("xjanuary").is_none());
+        assert!(!birth_layout_ok("January"));
+        assert!(!birth_layout_ok("1 2"));
+        let text = "date text born";
+        assert!(born_near(&[(5, 9)], 0, 10, text));
+        assert!(born_near(&[(12, 16)], 0, 4, text));
+        assert!(!born_near(&[(0, 4)], 80, 90, &" ".repeat(100)));
+        let _ = shield_phone("9+14165550123");
+        let _ = shield_phone("postal code H2X 1Y49");
+    }
+
+    fn shield_phone(text: &str) -> String {
+        let mut vault = crate::vault::Vault::new();
+        let (out, _) = crate::shield::shield_text_with(
+            &mut vault,
+            &crate::glossary::Glossary::empty(),
+            text,
+            crate::shield::Operator::Token,
+        )
+        .unwrap();
+        out
+    }
+}

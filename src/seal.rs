@@ -184,6 +184,15 @@ mod tests {
         short_message.extend_from_slice(&0u64.to_le_bytes());
         short_message.extend_from_slice(&1u64.to_le_bytes());
         short_message.extend_from_slice(&4u64.to_le_bytes());
+        let mut huge_vault = Vec::new();
+        huge_vault.extend_from_slice(&1_000u64.to_le_bytes());
+        huge_vault.extend_from_slice(&[1, 2, 3]);
+        assert_eq!(
+            open(&sealed(&huge_vault, &key), &key)
+                .unwrap_err()
+                .to_string(),
+            "sealed transcript is corrupt"
+        );
         assert_eq!(
             open(&sealed(&short_message, &key), &key)
                 .unwrap_err()

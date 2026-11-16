@@ -292,3 +292,64 @@ fn session_debug_names_the_thinking_length_and_a_missing_index() {
     args.push("ada@example.com");
     assert_eq!(args.as_str(), "ada@example.com");
 }
+
+#[test]
+fn json_numbers_literals_and_a_reloaded_number_round_trip() {
+    let config = parse_identifiers_config("[identifiers]\n\nglossary = \"\"\n").unwrap();
+    assert!(config.glossary.is_none());
+    let nested = r#"{"note":"{\"ok\":true,\"no\":false,\"z\":null,\"n\":1.5,\"e\":1e2}"}"#;
+    let mut vault = Vault::new();
+    let (out, _) = shield_json_strings(&mut vault, &Glossary::empty(), nested).unwrap();
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), nested);
+    assert!(
+        shield_json_strings(&mut vault, &Glossary::empty(), r#"{"note":"{\"bad\":1.}"}"#).is_ok()
+    );
+    assert!(
+        shield_json_strings(&mut vault, &Glossary::empty(), r#"{"note":"{\"bad\":1e}"}"#).is_ok()
+    );
+    assert!(restore_json_write(&Vault::new(), r#"{"a":"h1_secret"}"#).is_err());
+
+    let sin = (0..10)
+        .map(|digit| format!("13069254{digit}"))
+        .find(|sin| {
+            let input = format!(r#"{{"sin":{sin}}}"#);
+            let mut vault = Vault::new();
+            shield_json_strings(&mut vault, &Glossary::empty(), &input)
+                .unwrap()
+                .1
+                .sin
+                == 1
+        })
+        .unwrap();
+    let input = format!(r#"{{"sin":{sin}}}"#);
+    let mut numbers = Vault::new();
+    let (shielded, _) = shield_json_strings(&mut numbers, &Glossary::empty(), &input).unwrap();
+    let dir = scratch("reload");
+    let path = dir.join("number");
+    numbers.save(&path).unwrap();
+    let loaded = Vault::load(&path).unwrap();
+    assert_eq!(restore_json_write(&loaded, &shielded).unwrap(), input);
+
+    let mut vault = Vault::new();
+    let token = vault.issue(Kind::Email, b"a@b.co").unwrap();
+    let good = dir.join("good");
+    vault.save(&good).unwrap();
+    let text = fs::read_to_string(&good).unwrap();
+    let record = text.lines().nth(1).unwrap().to_string();
+    let (token_text, hex) = record.split_once(' ').unwrap();
+    let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
+    lines[1] = format!("{token_text} a");
+    assert!(Vault::load(&write(&dir, "odd", &format!("{}\n", lines.join("\n")))).is_err());
+    let mut broken = token.clone();
+    let last = broken.pop().unwrap();
+    let replacement = if last == '2' { '3' } else { '2' };
+    broken.push(replacement);
+    lines[1] = format!("{broken} {hex}");
+    assert!(Vault::load(&write(&dir, "check", &format!("{}\n", lines.join("\n")))).is_err());
+
+    let dest = dir.join("not-a-file");
+    fs::create_dir(&dest).unwrap();
+    assert!(vault.save(&dest).is_err());
+    let _ = fs::remove_dir_all(&dir);
+    let _ = token;
+}

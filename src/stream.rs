@@ -142,3 +142,23 @@ static HEADS: LazyLock<Vec<String>> = LazyLock::new(|| {
     .map(|kind| format!("h1_{}_", kind.as_str()))
     .collect()
 });
+
+#[cfg(test)]
+mod rest_edges {
+    use super::HeldStream;
+
+    #[test]
+    fn a_finished_secret_is_released_and_a_short_head_is_held() {
+        let mut held = HeldStream::new();
+        let emit = held.push("h1_secret next");
+        assert!(emit.contains("h1_secret"), "{emit}");
+        let mut held = HeldStream::new();
+        assert!(held.push("h1_e").is_empty());
+        assert_eq!(held.finish(), "h1_e");
+        let mut held = HeldStream::new();
+        let wide = "é".repeat(40);
+        let emit = held.push(&wide);
+        assert_eq!(emit, wide);
+        let _ = crate::token::find_h1("éh", 1);
+    }
+}
