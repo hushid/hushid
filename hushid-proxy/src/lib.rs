@@ -4,11 +4,11 @@
 //! same vault rules as the library. The clear request is not written beside
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
-//! fragment is dropped. The upstream status is returned with a restored
-//! body. A response with no `Content-Length` is read until the connection
-//! closes, up to 1 MiB. A chunked body is assembled the same way. A body
-//! shorter than a declared `Content-Length` is refused. A redirect is not
-//! followed.
+//! fragment is dropped. A restored body keeps the upstream status; a failed
+//! restore is a 502 and is not forwarded. A request with no `Content-Length`
+//! is read until the connection closes, the same as a response, up to 1 MiB.
+//! A chunked body is assembled the same way. A body shorter than a declared
+//! `Content-Length` is refused for both directions. A redirect is not followed.
 
 use hushid::{Glossary, JsonError, Vault};
 use std::fmt;
@@ -29,6 +29,7 @@ const MAX_BODY: usize = 1024 * 1024;
 pub enum ProxyError {
     Session,
     Body,
+    Client,
     Upstream,
     Vault(hushid::VaultError),
     Json(JsonError),
@@ -39,6 +40,7 @@ impl fmt::Display for ProxyError {
         match self {
             ProxyError::Session => write!(f, "session"),
             ProxyError::Body => write!(f, "body"),
+            ProxyError::Client => write!(f, "client"),
             ProxyError::Upstream => write!(f, "upstream"),
             ProxyError::Vault(err) => write!(f, "vault: {err}"),
             ProxyError::Json(err) => write!(f, "body: {err}"),
@@ -115,15 +117,15 @@ impl Proxy {
     }
 
     pub fn serve_one(&self) -> Result<(), ProxyError> {
-        let (mut stream, _) = self.listener.accept().map_err(|_| ProxyError::Upstream)?;
+        let (mut stream, _) = self.listener.accept().map_err(|_| ProxyError::Client)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
-            .map_err(|_| ProxyError::Upstream)?;
+            .map_err(|_| ProxyError::Client)?;
         let request = read_http(&mut stream).map_err(|_| ProxyError::Body)?;
         let response = self.handle(&request);
         stream
             .write_all(response.as_bytes())
-            .map_err(|_| ProxyError::Upstream)?;
+            .map_err(|_| ProxyError::Client)?;
         Ok(())
     }
 
@@ -140,8 +142,10 @@ impl Proxy {
         let Some(session) = request.header(SESSION_HEADER) else {
             return http_response(400, br#"{"error":"missing session"}"#);
         };
-        let Ok(mut vault) = load_session(&self.vault_dir, session) else {
-            return http_response(400, br#"{"error":"bad session"}"#);
+        let mut vault = match load_session(&self.vault_dir, session) {
+            Ok(vault) => vault,
+            Err(ProxyError::Vault(_)) => return http_response(500, br#"{"error":"vault"}"#),
+            Err(_) => return http_response(400, br#"{"error":"bad session"}"#),
         };
         let Ok(body) = std::str::from_utf8(&request.body) else {
             return http_response(400, br#"{"error":"body"}"#);
@@ -157,8 +161,20 @@ impl Proxy {
             Err(_) => return http_response(502, br#"{"error":"upstream"}"#),
         };
         let restored = match std::str::from_utf8(&upstream.body) {
-            Ok(text) => restore_chat(text, &vault).unwrap_or_else(|_| text.to_string()),
-            Err(_) => String::from_utf8_lossy(&upstream.body).into_owned(),
+            Ok(text) => match restore_chat(text, &vault) {
+                Ok(restored) => restored,
+                Err(_) => return http_response(502, br#"{"error":"restore"}"#),
+            },
+            Err(_) => {
+                if upstream
+                    .body
+                    .windows(3)
+                    .any(|window| window.eq_ignore_ascii_case(b"h1_"))
+                {
+                    return http_response(502, br#"{"error":"restore"}"#);
+                }
+                String::from_utf8_lossy(&upstream.body).into_owned()
+            }
         };
         http_response(upstream.status, restored.as_bytes())
     }
@@ -429,10 +445,17 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         let name = name.trim();
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
-            saw_length = true;
-            length = value
-                .parse()
+            let parsed = value
+                .parse::<usize>()
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "length"))?;
+            if saw_length && parsed != length {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "length",
+                ));
+            }
+            saw_length = true;
+            length = parsed;
         } else if name.eq_ignore_ascii_case("transfer-encoding")
             && value.to_ascii_lowercase().contains("chunked")
         {
@@ -449,7 +472,7 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
             ));
         }
         decode_chunked(stream, &pending)?
-    } else if is_response && !saw_length {
+    } else if !saw_length {
         read_until_close(stream, pending)?
     } else {
         if length > MAX_BODY {
@@ -463,7 +486,7 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
             }
             body.extend_from_slice(&chunk[..read]);
         }
-        if is_response && body.len() < length {
+        if body.len() < length {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "length",
@@ -672,7 +695,11 @@ fn mcp_tool(
     session: &str,
     text: &str,
 ) -> Result<String, &'static str> {
-    let mut vault = load_session(vault_dir, session).map_err(|_| "session")?;
+    let mut vault = match load_session(vault_dir, session) {
+        Ok(vault) => vault,
+        Err(ProxyError::Vault(_)) => return Err("vault"),
+        Err(_) => return Err("session"),
+    };
     let out = if name == "shield" {
         let (out, _) = hushid::shield_text(&mut vault, glossary, text).map_err(|_| "shield")?;
         save_session(vault_dir, session, &vault).map_err(|_| "vault")?;
@@ -1011,7 +1038,7 @@ mod auth_header_tests {
 #[cfg(test)]
 mod header_tests {
     use super::read_http;
-    use std::io::Read;
+    use std::io::{Cursor, Read};
 
     struct ChunkFlood {
         prefix: &'static [u8],
@@ -1070,6 +1097,44 @@ mod header_tests {
     fn a_bad_request_length_is_rejected() {
         let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: no\r\n\r\n";
         assert!(read_http(&mut &raw[..]).is_err());
+    }
+
+    #[test]
+    fn a_request_without_content_length_keeps_the_buffered_json() {
+        let json = br#"{"messages":[]}"#;
+        let raw = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n{}",
+            std::str::from_utf8(json).unwrap()
+        );
+        let request = read_http(&mut Cursor::new(raw.into_bytes())).unwrap();
+        assert_eq!(request.body, json);
+    }
+
+    #[test]
+    fn a_request_shorter_than_content_length_is_refused() {
+        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: 32\r\n\r\n{\"messages\":[]}";
+        let err = read_http(&mut Cursor::new(&raw[..]))
+            .err()
+            .expect("short request body was accepted");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "length");
+    }
+
+    #[test]
+    fn disagreeing_content_lengths_are_refused() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 1\r\n\r\nhello";
+        let err = read_http(&mut Cursor::new(&raw[..]))
+            .err()
+            .expect("two content lengths were accepted");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "length");
+    }
+
+    #[test]
+    fn the_same_content_length_twice_is_accepted() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello";
+        let response = read_http(&mut Cursor::new(&raw[..])).unwrap();
+        assert_eq!(response.body, b"hello");
     }
 }
 
@@ -1367,6 +1432,7 @@ mod coverage_edges {
         assert!(http_response(500, b"{}").contains("Error"));
         assert_eq!(ProxyError::Session.to_string(), "session");
         assert_eq!(ProxyError::Body.to_string(), "body");
+        assert_eq!(ProxyError::Client.to_string(), "client");
         assert_eq!(ProxyError::Upstream.to_string(), "upstream");
         assert!(ProxyError::Vault(VaultError::Missing)
             .to_string()
@@ -1510,6 +1576,39 @@ mod coverage_edges {
     }
 
     #[test]
+    fn an_unrestored_upstream_secret_is_not_forwarded() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let _ = read_http(&mut stream);
+            let body = br#"{"completion":"h1_secret"}"#;
+            let _ = stream.write_all(http_response(200, body).as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            b"{}",
+        ));
+        assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+        assert!(response.contains("restore"), "{response}");
+        assert!(!response.contains("h1_secret"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn readers_refuse_a_broken_frame_and_a_body_past_the_cap() {
         assert!(read_http(&mut Cursor::new(b"")).is_err());
         assert!(read_http(&mut Cursor::new(b"GET /\xff HTTP/1.1\r\n\r\n")).is_err());
@@ -1621,7 +1720,8 @@ mod coverage_edges {
         let handle = thread::spawn(move || proxy.serve_one());
         let client = TcpStream::connect(addr).unwrap();
         drop(client);
-        assert!(handle.join().unwrap().is_err());
+        let err = handle.join().unwrap().unwrap_err();
+        assert_ne!(err.to_string(), "upstream", "{err}");
 
         struct FailSecond {
             writes: usize,
@@ -1661,6 +1761,50 @@ mod coverage_edges {
         let reply = forward(&upstream, "{}", None).unwrap();
         assert_eq!(reply.status, 200);
         assert!(reply.body.windows(2).any(|window| window == b"ok"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_corrupt_vault_is_not_a_bad_session() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-corrupt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("demo.vault"), "not-a-vault\n").unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            b"{}",
+        ));
+        assert!(response.starts_with("HTTP/1.1 500"), "{response}");
+        assert!(response.contains("vault"), "{response}");
+        assert!(!response.contains("bad session"), "{response}");
+        let bad = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "bad/id")],
+            b"{}",
+        ));
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+        assert!(bad.contains("bad session"), "{bad}");
+        let glossary = Glossary::empty();
+        let vault_text = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"hi"}}}"#,
+        )
+        .expect("mcp reply");
+        assert!(vault_text.contains("\"vault\""), "{vault_text}");
+        assert!(!vault_text.contains("bad session"), "{vault_text}");
+        let session_text = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shield","arguments":{"session":"bad/id","text":"hi"}}}"#,
+        )
+        .expect("mcp reply");
+        assert!(session_text.contains("\"session\""), "{session_text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
