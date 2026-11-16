@@ -26,9 +26,16 @@ const SESSION_HEADER: &str = "x-hushid-session";
 const MAX_BODY: usize = 1024 * 1024;
 
 #[derive(Debug)]
+/// Why a proxy call failed.
+///
+/// `Client` was added after 0.1.2. A caller that matches every variant
+/// needs an arm for it. A match that already has a wildcard does not.
 pub enum ProxyError {
     Session,
     Body,
+    /// The accepted socket failed. Setting its read timeout or writing
+    /// the response uses this variant. Its display is `client`. A failed
+    /// dial stays [`ProxyError::Upstream`].
     Client,
     Upstream,
     Vault(hushid::VaultError),
