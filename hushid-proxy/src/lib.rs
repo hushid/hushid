@@ -4,11 +4,11 @@
 //! same vault rules as the library. The clear request is not written beside
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
-//! fragment is dropped. The upstream status is returned with a restored
-//! body. A request with no `Content-Length` is read until the connection
-//! closes, the same as a response, up to 1 MiB. A chunked body is assembled
-//! the same way. A body shorter than a declared `Content-Length` is refused
-//! for both directions. A redirect is not followed.
+//! fragment is dropped. A restored body keeps the upstream status; a failed
+//! restore is a 502 and is not forwarded. A request with no `Content-Length`
+//! is read until the connection closes, the same as a response, up to 1 MiB.
+//! A chunked body is assembled the same way. A body shorter than a declared
+//! `Content-Length` is refused for both directions. A redirect is not followed.
 
 use hushid::{Glossary, JsonError, Vault};
 use std::fmt;
@@ -157,8 +157,20 @@ impl Proxy {
             Err(_) => return http_response(502, br#"{"error":"upstream"}"#),
         };
         let restored = match std::str::from_utf8(&upstream.body) {
-            Ok(text) => restore_chat(text, &vault).unwrap_or_else(|_| text.to_string()),
-            Err(_) => String::from_utf8_lossy(&upstream.body).into_owned(),
+            Ok(text) => match restore_chat(text, &vault) {
+                Ok(restored) => restored,
+                Err(_) => return http_response(502, br#"{"error":"restore"}"#),
+            },
+            Err(_) => {
+                if upstream
+                    .body
+                    .windows(3)
+                    .any(|window| window.eq_ignore_ascii_case(b"h1_"))
+                {
+                    return http_response(502, br#"{"error":"restore"}"#);
+                }
+                String::from_utf8_lossy(&upstream.body).into_owned()
+            }
         };
         http_response(upstream.status, restored.as_bytes())
     }
@@ -429,10 +441,17 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         let name = name.trim();
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
-            saw_length = true;
-            length = value
-                .parse()
+            let parsed = value
+                .parse::<usize>()
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "length"))?;
+            if saw_length && parsed != length {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "length",
+                ));
+            }
+            saw_length = true;
+            length = parsed;
         } else if name.eq_ignore_ascii_case("transfer-encoding")
             && value.to_ascii_lowercase().contains("chunked")
         {
@@ -1092,6 +1111,23 @@ mod header_tests {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert_eq!(err.to_string(), "length");
     }
+
+    #[test]
+    fn disagreeing_content_lengths_are_refused() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 1\r\n\r\nhello";
+        let err = read_http(&mut Cursor::new(&raw[..]))
+            .err()
+            .expect("two content lengths were accepted");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "length");
+    }
+
+    #[test]
+    fn the_same_content_length_twice_is_accepted() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello";
+        let response = read_http(&mut Cursor::new(&raw[..])).unwrap();
+        assert_eq!(response.body, b"hello");
+    }
 }
 
 #[cfg(test)]
@@ -1527,6 +1563,39 @@ mod coverage_edges {
             b"{}",
         ));
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unrestored_upstream_secret_is_not_forwarded() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let _ = read_http(&mut stream);
+            let body = br#"{"completion":"h1_secret"}"#;
+            let _ = stream.write_all(http_response(200, body).as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            b"{}",
+        ));
+        assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+        assert!(response.contains("restore"), "{response}");
+        assert!(!response.contains("h1_secret"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
