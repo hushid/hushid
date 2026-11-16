@@ -29,6 +29,7 @@ const MAX_BODY: usize = 1024 * 1024;
 pub enum ProxyError {
     Session,
     Body,
+    Client,
     Upstream,
     Vault(hushid::VaultError),
     Json(JsonError),
@@ -39,6 +40,7 @@ impl fmt::Display for ProxyError {
         match self {
             ProxyError::Session => write!(f, "session"),
             ProxyError::Body => write!(f, "body"),
+            ProxyError::Client => write!(f, "client"),
             ProxyError::Upstream => write!(f, "upstream"),
             ProxyError::Vault(err) => write!(f, "vault: {err}"),
             ProxyError::Json(err) => write!(f, "body: {err}"),
@@ -115,15 +117,15 @@ impl Proxy {
     }
 
     pub fn serve_one(&self) -> Result<(), ProxyError> {
-        let (mut stream, _) = self.listener.accept().map_err(|_| ProxyError::Upstream)?;
+        let (mut stream, _) = self.listener.accept().map_err(|_| ProxyError::Client)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
-            .map_err(|_| ProxyError::Upstream)?;
+            .map_err(|_| ProxyError::Client)?;
         let request = read_http(&mut stream).map_err(|_| ProxyError::Body)?;
         let response = self.handle(&request);
         stream
             .write_all(response.as_bytes())
-            .map_err(|_| ProxyError::Upstream)?;
+            .map_err(|_| ProxyError::Client)?;
         Ok(())
     }
 
@@ -140,8 +142,10 @@ impl Proxy {
         let Some(session) = request.header(SESSION_HEADER) else {
             return http_response(400, br#"{"error":"missing session"}"#);
         };
-        let Ok(mut vault) = load_session(&self.vault_dir, session) else {
-            return http_response(400, br#"{"error":"bad session"}"#);
+        let mut vault = match load_session(&self.vault_dir, session) {
+            Ok(vault) => vault,
+            Err(ProxyError::Vault(_)) => return http_response(500, br#"{"error":"vault"}"#),
+            Err(_) => return http_response(400, br#"{"error":"bad session"}"#),
         };
         let Ok(body) = std::str::from_utf8(&request.body) else {
             return http_response(400, br#"{"error":"body"}"#);
@@ -691,7 +695,11 @@ fn mcp_tool(
     session: &str,
     text: &str,
 ) -> Result<String, &'static str> {
-    let mut vault = load_session(vault_dir, session).map_err(|_| "session")?;
+    let mut vault = match load_session(vault_dir, session) {
+        Ok(vault) => vault,
+        Err(ProxyError::Vault(_)) => return Err("vault"),
+        Err(_) => return Err("session"),
+    };
     let out = if name == "shield" {
         let (out, _) = hushid::shield_text(&mut vault, glossary, text).map_err(|_| "shield")?;
         save_session(vault_dir, session, &vault).map_err(|_| "vault")?;
@@ -1424,6 +1432,7 @@ mod coverage_edges {
         assert!(http_response(500, b"{}").contains("Error"));
         assert_eq!(ProxyError::Session.to_string(), "session");
         assert_eq!(ProxyError::Body.to_string(), "body");
+        assert_eq!(ProxyError::Client.to_string(), "client");
         assert_eq!(ProxyError::Upstream.to_string(), "upstream");
         assert!(ProxyError::Vault(VaultError::Missing)
             .to_string()
@@ -1711,7 +1720,8 @@ mod coverage_edges {
         let handle = thread::spawn(move || proxy.serve_one());
         let client = TcpStream::connect(addr).unwrap();
         drop(client);
-        assert!(handle.join().unwrap().is_err());
+        let err = handle.join().unwrap().unwrap_err();
+        assert_ne!(err.to_string(), "upstream", "{err}");
 
         struct FailSecond {
             writes: usize,
@@ -1751,6 +1761,50 @@ mod coverage_edges {
         let reply = forward(&upstream, "{}", None).unwrap();
         assert_eq!(reply.status, 200);
         assert!(reply.body.windows(2).any(|window| window == b"ok"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_corrupt_vault_is_not_a_bad_session() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-corrupt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("demo.vault"), "not-a-vault\n").unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            b"{}",
+        ));
+        assert!(response.starts_with("HTTP/1.1 500"), "{response}");
+        assert!(response.contains("vault"), "{response}");
+        assert!(!response.contains("bad session"), "{response}");
+        let bad = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "bad/id")],
+            b"{}",
+        ));
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+        assert!(bad.contains("bad session"), "{bad}");
+        let glossary = Glossary::empty();
+        let vault_text = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"hi"}}}"#,
+        )
+        .expect("mcp reply");
+        assert!(vault_text.contains("\"vault\""), "{vault_text}");
+        assert!(!vault_text.contains("bad session"), "{vault_text}");
+        let session_text = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shield","arguments":{"session":"bad/id","text":"hi"}}}"#,
+        )
+        .expect("mcp reply");
+        assert!(session_text.contains("\"session\""), "{session_text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
