@@ -41,3 +41,14 @@ fn echo_of_a_known_name_is_shielded_without_the_glossary() {
     assert!(out.starts_with("echo h1_glossary_"), "{out}");
     assert_eq!(vault.restore_write(&out).unwrap(), "echo Elodie");
 }
+
+#[test]
+fn echo_after_a_separator_and_a_quoted_printf_are_shielded() {
+    let mut vault = Vault::new();
+    let glossary = Glossary::from_terms(["Elodie"]);
+    shield_text(&mut vault, &glossary, "Ask Elodie today.").unwrap();
+    let text = ";echo Elodie\nprintf 'Elodie'";
+    let (out, audit) = shield_text(&mut vault, &Glossary::empty(), text).unwrap();
+    assert_eq!(audit.glossary, 2, "{out}");
+    assert!(!out.contains("Elodie"), "{out}");
+}

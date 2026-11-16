@@ -1291,3 +1291,278 @@ mod tls_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod coverage_edges {
+    use super::{
+        completions_url, decode_chunked, decode_json_string, exchange, http_response, mcp_message,
+        read_http, read_more, read_until_close, tls_dns_name, HttpRequest, Proxy, ProxyError,
+        MAX_BODY,
+    };
+    use hushid::{Glossary, JsonError, VaultError};
+    use std::io::{self, Cursor, Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    struct Mem {
+        inbound: Cursor<Vec<u8>>,
+        outbound: Vec<u8>,
+    }
+
+    impl Read for Mem {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.inbound.read(buf)
+        }
+    }
+
+    impl Write for Mem {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.outbound.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn request(method: &str, path: &str, headers: &[(&str, &str)], body: &[u8]) -> HttpRequest {
+        HttpRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            status: 0,
+            headers: headers
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect(),
+            body: body.to_vec(),
+        }
+    }
+
+    #[test]
+    fn urls_hosts_and_reasons_cover_the_refused_shapes() {
+        assert!(completions_url("http://").is_err());
+        assert!(completions_url("http:///v1").is_err());
+        assert!(completions_url("http://[]/v1").is_err());
+        assert_eq!(
+            completions_url("https://example.com/v1").unwrap(),
+            "https://example.com:443/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("http://example.com/openai").unwrap(),
+            "http://example.com:80/openai/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_url("http://[::1]").unwrap(),
+            "http://[::1]:80/v1/chat/completions"
+        );
+        assert!(completions_url("http://example.com:not-a-port").is_ok());
+        assert_eq!(tls_dns_name("user@host:443").unwrap(), "host");
+        assert_eq!(tls_dns_name("[::1]:443").unwrap(), "::1");
+        assert_eq!(tls_dns_name("[::1]").unwrap(), "::1");
+        assert!(tls_dns_name("@:80").is_err());
+        assert!(http_response(400, b"{}").contains("Bad Request"));
+        assert!(http_response(404, b"{}").contains("Not Found"));
+        assert!(http_response(500, b"{}").contains("Error"));
+        assert_eq!(ProxyError::Session.to_string(), "session");
+        assert_eq!(ProxyError::Body.to_string(), "body");
+        assert_eq!(ProxyError::Upstream.to_string(), "upstream");
+        assert!(ProxyError::Vault(VaultError::Missing)
+            .to_string()
+            .contains("vault"));
+        assert!(ProxyError::Json(JsonError::Syntax { at: 1 })
+            .to_string()
+            .starts_with("body"));
+    }
+
+    #[test]
+    fn the_proxy_refuses_a_bad_request_before_it_dials() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-edge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        assert!(proxy
+            .handle(&request("GET", "/v1/chat/completions", &[], b"{}"))
+            .contains("not found"));
+        assert!(proxy
+            .handle(&request("POST", "/v1/chat/completions", &[], b"{}"))
+            .contains("missing session"));
+        assert!(proxy
+            .handle(&request(
+                "POST",
+                "/v1/chat/completions",
+                &[("x-hushid-session", "bad/id")],
+                b"{}",
+            ))
+            .contains("bad session"));
+        assert!(proxy
+            .handle(&request(
+                "POST",
+                "/v1/chat/completions",
+                &[("x-hushid-session", "demo")],
+                &[0xff],
+            ))
+            .contains("\"body\""));
+        assert!(proxy
+            .handle(&request(
+                "POST",
+                "/v1/chat/completions",
+                &[("x-hushid-session", "demo")],
+                br#"{"a":"\q"}"#,
+            ))
+            .contains("\"body\""));
+        let file = dir.join("not-a-dir");
+        std::fs::write(&file, b"x").unwrap();
+        let blocked = Proxy::bind(
+            "127.0.0.1:0",
+            "http://127.0.0.1:9",
+            &file,
+            Glossary::empty(),
+        )
+        .unwrap();
+        assert!(blocked
+            .handle(&request(
+                "POST",
+                "/v1/chat/completions",
+                &[("x-hushid-session", "demo")],
+                b"{}",
+            ))
+            .contains("vault"));
+        assert!(proxy
+            .handle(&request(
+                "POST",
+                "/v1/chat/completions",
+                &[("x-hushid-session", "demo")],
+                b"{}",
+            ))
+            .contains("upstream"));
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf);
+            let body = [0xff, 0xfe];
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(&body);
+        });
+        let binary = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = binary.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("x-hushid-session", "demo"), ("authorization", "Bearer z")],
+            b"{}",
+        ));
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn readers_refuse_a_broken_frame_and_a_body_past_the_cap() {
+        assert!(read_http(&mut Cursor::new(b"")).is_err());
+        assert!(read_http(&mut Cursor::new(b"GET /\xff HTTP/1.1\r\n\r\n")).is_err());
+        assert!(read_http(&mut Cursor::new(
+            b"POST / HTTP/1.1\r\nContent-Length: nope\r\n\r\n"
+        ))
+        .is_err());
+        assert!(read_http(&mut Cursor::new(
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+        ))
+        .is_err());
+        let huge = format!(
+            "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY + 1
+        );
+        assert!(read_http(&mut Cursor::new(huge.into_bytes())).is_err());
+        assert!(read_until_close(&mut Cursor::new(Vec::new()), vec![0; MAX_BODY + 1]).is_err());
+        let mut flood = Cursor::new(vec![b'a'; MAX_BODY + 64]);
+        assert!(read_until_close(&mut flood, Vec::new()).is_err());
+        assert!(decode_chunked(&mut Cursor::new(Vec::new()), &[b'A'; 65]).is_err());
+        assert!(decode_chunked(&mut Cursor::new(b"zz\r\n"), b"").is_err());
+        assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"1\r\n").is_err());
+        assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"1\r\nXQQ").is_err());
+        assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"100001\r\n").is_err());
+        let mut raw = Vec::new();
+        let mut filled = MAX_BODY + 64;
+        assert!(read_more(&mut Cursor::new([1u8]), &mut raw, &mut filled).is_err());
+        let mut stream = Mem {
+            inbound: Cursor::new(b"HTTP/1.1 nope\r\nContent-Length: 0\r\n\r\n".to_vec()),
+            outbound: Vec::new(),
+        };
+        assert!(exchange(
+            &mut stream,
+            "/v1/chat/completions",
+            "host:80",
+            "{}",
+            Some("Bearer z")
+        )
+        .is_err());
+        assert!(String::from_utf8(stream.outbound)
+            .unwrap()
+            .contains("Authorization"));
+    }
+
+    #[test]
+    fn mcp_methods_and_string_escapes_round_trip() {
+        let dir = std::env::temp_dir().join(format!("hushid-mcp-edge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let glossary = Glossary::empty();
+        let ping = mcp_message(&dir, &glossary, r#"{"jsonrpc":"2.0","method":"ping"}"#).unwrap();
+        assert!(ping.contains("result"), "{ping}");
+        let unknown = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":1,"method":"nope"}"#,
+        )
+        .unwrap();
+        assert!(unknown.contains("method"), "{unknown}");
+        let listed = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        )
+        .unwrap();
+        assert!(listed.contains("shield"), "{listed}");
+        let tool = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"other","arguments":{"session":"demo","text":"hi"}}}"#,
+        )
+        .unwrap();
+        assert!(tool.contains("tool"), "{tool}");
+        let emoji = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"\uD83D\uDE00"}}}"#,
+        )
+        .unwrap();
+        assert!(emoji.contains("😀") || emoji.contains("\\ud83d"), "{emoji}");
+        let escapes = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"\"\\\b\f\r\/"}}}"#,
+        )
+        .unwrap();
+        assert!(escapes.contains("result"), "{escapes}");
+        assert!(decode_json_string(r#"\q"#).is_err());
+        assert!(decode_json_string(r#"\uD800\uD800"#).is_err());
+        assert!(decode_json_string(r#"\"#).is_err());
+        assert_eq!(decode_json_string(r#"\uD83D\uDE00"#).unwrap(), "😀");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

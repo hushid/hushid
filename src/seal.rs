@@ -123,3 +123,72 @@ fn read_u64(bytes: &[u8]) -> Result<(usize, &[u8]), SealError> {
     let len = u64::from_le_bytes(len_bytes) as usize;
     Ok((len, &bytes[8..]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{open, pack, SealError, AAD, MAGIC};
+    use crate::vault::Vault;
+    use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+    use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+
+    fn sealed(plain: &[u8], key: &[u8; 32]) -> Vec<u8> {
+        let cipher = XChaCha20Poly1305::new_from_slice(key).unwrap();
+        let mut nonce_bytes = [0u8; 24];
+        getrandom::fill(&mut nonce_bytes).unwrap();
+        let nonce = XNonce::try_from(nonce_bytes.as_slice()).unwrap();
+        let ciphertext = cipher
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: plain,
+                    aad: AAD,
+                },
+            )
+            .unwrap();
+        let mut bytes = Vec::from(MAGIC);
+        bytes.extend(nonce_bytes);
+        bytes.extend(ciphertext);
+        bytes
+    }
+
+    #[test]
+    fn a_torn_payload_and_a_bad_vault_name_their_errors() {
+        let mut key = [0u8; 32];
+        getrandom::fill(&mut key).unwrap();
+        assert_eq!(SealError::Key.to_string(), "seal key must be 32 bytes");
+        assert_eq!(
+            SealError::Crypto.to_string(),
+            "sealed transcript cannot be opened"
+        );
+        let torn = open(&sealed(b"short", &key), &key).unwrap_err();
+        assert_eq!(torn.to_string(), "sealed transcript is corrupt");
+        let bad_vault = open(&sealed(&pack("not a vault\n", &[]), &key), &key).unwrap_err();
+        assert_eq!(bad_vault.to_string(), "sealed vault cannot be read");
+        let extra = {
+            let mut plain = pack(&Vault::new().encode(), &[]);
+            plain.push(b'x');
+            open(&sealed(&plain, &key), &key).unwrap_err()
+        };
+        assert_eq!(extra.to_string(), "sealed transcript is corrupt");
+        let mut bad_text = Vec::new();
+        bad_text.extend_from_slice(&1u64.to_le_bytes());
+        bad_text.push(0xff);
+        bad_text.extend_from_slice(&0u64.to_le_bytes());
+        assert_eq!(
+            open(&sealed(&bad_text, &key), &key)
+                .unwrap_err()
+                .to_string(),
+            "sealed transcript is corrupt"
+        );
+        let mut short_message = Vec::new();
+        short_message.extend_from_slice(&0u64.to_le_bytes());
+        short_message.extend_from_slice(&1u64.to_le_bytes());
+        short_message.extend_from_slice(&4u64.to_le_bytes());
+        assert_eq!(
+            open(&sealed(&short_message, &key), &key)
+                .unwrap_err()
+                .to_string(),
+            "sealed transcript is corrupt"
+        );
+    }
+}

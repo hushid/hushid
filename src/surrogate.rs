@@ -140,3 +140,21 @@ fn random_bytes(len: usize) -> Result<Vec<u8>, TokenError> {
     getrandom::fill(&mut raw).map_err(|_| TokenError::Entropy)?;
     Ok(raw)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{acceptable, mint};
+    use crate::token::{Kind, TokenError};
+
+    #[test]
+    fn a_stand_in_must_differ_from_the_surface() {
+        assert!(!acceptable("Ada", ""));
+        assert!(!acceptable("Ada", "h1_email_x"));
+        assert!(!acceptable("Ada", "ada"));
+        assert!(!acceptable("Ada", "xxAda"));
+        assert!(!acceptable("12a", "12b"));
+        assert!(acceptable("Ada", "Bea"));
+        assert!(matches!(mint(Kind::Phone, ""), Err(TokenError::Payload)));
+        assert!(mint(Kind::Email, "ada@example.com").is_ok());
+    }
+}

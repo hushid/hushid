@@ -230,3 +230,107 @@ impl<'a> Proto<'a> {
         Some(slice)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{field_bytes, messages, Ner, NerError};
+    use std::path::PathBuf;
+
+    fn varint(mut value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value == 0 {
+                out.push(byte);
+                break;
+            }
+            byte |= 0x80;
+            out.push(byte);
+        }
+        out
+    }
+
+    fn delim(field: u64, payload: &[u8]) -> Vec<u8> {
+        let mut out = varint((field << 3) | 2);
+        out.extend(varint(payload.len() as u64));
+        out.extend(payload);
+        out
+    }
+
+    fn tensor(name: &[u8], raw: &[u8]) -> Vec<u8> {
+        let mut body = delim(8, name);
+        body.extend(delim(9, raw));
+        delim(5, &body)
+    }
+
+    fn floats(values: &[f32]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        for value in values {
+            raw.extend(value.to_le_bytes());
+        }
+        raw
+    }
+
+    fn model(gemm: bool, weights: usize, bias: usize) -> Vec<u8> {
+        let mut graph = Vec::new();
+        if gemm {
+            graph.extend(delim(1, &delim(4, b"Gemm")));
+        }
+        graph.extend(tensor(b"W", &floats(&vec![1.0; weights])));
+        graph.extend(tensor(b"B", &floats(&vec![0.0; bias])));
+        graph.extend(varint(2 << 3));
+        graph.extend(varint(1));
+        graph.extend(varint((3 << 3) | 1));
+        graph.extend([0u8; 8]);
+        graph.extend(varint((6 << 3) | 5));
+        graph.extend([0u8; 4]);
+        delim(7, &graph)
+    }
+
+    fn load_bytes(bytes: &[u8]) -> Result<Ner, NerError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "hushid-ner-{}-{}.onnx",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        let loaded = Ner::load(&path);
+        let _ = std::fs::remove_file(&path);
+        loaded
+    }
+
+    #[test]
+    fn a_one_hot_gemm_finds_a_title_and_leaves_the_rest() {
+        let ner = load_bytes(&model(true, 128, 1)).unwrap();
+        let hits = ner.find("Mme Tremblay est arrivée.");
+        assert_eq!(hits.len(), 1);
+        assert!(ner.find("Tremblay est arrivée.").is_empty());
+        assert!(ner.find("Mme A.").is_empty());
+        assert!(ner.find("Mme Ab2").is_empty());
+        assert_eq!(ner.find("Ms. Smith,;:!?\"')").len(), 1);
+        assert!(ner.find("   ").is_empty());
+        assert_eq!(NerError.to_string(), "name model is not a one-hot Gemm");
+    }
+
+    #[test]
+    fn a_model_that_is_not_that_graph_is_refused() {
+        let missing = PathBuf::from("/no/such/hushid-person.onnx");
+        assert!(Ner::load(&missing).is_err());
+        assert!(load_bytes(b"nope").is_err());
+        assert!(load_bytes(&model(false, 128, 1)).is_err());
+        assert!(load_bytes(&model(true, 2, 1)).is_err());
+        assert!(load_bytes(&model(true, 128, 2)).is_err());
+        assert!(load_bytes(&delim(7, &tensor(b"W", &[1, 2, 3]))).is_err());
+        assert!(load_bytes(&delim(7, &tensor(&[0xff], &floats(&[1.0; 128])))).is_err());
+        let mut huge = varint((1 << 3) | 2);
+        huge.extend(varint(100));
+        assert!(load_bytes(&delim(7, &huge)).is_err());
+        assert!(load_bytes(&delim(7, &[0x80; 12])).is_err());
+        assert!(load_bytes(&delim(7, &varint((1 << 3) | 7))).is_err());
+        assert!(messages(&[0x80; 12]).is_empty());
+        assert!(field_bytes(b"", 7).is_none());
+    }
+}
