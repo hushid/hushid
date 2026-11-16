@@ -153,8 +153,9 @@ pub fn classify(name: &str, mcp: bool) -> Sink {
 
 /// Decide whether a finished tool call may run.
 ///
-/// A local file tool gets the original bytes back. The token in the
-/// arguments is not what the tool should write.
+/// A local write gets the original bytes back. The token in the
+/// arguments is not what the tool should write. A local read runs
+/// with the arguments unchanged.
 ///
 /// ```
 /// use hushid::{judge, shield_text, Glossary, Judgment, Sink, Vault};

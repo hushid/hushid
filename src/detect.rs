@@ -570,8 +570,9 @@ fn push_postal(text: &str, out: &mut Vec<RawHit>) {
 
 fn push_births(text: &str, out: &mut Vec<RawHit>) {
     // A date of birth is a calendar date within 40 characters of a
-    // birth cue. The cue is `date of birth`, `birth date`, `DOB`,
-    // `D.O.B.`, `date de naissance`, `DDN`, or `né le`. `born` counts
+    // birth cue. The cue is `date of birth`, `birth date`, `birthdate`,
+    // `DOB`, `D.O.B.`, `date de naissance`, `datenaissance`, `DDN`,
+    // `né le`, `nee le`, or `née le`. `born` counts
     // only inside the same sentence, so a period between that word
     // and a later date leaves the date as written. A date with no
     // cue stays as written. A day that month does not have stays as
@@ -1600,11 +1601,13 @@ pub(crate) fn assignment_secret_prefix(json_prefix: &str, value: &str) -> Option
 
 /// `{sep}` stands for one phone-group separator.
 ///
-/// The class is whitespace, a dot, a slash, or a hyphen mark, so a
-/// figure dash, an en dash, a minus sign, or a soft hyphen counts the
-/// same as an ASCII hyphen. A fullwidth full stop counts as that dot.
-/// A fullwidth solidus counts as that slash. Patterns repeat it when
-/// the gap may hold more than one, as in `416 - 555 - 0123`.
+/// The class is whitespace, a dot, a slash, a comma, a middle dot, or
+/// a hyphen mark, so a figure dash, an en dash, a minus sign, or a
+/// soft hyphen counts the same as an ASCII hyphen. A fullwidth full
+/// stop counts as that dot. A fullwidth solidus counts as that slash.
+/// A fullwidth comma and an ideographic comma count as that comma.
+/// Patterns repeat it when the gap may hold more than one, as in
+/// `416 - 555 - 0123`.
 fn phone_pattern(body: &str) -> Regex {
     Regex::new(
         &body

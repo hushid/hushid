@@ -8,8 +8,10 @@ use std::fmt;
 
 const MAX_JSON_DEPTH: u8 = 8;
 
-/// Surrounding characters kept for a cue. The longest cue plus the
-/// 40-character gap is 66, and the quote on this string takes one more.
+/// Surrounding characters kept for a cue, in Unicode scalars.
+///
+/// The window is 96, which covers the longest cue, the 40-character
+/// gap, and the quote on this string.
 const CUE_CONTEXT_CHARS: usize = 96;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
