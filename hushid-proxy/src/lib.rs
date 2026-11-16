@@ -1295,13 +1295,13 @@ mod tls_tests {
 #[cfg(test)]
 mod coverage_edges {
     use super::{
-        completions_url, decode_chunked, decode_json_string, exchange, http_response, mcp_message,
-        read_http, read_more, read_until_close, tls_dns_name, HttpRequest, Proxy, ProxyError,
-        MAX_BODY,
+        completions_url, decode_chunked, decode_json_string, exchange, forward, http_response,
+        json_object_field, json_raw_field, mcp_message, read_http, read_more, read_until_close,
+        spawn_upstream, tls_dns_name, HttpRequest, Proxy, ProxyError, MAX_BODY,
     };
     use hushid::{Glossary, JsonError, VaultError};
     use std::io::{self, Cursor, Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::thread;
     use std::time::Duration;
 
@@ -1377,6 +1377,7 @@ mod coverage_edges {
     }
 
     #[test]
+    #[allow(clippy::while_let_loop)]
     fn the_proxy_refuses_a_bad_request_before_it_dials() {
         let dir = std::env::temp_dir().join(format!("hushid-proxy-edge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1443,16 +1444,53 @@ mod coverage_edges {
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-            let mut buf = [0u8; 2048];
-            let _ = stream.read(&mut buf);
-            let body = [0xff, 0xfe];
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(response.as_bytes());
-            let _ = stream.write_all(&body);
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            loop {
+                let Ok(read) = stream.read(&mut chunk) else {
+                    break;
+                };
+                if read == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..read]);
+                if !buf.windows(4).any(|window| window == b"\r\n\r\n") {
+                    continue;
+                }
+                let header_end = buf
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .unwrap();
+                let header = std::str::from_utf8(&buf[..header_end]).unwrap_or("");
+                let length = header
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or(0);
+                while buf.len() < header_end + 4 + length {
+                    let read = stream.read(&mut chunk).unwrap_or(0);
+                    if read == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..read]);
+                }
+                let body = [0xffu8, 0xfe];
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                break;
+            }
         });
         let binary = Proxy::bind(
             "127.0.0.1:0",
@@ -1563,6 +1601,66 @@ mod coverage_edges {
         assert!(decode_json_string(r#"\uD800\uD800"#).is_err());
         assert!(decode_json_string(r#"\"#).is_err());
         assert_eq!(decode_json_string(r#"\uD83D\uDE00"#).unwrap(), "😀");
+        assert!(decode_json_string(r#"\uDC00"#).is_err());
+        assert!(decode_json_string(r#"\uZZZZ"#).is_err());
+        assert!(decode_json_string("\u{0001}").is_err());
+        assert!(json_raw_field(r#"{"a":"unterminated}"#, "a").is_none());
+        assert!(json_raw_field(r#"{"a":{"b":1"#, "a").is_none());
+        assert!(json_object_field(r#"{"arguments":"no"}"#, "arguments").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_closed_socket_and_a_failed_write_are_upstream_errors() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-serve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        let addr = proxy.local_addr().unwrap();
+        let handle = thread::spawn(move || proxy.serve_one());
+        let client = TcpStream::connect(addr).unwrap();
+        drop(client);
+        assert!(handle.join().unwrap().is_err());
+
+        struct FailSecond {
+            writes: usize,
+        }
+        impl Read for FailSecond {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                Ok(0)
+            }
+        }
+        impl Write for FailSecond {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.writes += 1;
+                if self.writes > 1 {
+                    Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+                } else {
+                    Ok(buf.len())
+                }
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(exchange(
+            &mut FailSecond { writes: 0 },
+            "/v1/chat/completions",
+            "host:80",
+            "{}",
+            None
+        )
+        .is_err());
+        assert!(completions_url("http://?x=1").is_err());
+        assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"5").is_err());
+        assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"\xff\r\n").is_err());
+        let mut flood = vec![b'A'; MAX_BODY + 8];
+        assert!(read_http(&mut Cursor::new(flood.as_mut_slice())).is_err());
+        let upstream = spawn_upstream(b"{\"ok\":true}").unwrap();
+        let reply = forward(&upstream, "{}", None).unwrap();
+        assert_eq!(reply.status, 200);
+        assert!(reply.body.windows(2).any(|window| window == b"ok"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

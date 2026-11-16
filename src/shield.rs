@@ -249,6 +249,13 @@ mod tests {
             }
         }
         assert!(issued);
+        assert!(matches!(
+            mint_surrogate(&mut vault, Kind::Email, "example.org"),
+            Err(TokenError::Surrogate)
+        ));
+        for _ in 0..20 {
+            let _ = mint_surrogate(&mut vault, Kind::Phone, "7");
+        }
         assert_eq!(mask_for(Kind::Email, "ada@example.com"), "***@***");
         assert_eq!(mask_for(Kind::Phone, "415-555-0134"), "***-***-****");
         assert_eq!(mask_for(Kind::Card, "4111"), "**** **** **** ****");
@@ -259,5 +266,27 @@ mod tests {
         assert_eq!(mask_for(Kind::Birth, "Jan 2, 1990"), "*** *** ***");
         assert_eq!(mask_for(Kind::Glossary, "Nadine"), "***");
         assert_eq!(mask_for(Kind::Email, "***@***"), "(***@***)");
+    }
+}
+
+#[cfg(feature = "ner")]
+#[cfg(test)]
+mod ner_overlap {
+    use super::hit_overlaps;
+    use crate::detect::Hit;
+    use crate::token::Kind;
+
+    fn name(start: usize, end: usize) -> Hit {
+        Hit::Reversible {
+            kind: Kind::Glossary,
+            start,
+            end,
+        }
+    }
+
+    #[test]
+    fn a_later_name_inside_an_earlier_span_is_the_same_hit() {
+        assert!(hit_overlaps(&[name(0, 5)], &name(3, 8)));
+        assert!(!hit_overlaps(&[name(0, 5)], &name(6, 9)));
     }
 }

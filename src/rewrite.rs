@@ -201,3 +201,35 @@ fn base64(data: &[u8], url: bool) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod rest_edges {
+    use super::{encodings, push_bounded, push_commands, quote_closes};
+    use crate::detect::Hit;
+    use crate::token::Kind;
+
+    #[test]
+    fn padded_base64_and_a_quoted_echo_are_recorded() {
+        let forms = encodings("ada@ex.com");
+        assert!(forms.iter().any(|form| form.contains('=')));
+        let mut extras = Vec::new();
+        push_bounded("xxxx", "", Kind::Email, &[], &mut extras);
+        assert!(extras.is_empty());
+        let hit = Hit::Reversible {
+            kind: Kind::Email,
+            start: 0,
+            end: 4,
+        };
+        push_bounded("xxxx", "xx", Kind::Email, &[hit], &mut extras);
+        assert!(quote_closes("echo \"ada\"", 9, "echo \""));
+        let mut extras = Vec::new();
+        push_commands(
+            "echo \"Elodie\"",
+            "Elodie",
+            Kind::Glossary,
+            &[],
+            &mut extras,
+        );
+        assert!(!extras.is_empty(), "{extras:?}");
+    }
+}

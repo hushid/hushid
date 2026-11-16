@@ -182,3 +182,78 @@ fn the_proxy_binary_names_a_missing_flag() {
     assert_eq!(listen.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&listen.stderr).contains("listen"));
 }
+
+#[test]
+fn a_closed_stdout_stops_the_mcp_process() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-closed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut child = Command::new(exe("mcp"))
+        .env("HUSHID_VAULT_DIR", &dir)
+        .env_remove("HUSHID_GLOSSARY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&frame(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"ada@example.com"}}}"#,
+        ))
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{:?}", output.status);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_proxy_exits_when_the_client_drops() {
+    let dir = std::env::temp_dir().join(format!("hushid-proxy-drop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let glossary = dir.join("names.txt");
+    std::fs::write(&glossary, "Nadine\n").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let child = Command::new(exe("proxy"))
+        .env_remove("HUSHID_VAULT_DIR")
+        .env_remove("HUSHID_GLOSSARY")
+        .args([
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--upstream",
+            "http://127.0.0.1:9",
+            "--vault-dir",
+        ])
+        .arg(&dir)
+        .arg("--glossary")
+        .arg(&glossary)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stream = None;
+    for _ in 0..50 {
+        if let Ok(connected) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+            stream = Some(connected);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let stream = stream.expect("proxy did not accept");
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let output = child.wait_with_output().unwrap();
+    drop(stream);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

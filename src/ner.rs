@@ -312,6 +312,8 @@ mod tests {
         assert!(ner.find("Mme Ab2").is_empty());
         assert_eq!(ner.find("Ms. Smith,;:!?\"')").len(), 1);
         assert!(ner.find("   ").is_empty());
+        assert!(!super::person_shape(""));
+        assert!(super::words("plain").len() == 1);
         assert_eq!(NerError.to_string(), "name model is not a one-hot Gemm");
     }
 
