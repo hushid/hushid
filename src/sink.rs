@@ -16,7 +16,8 @@ pub enum Sink {
 ///
 /// `Run` carries no restored text. The host keeps the original arguments.
 /// `Refuse` is the shell, network, GitHub, image, video, and MCP path:
-/// any `h1_` prefix refuses the call, and nothing is interpolated.
+/// an `h1_` prefix refuses the call, including a hex spelling of that
+/// prefix, and nothing is interpolated.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Judgment {
     Run { sink: Sink },
@@ -184,12 +185,63 @@ pub fn judge(vault: &Vault, name: &str, arguments: &str, mcp: bool) -> Judgment 
             Err(error) => Judgment::WriteRejected { sink, error },
         },
         Sink::Shell | Sink::LeavesMachine => {
-            if find_h1(arguments, 0).is_some() {
+            if arguments_carry_a_token(arguments) {
                 Judgment::Refuse { sink }
             } else {
                 Judgment::Run { sink }
             }
         }
+    }
+}
+
+fn arguments_carry_a_token(arguments: &str) -> bool {
+    if find_h1(arguments, 0).is_some() {
+        return true;
+    }
+    let bytes = arguments.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if !bytes[index].is_ascii_hexdigit() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_hexdigit() {
+            index += 1;
+        }
+        let run = &arguments[start..index];
+        if run.len() < 8 || !run.len().is_multiple_of(2) {
+            continue;
+        }
+        let Some(decoded) = decode_hex(run) else {
+            continue;
+        };
+        if find_h1(&decoded, 0).is_some() {
+            return true;
+        }
+    }
+    false
+}
+
+fn decode_hex(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        let high = hex_value(bytes[index])?;
+        let low = hex_value(bytes[index + 1])?;
+        out.push((high << 4) | low);
+        index += 2;
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -220,5 +272,47 @@ impl Drop for Ephemeral {
 pub fn permissions_view(vault: &Vault, text: &str) -> Ephemeral {
     Ephemeral {
         text: vault.restore_display(text),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{judge, Judgment, Sink};
+    use crate::glossary::Glossary;
+    use crate::shield_text;
+    use crate::token::find_h1;
+    use crate::vault::Vault;
+
+    #[test]
+    fn a_shell_hex_of_a_token_is_refused() {
+        let mut vault = Vault::new();
+        let (token, _) = shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        let hex: String = token.bytes().map(|byte| format!("{byte:02x}")).collect();
+        let command = format!("python3 -c \"print(bytes.fromhex('{hex}').decode())\"");
+        assert!(find_h1(&command, 0).is_none(), "{command}");
+        assert!(
+            matches!(
+                judge(&vault, "run_command", &command, false),
+                Judgment::Refuse { sink: Sink::Shell }
+            ),
+            "{command}"
+        );
+        let upper = command.replace(&hex, &hex.to_ascii_uppercase());
+        assert!(matches!(
+            judge(&vault, "run_command", &upper, false),
+            Judgment::Refuse { sink: Sink::Shell }
+        ));
+    }
+
+    #[test]
+    fn a_shell_hex_of_the_clear_address_still_runs() {
+        let vault = Vault::new();
+        let email = "ada@example.com";
+        let hex: String = email.bytes().map(|byte| format!("{byte:02x}")).collect();
+        let command = format!("python3 -c \"print(bytes.fromhex('{hex}').decode())\"");
+        assert!(matches!(
+            judge(&vault, "run_command", &command, false),
+            Judgment::Run { sink: Sink::Shell }
+        ));
     }
 }
