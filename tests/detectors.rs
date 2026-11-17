@@ -10047,3 +10047,20 @@ fn square_brackets_around_a_canadian_area_code_still_shield_the_number() {
         assert_eq!(audit.phone, 0, "{bare} -> {out}");
     }
 }
+
+#[test]
+fn a_diff_plus_before_a_domestic_phone_stays_a_diff_marker() {
+    let diff = "@@ -0,0 +1 @@\n+415-555-0134\n";
+    let mut vault = Vault::new();
+    let (first, _) = shield_text(&mut vault, &Glossary::empty(), "415-555-0134").unwrap();
+    let (second, audit) = shield_text(&mut vault, &Glossary::empty(), diff).unwrap();
+    assert_eq!(audit.phone, 1, "{second}");
+    assert!(second.contains(&first), "{second} {first}");
+    assert!(second.contains("\n+h1_phone_"), "{second}");
+    assert_eq!(vault.len(), 1);
+    assert_eq!(vault.restore_write(&second).unwrap(), diff);
+
+    let (_vault, out, audit) = shield("+44 20 7946 0958");
+    assert_eq!(audit.phone, 1, "{out}");
+    assert!(!out.contains('+'), "{out}");
+}
