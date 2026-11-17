@@ -4,7 +4,7 @@ Hushid replaces a recognized identifier with a typed token. The original stays i
 
 ## Changes
 
-Open a pull request against `main`. Sign every commit with `git commit -s`. The sign-off email is `git config user.email`.
+Open a pull request against `main`. The pull request form asks for the change and the checks. Sign every commit with `git commit -s`. The sign-off email is `git config user.email`.
 
 Do not publish the crate. `publish` stays `false`. Do not add a README badge, a homepage, or `FUNDING.yml`.
 
