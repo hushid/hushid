@@ -34,6 +34,7 @@ fn main() -> ExitCode {
         };
         if let Some(response) = mcp_message(&vault_dir, &glossary, &message) {
             if write_frame(&mut stdout, &response).is_err() {
+                eprintln!("client");
                 return ExitCode::from(1);
             }
         }

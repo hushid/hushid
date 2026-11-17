@@ -206,6 +206,11 @@ fn a_closed_stdout_stops_the_mcp_process() {
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(1), "{:?}", output.status);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("client"),
+        "{:?}",
+        output.stderr
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
