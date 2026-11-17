@@ -69,6 +69,11 @@ fn the_mcp_binary_frames_a_call_and_stops_on_a_bad_header() {
     let missing_file = dir.join("missing.txt");
     let bad_glossary = mcp(Some(&dir), Some(&missing_file), b"");
     assert_eq!(bad_glossary.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&bad_glossary.stderr).contains("glossary"),
+        "{:?}",
+        bad_glossary.stderr
+    );
 
     let quiet = mcp(Some(&dir), Some(&glossary), b"");
     assert_eq!(quiet.status.code(), Some(0), "{:?}", quiet.stderr);
@@ -86,29 +91,22 @@ fn the_mcp_binary_frames_a_call_and_stops_on_a_bad_header() {
 
     let mut long = vec![b'A'; 1100];
     long.extend(b"\r\n\r\n");
-    assert_eq!(mcp(Some(&dir), None, &long).status.code(), Some(0));
-    assert_eq!(
-        mcp(Some(&dir), None, b"\xff\r\n\r\n").status.code(),
-        Some(0)
-    );
-    assert_eq!(
-        mcp(Some(&dir), None, b"Content-Length: no\r\n\r\n")
-            .status
-            .code(),
-        Some(0)
-    );
-    assert_eq!(
-        mcp(Some(&dir), None, b"Content-Length: 10\r\n\r\nab")
-            .status
-            .code(),
-        Some(0)
-    );
-    assert_eq!(
-        mcp(Some(&dir), None, b"Content-Length: 1\r\n\r\n\xff")
-            .status
-            .code(),
-        Some(0)
-    );
+    for stdin in [
+        long.as_slice(),
+        b"\xff\r\n\r\n".as_slice(),
+        b"Content-Length: no\r\n\r\n".as_slice(),
+        b"Content-Length: 10\r\n\r\nab".as_slice(),
+        b"Content-Length: 1\r\n\r\n\xff".as_slice(),
+        b"\r\n\r\n".as_slice(),
+    ] {
+        let output = mcp(Some(&dir), None, stdin);
+        assert_eq!(output.status.code(), Some(1), "{stdin:?} {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("frame"),
+            "{stdin:?} {:?}",
+            output.stderr
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
