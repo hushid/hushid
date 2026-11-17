@@ -285,6 +285,12 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
     }
     for hit in INTERNATIONAL.find_iter(text) {
         if let Some((start, end)) = international_span(text, hit.start(), hit.end()) {
+            // A unified diff writes '+' against the added line. That sign
+            // is not a country code when the rest is already a domestic
+            // number.
+            if plus_prefixes_a_domestic_number(text, start, end, &NANP) {
+                continue;
+            }
             out.push(span(TIER_PHONE, Kind::Phone, start, end));
         }
     }
@@ -293,6 +299,17 @@ fn push_phones(text: &str, out: &mut Vec<RawHit>) {
             out.push(span(TIER_PHONE, Kind::Phone, hit.start(), hit.end()));
         }
     }
+}
+
+fn plus_prefixes_a_domestic_number(text: &str, start: usize, end: usize, nanp: &Regex) -> bool {
+    let Some(slice) = text.get(start..end) else {
+        return false;
+    };
+    let Some(rest) = slice.strip_prefix('+') else {
+        return false;
+    };
+    nanp.find(rest)
+        .is_some_and(|hit| hit.start() == 0 && hit.end() == rest.len())
 }
 
 fn push_cards(text: &str, out: &mut Vec<RawHit>) {
