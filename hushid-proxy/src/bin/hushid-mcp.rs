@@ -66,6 +66,9 @@ fn read_frame(input: &mut impl Read) -> Result<Option<String>, &'static str> {
     let Some(length) = length else {
         return Err("frame");
     };
+    if length > 1024 * 1024 {
+        return Err("frame");
+    }
     let mut body = vec![0u8; length];
     input.read_exact(&mut body).map_err(|_| "frame")?;
     String::from_utf8(body).map(Some).map_err(|_| "frame")

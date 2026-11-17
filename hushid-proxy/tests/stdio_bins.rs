@@ -98,6 +98,7 @@ fn the_mcp_binary_frames_a_call_and_stops_on_a_bad_header() {
         b"Content-Length: 10\r\n\r\nab".as_slice(),
         b"Content-Length: 1\r\n\r\n\xff".as_slice(),
         b"\r\n\r\n".as_slice(),
+        b"Content-Length: 1048577\r\n\r\n".as_slice(),
     ] {
         let output = mcp(Some(&dir), None, stdin);
         assert_eq!(output.status.code(), Some(1), "{stdin:?} {output:?}");
