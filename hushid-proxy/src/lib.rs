@@ -131,14 +131,26 @@ impl Proxy {
             .map_err(|_| ProxyError::Client)?;
         let request = match read_http(&mut stream) {
             Ok(request) => request,
-            Err(err) if err.to_string() == "chunk" => {
-                let response = http_response(400, br#"{"error":"body"}"#);
-                stream
-                    .write_all(response.as_bytes())
-                    .map_err(|_| ProxyError::Client)?;
-                return Ok(());
+            Err(err) => {
+                let word = err.to_string();
+                let answered = word == "chunk"
+                    || (err.kind() == std::io::ErrorKind::InvalidData
+                        && matches!(word.as_str(), "body" | "length" | "headers"));
+                if answered {
+                    let shown = if word == "chunk" {
+                        "body"
+                    } else {
+                        word.as_str()
+                    };
+                    let response =
+                        http_response(400, format!(r#"{{"error":"{shown}"}}"#).as_bytes());
+                    stream
+                        .write_all(response.as_bytes())
+                        .map_err(|_| ProxyError::Client)?;
+                    return Ok(());
+                }
+                return Err(ProxyError::Body);
             }
-            Err(_) => return Err(ProxyError::Body),
         };
         let response = self.handle(&request);
         stream
@@ -436,7 +448,7 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     let header_end = find_header_end(&buf)
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "headers"))?;
     let header_text = std::str::from_utf8(&buf[..header_end])
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "headers"))?;
     let mut lines = header_text.split("\r\n");
     let start = lines.next().unwrap_or("");
     let mut parts = start.split(' ');
@@ -685,10 +697,7 @@ pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Opti
         };
         let text = match json_string_field(arguments, "text") {
             Ok(value) => value.unwrap_or_default(),
-            Err(_) => {
-                let result = r#"{"content":[{"type":"text","text":"text"}],"isError":true}"#;
-                return Some(json_result(id, result));
-            }
+            Err(_) => return Some(escape_tool_error(id)),
         };
         match mcp_tool(vault_dir, glossary, &name, &session, &text) {
             Ok(payload) => format!(r#"{{"content":[{{"type":"text","text":{payload}}}]}}"#),
@@ -1751,6 +1760,14 @@ mod coverage_edges {
         .unwrap();
         assert!(bad_session.contains("escape"), "{bad_session}");
         assert!(!bad_session.contains("\"session\""), "{bad_session}");
+        let bad_text = mcp_message(
+            &dir,
+            &glossary,
+            r#"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"\q"}}}"#,
+        )
+        .unwrap();
+        assert!(bad_text.contains("escape"), "{bad_text}");
+        assert!(!bad_text.contains("\"text\":\"text\""), "{bad_text}");
         assert!(decode_json_string(r#"\uDC00"#).is_err());
         assert!(decode_json_string(r#"\uZZZZ"#).is_err());
         assert!(decode_json_string("\u{0001}").is_err());
@@ -1979,6 +1996,41 @@ mod coverage_edges {
         let response = String::from_utf8_lossy(&response);
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
         assert!(response.contains("\"body\""), "{response}");
+        assert!(!response.contains("upstream"), "{response}");
+        assert!(serve.join().unwrap().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_length_is_http_400_and_the_process_stays_up() {
+        let dir = std::env::temp_dir().join(format!(
+            "hushid-proxy-bad-length-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        let addr = proxy.local_addr().unwrap();
+        let serve = thread::spawn(move || proxy.serve_one());
+        let mut client = TcpStream::connect(addr).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client
+            .write_all(
+                b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nContent-Length: no\r\n\r\n",
+            )
+            .unwrap();
+        let mut response = Vec::new();
+        let _ = client.read_to_end(&mut response);
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert!(response.contains("\"length\""), "{response}");
         assert!(!response.contains("upstream"), "{response}");
         assert!(serve.join().unwrap().is_ok());
         let _ = std::fs::remove_dir_all(&dir);
