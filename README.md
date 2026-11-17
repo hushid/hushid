@@ -41,7 +41,7 @@ A city, a diagnosis, an account number with no recognized shape, a person who is
 
 ## Chat proxy
 
-`hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The session header is `X-Hushid-Session`.
+From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The session header is `X-Hushid-Session`.
 
 ```text
 cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
@@ -51,7 +51,11 @@ cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
 
 ## MCP
 
-`hushid-mcp` reads MCP frames on stdin and writes frames on stdout. `HUSHID_VAULT_DIR` is required. `HUSHID_GLOSSARY` is optional.
+From a clone of this repository, `hushid-mcp` reads MCP frames on stdin and writes frames on stdout. `HUSHID_VAULT_DIR` is required. `HUSHID_GLOSSARY` is optional.
+
+```text
+HUSHID_VAULT_DIR=DIR cargo run -p hushid-proxy --bin hushid-mcp
+```
 
 ## Security
 
