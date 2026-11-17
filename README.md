@@ -10,7 +10,7 @@
 [![Release](https://img.shields.io/github/v/release/hushid/hushid?logo=github&sort=semver)](https://github.com/hushid/hushid/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
-[![OpenSSF Scorecard](https://github.com/hushid/hushid/actions/workflows/scorecard.yml/badge.svg?event=push)](https://github.com/hushid/hushid/actions/workflows/scorecard.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/hushid/hushid/badge)](https://securityscorecards.dev/viewer/?uri=github.com/hushid/hushid)
 [![FOSSA Status](https://github.com/hushid/hushid/actions/workflows/fossa.yml/badge.svg?event=push)](https://github.com/hushid/hushid/actions/workflows/fossa.yml)
 
 Hushid replaces a direct identifier it recognizes with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
