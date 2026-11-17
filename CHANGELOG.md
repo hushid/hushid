@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/hushid/hushid/compare/hushid-v0.1.2...hushid-v0.1.3) (2026-11-16)
+
+
+### Bug Fixes
+
+* keep a chat body intact through the proxy and the vault ([#220](https://github.com/hushid/hushid/issues/220)) ([ebf6d0a](https://github.com/hushid/hushid/commit/ebf6d0a47b7565d267b45489fa594103d5739a22))
+* report a broken MCP string instead of dropping the call ([#224](https://github.com/hushid/hushid/issues/224)) ([beb1bf9](https://github.com/hushid/hushid/commit/beb1bf92ba5f773e1bb089b5f60879f7b7a80f4f))
+
 ## [0.1.2](https://github.com/hushid/hushid/compare/hushid-v0.1.1...hushid-v0.1.2) (2026-11-15)
 
 
