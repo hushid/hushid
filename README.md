@@ -1,4 +1,14 @@
+<p align="center">
+  <img src="brand/ember.svg" alt="Hushid" width="420">
+</p>
+
 # Hushid
+
+[![CI](https://github.com/hushid/hushid/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/hushid/hushid/actions/workflows/ci.yml)
+[![Security](https://github.com/hushid/hushid/actions/workflows/security.yml/badge.svg?event=pull_request)](https://github.com/hushid/hushid/actions/workflows/security.yml)
+[![Coverage](https://github.com/hushid/hushid/actions/workflows/coverage.yml/badge.svg?event=pull_request)](https://github.com/hushid/hushid/actions/workflows/coverage.yml)
+[![Release](https://img.shields.io/github/v/release/hushid/hushid?logo=github&sort=semver)](https://github.com/hushid/hushid/releases/latest)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
 Hushid replaces a direct identifier it recognizes with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
 
