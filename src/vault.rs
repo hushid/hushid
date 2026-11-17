@@ -28,6 +28,9 @@ struct Entry {
 #[derive(Clone)]
 pub struct Vault {
     entries: BTreeMap<String, Entry>,
+    /// Issue order. The map above is sorted by token, which is not the
+    /// order a later shield should prefer.
+    issued: Vec<String>,
     /// Stand-in text to the original surface. Restore walks this before `h1_`.
     digits: BTreeMap<String, String>,
 }
@@ -100,6 +103,7 @@ impl Vault {
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
+            issued: Vec::new(),
             digits: BTreeMap::new(),
         }
     }
@@ -149,6 +153,7 @@ impl Vault {
             self.digits.insert(stand_in.clone(), text.to_string());
         }
         let shown = digits.clone().unwrap_or_else(|| token.clone());
+        self.issued.push(token.clone());
         self.entries.insert(
             token,
             Entry {
@@ -170,11 +175,17 @@ impl Vault {
         surface: &[u8],
     ) -> Result<String, TokenError> {
         let token = format_token(kind, payload)?;
-        self.entries.entry(token.clone()).or_insert_with(|| Entry {
-            surface: surface.to_vec(),
-            json_number: false,
-            digits: None,
-        });
+        if !self.entries.contains_key(&token) {
+            self.issued.push(token.clone());
+            self.entries.insert(
+                token.clone(),
+                Entry {
+                    surface: surface.to_vec(),
+                    json_number: false,
+                    digits: None,
+                },
+            );
+        }
         Ok(token)
     }
 
@@ -204,10 +215,10 @@ impl Vault {
         self.entries.values().any(|entry| entry.surface == bytes)
     }
 
-    /// One token already stored for these exact bytes.
+    /// The earliest token already stored for these exact bytes.
     ///
-    /// Map order is not issuance order. [`Self::issue`] still mints a
-    /// new token when these bytes repeat inside one shield.
+    /// [`Self::issue`] still mints a new token when these bytes repeat
+    /// inside one shield. A later shield uses the earliest of those tokens.
     pub fn first_token_for_surface(&self, bytes: &[u8]) -> Option<&str> {
         self.stored_surfaces()
             .find(|(_, surface)| *surface == bytes)
@@ -220,12 +231,19 @@ impl Vault {
     /// The host can splice one of these tokens back into a later
     /// message before shielding it again.
     pub fn stored_surfaces(&self) -> impl Iterator<Item = (&str, &[u8])> {
-        self.entries.iter().filter_map(|(token, entry)| {
-            if entry.digits.is_none() && !entry.json_number {
-                Some((token.as_str(), entry.surface.as_slice()))
-            } else {
-                None
+        let mut index = 0;
+        std::iter::from_fn(move || {
+            while index < self.issued.len() {
+                let token = self.issued[index].as_str();
+                index += 1;
+                let Some(entry) = self.entries.get(token) else {
+                    continue;
+                };
+                if entry.digits.is_none() && !entry.json_number {
+                    return Some((token, entry.surface.as_slice()));
+                }
             }
+            None
         })
     }
 
@@ -265,7 +283,10 @@ impl Vault {
     pub(crate) fn encode(&self) -> String {
         let mut body = String::from(HEADER);
         body.push('\n');
-        for (token, entry) in &self.entries {
+        for token in &self.issued {
+            let Some(entry) = self.entries.get(token) else {
+                continue;
+            };
             body.push_str(token);
             body.push(' ');
             body.push_str(&hex_encode(&entry.surface));
@@ -294,6 +315,7 @@ impl Vault {
             return Err(VaultError::Corrupt);
         }
         let mut entries = BTreeMap::new();
+        let mut issued = Vec::new();
         let mut digits = BTreeMap::new();
         for line in lines {
             if line.is_empty() {
@@ -338,6 +360,7 @@ impl Vault {
                     return Err(VaultError::Corrupt);
                 }
             }
+            issued.push(token.to_string());
             entries.insert(
                 token.to_string(),
                 Entry {
@@ -347,7 +370,11 @@ impl Vault {
                 },
             );
         }
-        Ok(Self { entries, digits })
+        Ok(Self {
+            entries,
+            issued,
+            digits,
+        })
     }
 }
 
@@ -572,7 +599,7 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(vault.len(), 2);
         let found = vault.first_token_for_surface(b"ada@example.com").unwrap();
-        assert!(found == first || found == second, "{found}");
+        assert_eq!(found, first);
         assert_eq!(vault.get(found), Some(b"ada@example.com".as_slice()));
         assert!(vault
             .first_token_for_surface(b"other@example.com")
