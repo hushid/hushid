@@ -60,15 +60,16 @@ jobs:
           publish_results: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fail if Scorecard produced no results
-        if: hashFiles('results.sarif') == ''
-        env:
-          FIRST_OUTCOME: ${{ steps.scorecard.outcome }}
-          RETRY_OUTCOME: ${{ steps.scorecard_retry.outcome }}
-        run: |
-          echo "Scorecard analysis did not write results.sarif after retry"
-          echo "first outcome=${FIRST_OUTCOME} retry outcome=${RETRY_OUTCOME}"
-          exit 1
+      # A `run` step in this job makes api.scorecard.dev reject the
+      # publish (the job may only use actions). A missing SARIF fails
+      # the artifact upload instead.
+      - name: Keep the Scorecard results
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: scorecard-results
+          path: results.sarif
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload SARIF
         if: hashFiles('results.sarif') != ''

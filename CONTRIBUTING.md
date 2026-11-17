@@ -6,7 +6,7 @@ Hushid replaces a recognized identifier with a typed token. The original stays i
 
 Open a pull request against `main`. The pull request form asks for the change and the checks. Sign every commit with `git commit -s`. The sign-off email is `git config user.email`.
 
-Do not publish the crate. `publish` stays `false`. Do not add a homepage or `FUNDING.yml`. Do not add a README badge that does not resolve. The passing badges are CI, Security, Coverage, the GitHub release, and the Apache-2.0 license.
+Do not publish the crate. `publish` stays `false`. Do not add a homepage or `FUNDING.yml`. Do not add a README badge that does not resolve. The passing badges are CI, Security, Coverage, the GitHub release, the Apache-2.0 license, Scorecard, and FOSSA.
 
 Do not describe the crate as anonymization, private mode, or Law 25 compliant. Do not add a Bline type or a `gaze-recognizers` dependency.
 

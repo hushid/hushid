@@ -10,6 +10,9 @@
 [![Release](https://img.shields.io/github/v/release/hushid/hushid?logo=github&sort=semver)](https://github.com/hushid/hushid/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
+[![OpenSSF Scorecard](https://github.com/hushid/hushid/actions/workflows/scorecard.yml/badge.svg?event=push)](https://github.com/hushid/hushid/actions/workflows/scorecard.yml)
+[![FOSSA Status](https://github.com/hushid/hushid/actions/workflows/fossa.yml/badge.svg?event=push)](https://github.com/hushid/hushid/actions/workflows/fossa.yml)
+
 Hushid replaces a direct identifier it recognizes with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
 
 The token looks like `h1_<kind>_<8 characters><check>`. A secret-shaped value becomes `h1_secret` and is not stored, so it cannot be restored.
