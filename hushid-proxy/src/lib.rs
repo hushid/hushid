@@ -1071,7 +1071,10 @@ mod auth_header_tests {
         let port = listener.local_addr().unwrap().port();
         let upstream = format!("http://127.0.0.1:{port}/v1?x=1\r\nX-Injected: z");
         let err = forward(&upstream, "{}", None);
-        assert!(err.is_err());
+        match err {
+            Err(err) => assert_eq!(err.to_string(), "upstream"),
+            Ok(_) => panic!("a newline in the upstream url was accepted"),
+        }
         assert!(listener.accept().is_err());
     }
 }
