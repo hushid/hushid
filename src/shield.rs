@@ -256,6 +256,26 @@ mod tests {
     use crate::vault::Vault;
 
     #[test]
+    fn a_later_sentence_keeps_the_earliest_token() {
+        use crate::glossary::Glossary;
+        use crate::token::Kind;
+        let mut vault = Vault::new();
+        let earliest = vault
+            .issue_payload(Kind::Email, "ZZZZZZZZ", b"ada@example.com")
+            .unwrap();
+        let sorted_first = vault
+            .issue_payload(Kind::Email, "AAAAAAAA", b"ada@example.com")
+            .unwrap();
+        assert_ne!(earliest, sorted_first);
+        let (out, audit) =
+            super::shield_text(&mut vault, &Glossary::empty(), "see ada@example.com").unwrap();
+        assert_eq!(audit.email, 1, "{out}");
+        assert!(out.contains(&earliest), "{out} {earliest}");
+        assert!(!out.contains(&sorted_first), "{out}");
+        assert_eq!(vault.len(), 2);
+    }
+
+    #[test]
     fn a_later_sentence_keeps_the_stored_address_token() {
         use crate::glossary::Glossary;
         let mut vault = Vault::new();
