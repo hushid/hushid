@@ -49,9 +49,9 @@ pub enum Operator {
 
 /// Replace recognized identifiers in `text`.
 ///
-/// A surface that is already stored keeps that token. A new surface
-/// gets its own token.
-/// Secret-shaped spans become [`SECRET_MARK`] and are not stored.
+/// A repeat inside this call gets its own token. A surface that is
+/// already in `vault` keeps that token. Secret-shaped spans become
+/// [`SECRET_MARK`] and are not stored.
 ///
 /// ```
 /// use hushid::{shield_text, Glossary, Vault};
@@ -114,6 +114,12 @@ pub(crate) fn shield_in_context(
     #[cfg(not(feature = "ner"))]
     let _ = names;
     hits.sort_by_key(|hit| hit_span(hit).0);
+    // Tokens minted inside this call stay out of the snapshot, so a
+    // repeat in this text still gets its own token.
+    let stored: Vec<(String, Vec<u8>)> = vault
+        .stored_surfaces()
+        .map(|(token, surface)| (token.to_string(), surface.to_vec()))
+        .collect();
     let mut audit = AuditRecord::default();
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
@@ -139,7 +145,9 @@ pub(crate) fn shield_in_context(
                     Operator::Digits if digit_kind(kind) => mint_digits(vault, kind, surface)?,
                     Operator::Surrogate => mint_surrogate(vault, kind, surface)?,
                     Operator::Mask => mask_for(kind, surface),
-                    Operator::Token | Operator::Digits => vault.issue(kind, surface.as_bytes())?,
+                    Operator::Token | Operator::Digits => {
+                        reuse_or_issue(vault, &stored, kind, surface)?
+                    }
                 };
                 out.push_str(&replacement);
                 audit.bump(kind);
@@ -226,6 +234,21 @@ fn span_of(hit: &Hit) -> (usize, usize) {
     }
 }
 
+fn reuse_or_issue(
+    vault: &mut Vault,
+    stored: &[(String, Vec<u8>)],
+    kind: Kind,
+    surface: &str,
+) -> Result<String, TokenError> {
+    if let Some((token, _)) = stored
+        .iter()
+        .find(|(_, bytes)| bytes.as_slice() == surface.as_bytes())
+    {
+        return Ok(token.clone());
+    }
+    vault.issue(kind, surface.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{mask_for, mint_digits, mint_surrogate};
@@ -233,13 +256,14 @@ mod tests {
     use crate::vault::Vault;
 
     #[test]
-    fn the_same_address_keeps_one_token() {
+    fn a_later_sentence_keeps_the_stored_address_token() {
         use crate::glossary::Glossary;
         let mut vault = Vault::new();
         let (first, _) =
             super::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
-        let (second, _) =
+        let (second, audit) =
             super::shield_text(&mut vault, &Glossary::empty(), "see ada@example.com").unwrap();
+        assert_eq!(audit.email, 1, "{second}");
         assert!(second.contains(&first), "{second} {first}");
         assert_eq!(vault.len(), 1);
         assert_eq!(vault.restore_write(&second).unwrap(), "see ada@example.com");

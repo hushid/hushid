@@ -143,13 +143,6 @@ impl Vault {
         json_number: bool,
         digits: Option<String>,
     ) -> Result<String, TokenError> {
-        if digits.is_none() && !json_number {
-            if let Some((token, _)) = self.entries.iter().find(|(_, entry)| {
-                entry.surface == surface && entry.digits.is_none() && !entry.json_number
-            }) {
-                return Ok(token.clone());
-            }
-        }
         let token = random_token(kind)?;
         if let Some(stand_in) = &digits {
             let text = std::str::from_utf8(surface).map_err(|_| TokenError::Payload)?;
@@ -209,6 +202,31 @@ impl Vault {
 
     pub fn holds_surface(&self, bytes: &[u8]) -> bool {
         self.entries.values().any(|entry| entry.surface == bytes)
+    }
+
+    /// One token already stored for these exact bytes.
+    ///
+    /// Map order is not issuance order. [`Self::issue`] still mints a
+    /// new token when these bytes repeat inside one shield.
+    pub fn first_token_for_surface(&self, bytes: &[u8]) -> Option<&str> {
+        self.stored_surfaces()
+            .find(|(_, surface)| *surface == bytes)
+            .map(|(token, _)| token)
+    }
+
+    /// Tokens whose stored bytes are the original surface.
+    ///
+    /// Digit stand-ins and JSON-number tokens are not included.
+    /// The host can splice one of these tokens back into a later
+    /// message before shielding it again.
+    pub fn stored_surfaces(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.entries.iter().filter_map(|(token, entry)| {
+            if entry.digits.is_none() && !entry.json_number {
+                Some((token.as_str(), entry.surface.as_slice()))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn restore_display(&self, text: &str) -> String {
@@ -547,13 +565,30 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn a_repeated_surface_keeps_the_first_token() {
+    fn first_token_for_surface_finds_the_stored_address() {
         let mut vault = Vault::new();
         let first = vault.issue(Kind::Email, b"ada@example.com").unwrap();
         let second = vault.issue(Kind::Email, b"ada@example.com").unwrap();
-        assert_eq!(second, first);
-        assert_eq!(vault.len(), 1);
-        assert_eq!(vault.get(&first), Some(b"ada@example.com".as_slice()));
+        assert_ne!(first, second);
+        assert_eq!(vault.len(), 2);
+        let found = vault.first_token_for_surface(b"ada@example.com").unwrap();
+        assert!(found == first || found == second, "{found}");
+        assert_eq!(vault.get(found), Some(b"ada@example.com".as_slice()));
+        assert!(vault
+            .first_token_for_surface(b"other@example.com")
+            .is_none());
+    }
+
+    #[test]
+    fn stored_surfaces_skips_a_digit_stand_in_and_a_json_number() {
+        let mut vault = Vault::new();
+        vault
+            .issue_digits(Kind::Phone, b"415-555-0134", "415-555-0199")
+            .unwrap();
+        vault.issue_json_number(Kind::Phone, b"4155550199").unwrap();
+        assert!(vault.stored_surfaces().next().is_none());
+        assert!(vault.first_token_for_surface(b"415-555-0134").is_none());
+        assert!(vault.first_token_for_surface(b"4155550199").is_none());
     }
 
     #[test]
