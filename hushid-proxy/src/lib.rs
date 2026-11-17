@@ -1744,7 +1744,12 @@ mod coverage_edges {
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"\"\\\b\f\r\/"}}}"#,
         )
         .unwrap();
-        assert!(escapes.contains("result"), "{escapes}");
+        assert!(escapes.contains("\\u0008"), "{escapes}");
+        assert!(escapes.contains("\\u000c"), "{escapes}");
+        assert!(escapes.contains("\\r/"), "{escapes}");
+        assert!(escapes.contains("\\\""), "{escapes}");
+        assert!(escapes.contains("\\\\"), "{escapes}");
+        assert!(!escapes.contains("isError"), "{escapes}");
         assert!(decode_json_string(r#"\q"#).is_err());
         assert!(decode_json_string(r#"\uD800\uD800"#).is_err());
         assert!(decode_json_string(r#"\"#).is_err());
@@ -1790,7 +1795,7 @@ mod coverage_edges {
     }
 
     #[test]
-    fn a_closed_socket_and_a_failed_write_are_upstream_errors() {
+    fn a_dropped_client_is_body_and_a_failed_write_is_upstream() {
         let dir = std::env::temp_dir().join(format!("hushid-proxy-serve-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1801,7 +1806,7 @@ mod coverage_edges {
         let client = TcpStream::connect(addr).unwrap();
         drop(client);
         let err = handle.join().unwrap().unwrap_err();
-        assert_ne!(err.to_string(), "upstream", "{err}");
+        assert_eq!(err.to_string(), "body", "{err}");
 
         struct FailSecond {
             writes: usize,
@@ -1824,14 +1829,16 @@ mod coverage_edges {
                 Ok(())
             }
         }
-        assert!(exchange(
+        match exchange(
             &mut FailSecond { writes: 0 },
             "/v1/chat/completions",
             "host:80",
             "{}",
-            None
-        )
-        .is_err());
+            None,
+        ) {
+            Err(err) => assert_eq!(err.to_string(), "upstream"),
+            Ok(_) => panic!("a failed upstream write was accepted"),
+        }
         assert!(completions_url("http://?x=1").is_err());
         assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"5").is_err());
         assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"\xff\r\n").is_err());
