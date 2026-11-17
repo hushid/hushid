@@ -143,6 +143,13 @@ impl Vault {
         json_number: bool,
         digits: Option<String>,
     ) -> Result<String, TokenError> {
+        if digits.is_none() && !json_number {
+            if let Some((token, _)) = self.entries.iter().find(|(_, entry)| {
+                entry.surface == surface && entry.digits.is_none() && !entry.json_number
+            }) {
+                return Ok(token.clone());
+            }
+        }
         let token = random_token(kind)?;
         if let Some(stand_in) = &digits {
             let text = std::str::from_utf8(surface).map_err(|_| TokenError::Payload)?;
@@ -538,6 +545,16 @@ mod tests {
     use crate::token::Kind;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_repeated_surface_keeps_the_first_token() {
+        let mut vault = Vault::new();
+        let first = vault.issue(Kind::Email, b"ada@example.com").unwrap();
+        let second = vault.issue(Kind::Email, b"ada@example.com").unwrap();
+        assert_eq!(second, first);
+        assert_eq!(vault.len(), 1);
+        assert_eq!(vault.get(&first), Some(b"ada@example.com".as_slice()));
+    }
 
     #[test]
     fn a_repeated_token_is_corrupt() {

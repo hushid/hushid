@@ -49,7 +49,8 @@ pub enum Operator {
 
 /// Replace recognized identifiers in `text`.
 ///
-/// Each reversible surface gets its own token, even when the bytes repeat.
+/// A surface that is already stored keeps that token. A new surface
+/// gets its own token.
 /// Secret-shaped spans become [`SECRET_MARK`] and are not stored.
 ///
 /// ```
@@ -230,6 +231,19 @@ mod tests {
     use super::{mask_for, mint_digits, mint_surrogate};
     use crate::token::{Kind, TokenError};
     use crate::vault::Vault;
+
+    #[test]
+    fn the_same_address_keeps_one_token() {
+        use crate::glossary::Glossary;
+        let mut vault = Vault::new();
+        let (first, _) =
+            super::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        let (second, _) =
+            super::shield_text(&mut vault, &Glossary::empty(), "see ada@example.com").unwrap();
+        assert!(second.contains(&first), "{second} {first}");
+        assert_eq!(vault.len(), 1);
+        assert_eq!(vault.restore_write(&second).unwrap(), "see ada@example.com");
+    }
 
     #[test]
     fn minting_retries_a_copy_and_rejects_a_shape_with_no_digits() {
