@@ -7,7 +7,8 @@
 //! fragment is dropped. A restored body keeps the upstream status; a failed
 //! restore is a 502 and is not forwarded. A request with no `Content-Length`
 //! is read until the connection closes, the same as a response, up to 1 MiB.
-//! A chunked body is assembled the same way. A body shorter than a declared
+//! A chunked body is assembled the same way, for a request and for a
+//! response. A body shorter than a declared
 //! `Content-Length` is refused for both directions. A redirect is not followed.
 
 use hushid::{Glossary, JsonError, Vault};
@@ -128,7 +129,17 @@ impl Proxy {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .map_err(|_| ProxyError::Client)?;
-        let request = read_http(&mut stream).map_err(|_| ProxyError::Body)?;
+        let request = match read_http(&mut stream) {
+            Ok(request) => request,
+            Err(err) if err.to_string() == "chunk" => {
+                let response = http_response(400, br#"{"error":"body"}"#);
+                stream
+                    .write_all(response.as_bytes())
+                    .map_err(|_| ProxyError::Client)?;
+                return Ok(());
+            }
+            Err(_) => return Err(ProxyError::Body),
+        };
         let response = self.handle(&request);
         stream
             .write_all(response.as_bytes())
@@ -472,12 +483,6 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
     }
     let pending = buf[header_end + 4..].to_vec();
     let body = if chunked {
-        if !is_response {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "length",
-            ));
-        }
         decode_chunked(stream, &pending)?
     } else if !saw_length {
         read_until_close(stream, pending)?
@@ -556,7 +561,7 @@ fn decode_chunked(stream: &mut impl Read, pending: &[u8]) -> std::io::Result<Vec
             }
         };
         let line = std::str::from_utf8(&raw[pos..line_end])
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "chunk"))?;
         let size_text = line.split(';').next().unwrap_or("").trim();
         let size = usize::from_str_radix(size_text, 16)
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "chunk"))?;
@@ -1104,9 +1109,15 @@ mod header_tests {
     }
 
     #[test]
-    fn a_chunked_request_is_rejected() {
-        let raw = b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
-        assert!(read_http(&mut &raw[..]).is_err());
+    fn a_chunked_request_is_the_decoded_body() {
+        let json = br#"{"a":"ada@example.com"}"#;
+        let raw = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n{:X}\r\n{}\r\n0\r\n\r\n",
+            json.len(),
+            std::str::from_utf8(json).unwrap()
+        );
+        let request = read_http(&mut Cursor::new(raw.into_bytes())).unwrap();
+        assert_eq!(request.body, json);
     }
 
     #[test]
@@ -1632,10 +1643,11 @@ mod coverage_edges {
             b"POST / HTTP/1.1\r\nContent-Length: nope\r\n\r\n"
         ))
         .is_err());
-        assert!(read_http(&mut Cursor::new(
-            b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+        let empty = read_http(&mut Cursor::new(
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
         ))
-        .is_err());
+        .unwrap();
+        assert!(empty.body.is_empty());
         let huge = format!(
             "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
             MAX_BODY + 1
@@ -1844,6 +1856,131 @@ mod coverage_edges {
         )
         .expect("mcp reply");
         assert!(session_text.contains("\"session\""), "{session_text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_chunked_request_is_shielded() {
+        let dir = std::env::temp_dir().join(format!(
+            "hushid-proxy-chunk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = upstream.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let Ok((mut stream, _)) = upstream.accept() else {
+                return;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while let Ok(read) = stream.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..read]);
+                let Some(header_end) = buf.windows(4).position(|window| window == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let header = std::str::from_utf8(&buf[..header_end]).unwrap_or("");
+                let length = header
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                if buf.len() >= header_end + 4 + length {
+                    break;
+                }
+            }
+            let _ = tx.send(buf);
+            let body = br#"{"ok":true}"#;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body);
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let addr = proxy.local_addr().unwrap();
+        let serve = thread::spawn(move || proxy.serve_one());
+        let json = br#"{"a":"ada@example.com"}"#;
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nX-Hushid-Session: demo\r\n\r\n{:X}\r\n{}\r\n0\r\n\r\n",
+            json.len(),
+            std::str::from_utf8(json).unwrap()
+        );
+        let mut client = TcpStream::connect(addr).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        let _ = client.read_to_end(&mut response);
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains("ok"), "{response}");
+        assert!(!response.contains("ada@example.com"), "{response}");
+        let forwarded_bytes = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let forwarded = String::from_utf8_lossy(&forwarded_bytes);
+        assert!(forwarded.contains("h1_email_"), "{forwarded}");
+        assert!(!forwarded.contains("ada@example.com"), "{forwarded}");
+        assert!(serve.join().unwrap().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_invalid_chunked_request_is_http_400() {
+        let dir = std::env::temp_dir().join(format!(
+            "hushid-proxy-bad-chunk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        let addr = proxy.local_addr().unwrap();
+        let serve = thread::spawn(move || proxy.serve_one());
+        let mut client = TcpStream::connect(addr).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client
+            .write_all(
+                b"POST /v1/chat/completions HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n\xff\r\n",
+            )
+            .unwrap();
+        let mut response = Vec::new();
+        let _ = client.read_to_end(&mut response);
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert!(response.contains("\"body\""), "{response}");
+        assert!(!response.contains("upstream"), "{response}");
+        assert!(serve.join().unwrap().is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
