@@ -183,6 +183,43 @@ fn the_proxy_binary_names_a_missing_flag() {
 }
 
 #[test]
+fn an_mcp_length_header_allows_case_and_a_space() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-length-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let message = r#"{"jsonrpc":"2.0","method":"ping"}"#;
+    let len = message.len();
+    for header in [
+        format!("content-length: {len}"),
+        format!("Content-Length : {len}"),
+        format!("CONTENT-LENGTH: {len}"),
+    ] {
+        let mut stdin = header.clone().into_bytes();
+        stdin.extend(b"\r\n\r\n");
+        stdin.extend(message.as_bytes());
+        let output = mcp(Some(&dir), None, &stdin);
+        assert_eq!(output.status.code(), Some(0), "{header} {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("result"),
+            "{header} {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    let bad = format!(
+        "Content-Length: {len}\r\nContent-Length: {}\r\n\r\n{message}",
+        len + 1
+    );
+    let output = mcp(Some(&dir), None, bad.as_bytes());
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("frame"),
+        "{:?}",
+        output.stderr
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_closed_stdout_stops_the_mcp_process() {
     let dir = std::env::temp_dir().join(format!("hushid-mcp-closed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

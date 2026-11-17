@@ -60,9 +60,19 @@ fn read_frame(input: &mut impl Read) -> Result<Option<String>, &'static str> {
     let text = std::str::from_utf8(&header).map_err(|_| "frame")?;
     let mut length = None;
     for line in text.split("\r\n") {
-        if let Some(value) = line.strip_prefix("Content-Length:") {
-            length = Some(value.trim().parse::<usize>().map_err(|_| "frame")?);
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !name.trim().eq_ignore_ascii_case("content-length") {
+            continue;
         }
+        let parsed = value.trim().parse::<usize>().map_err(|_| "frame")?;
+        if let Some(previous) = length {
+            if previous != parsed {
+                return Err("frame");
+            }
+        }
+        length = Some(parsed);
     }
     let Some(length) = length else {
         return Err("frame");
