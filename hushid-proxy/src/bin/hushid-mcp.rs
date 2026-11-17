@@ -13,7 +13,10 @@ fn main() -> ExitCode {
     let glossary = match env::var_os("HUSHID_GLOSSARY").map(PathBuf::from) {
         Some(path) => match Glossary::load(&path) {
             Ok(glossary) => glossary,
-            Err(_) => return ExitCode::from(2),
+            Err(err) => {
+                eprintln!("glossary {}: {err}", path.display());
+                return ExitCode::from(2);
+            }
         },
         None => Glossary::empty(),
     };
@@ -21,42 +24,65 @@ fn main() -> ExitCode {
     let mut input = stdin.lock();
     let mut stdout = io::stdout().lock();
     loop {
-        let Some(message) = read_frame(&mut input) else {
-            return ExitCode::SUCCESS;
+        let message = match read_frame(&mut input) {
+            Ok(Some(message)) => message,
+            Ok(None) => return ExitCode::SUCCESS,
+            Err(word) => {
+                eprintln!("{word}");
+                return ExitCode::from(1);
+            }
         };
         if let Some(response) = mcp_message(&vault_dir, &glossary, &message) {
             if write_frame(&mut stdout, &response).is_err() {
+                eprintln!("client");
                 return ExitCode::from(1);
             }
         }
     }
 }
 
-fn read_frame(input: &mut impl Read) -> Option<String> {
+fn read_frame(input: &mut impl Read) -> Result<Option<String>, &'static str> {
     let mut header = Vec::new();
     let mut byte = [0u8; 1];
     loop {
-        if input.read(&mut byte).ok()? == 0 {
-            return None;
+        match input.read(&mut byte) {
+            Ok(0) if header.is_empty() => return Ok(None),
+            Ok(0) | Err(_) => return Err("frame"),
+            Ok(_) => header.push(byte[0]),
         }
-        header.push(byte[0]);
         if header.ends_with(b"\r\n\r\n") {
             break;
         }
         if header.len() > 1024 {
-            return None;
+            return Err("frame");
         }
     }
-    let text = std::str::from_utf8(&header).ok()?;
-    let mut length = 0usize;
+    let text = std::str::from_utf8(&header).map_err(|_| "frame")?;
+    let mut length = None;
     for line in text.split("\r\n") {
-        if let Some(value) = line.strip_prefix("Content-Length:") {
-            length = value.trim().parse().ok()?;
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !name.trim().eq_ignore_ascii_case("content-length") {
+            continue;
         }
+        let parsed = value.trim().parse::<usize>().map_err(|_| "frame")?;
+        if let Some(previous) = length {
+            if previous != parsed {
+                return Err("frame");
+            }
+        }
+        length = Some(parsed);
+    }
+    let Some(length) = length else {
+        return Err("frame");
+    };
+    if length > 1024 * 1024 {
+        return Err("frame");
     }
     let mut body = vec![0u8; length];
-    input.read_exact(&mut body).ok()?;
-    String::from_utf8(body).ok()
+    input.read_exact(&mut body).map_err(|_| "frame")?;
+    String::from_utf8(body).map(Some).map_err(|_| "frame")
 }
 
 fn write_frame(output: &mut impl Write, message: &str) -> io::Result<()> {

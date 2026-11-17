@@ -29,8 +29,9 @@ const MAX_BODY: usize = 1024 * 1024;
 #[derive(Debug)]
 /// Why a proxy call failed.
 ///
-/// `Client` was added after 0.1.2. A caller that matches every variant
-/// needs an arm for it. A match that already has a wildcard does not.
+/// `Client` and `Headers` were added after 0.1.2. A caller that matches
+/// every variant needs an arm for each. A match that already has a
+/// wildcard does not.
 pub enum ProxyError {
     Session,
     Body,
@@ -38,6 +39,11 @@ pub enum ProxyError {
     /// the response uses this variant. Its display is `client`. A failed
     /// dial stays [`ProxyError::Upstream`].
     Client,
+    /// The inbound `Authorization` value contained a carriage return, a
+    /// line feed, or a NUL. Its display is `headers`. No dial happens.
+    /// A line break in the configured upstream URL stays
+    /// [`ProxyError::Upstream`].
+    Headers,
     Upstream,
     Vault(hushid::VaultError),
     Json(JsonError),
@@ -49,6 +55,7 @@ impl fmt::Display for ProxyError {
             ProxyError::Session => write!(f, "session"),
             ProxyError::Body => write!(f, "body"),
             ProxyError::Client => write!(f, "client"),
+            ProxyError::Headers => write!(f, "headers"),
             ProxyError::Upstream => write!(f, "upstream"),
             ProxyError::Vault(err) => write!(f, "vault: {err}"),
             ProxyError::Json(err) => write!(f, "body: {err}"),
@@ -188,6 +195,7 @@ impl Proxy {
         }
         let upstream = match forward(&self.upstream, &shielded, request.header("authorization")) {
             Ok(reply) => reply,
+            Err(ProxyError::Headers) => return http_response(400, br#"{"error":"headers"}"#),
             Err(_) => return http_response(502, br#"{"error":"upstream"}"#),
         };
         let restored = match std::str::from_utf8(&upstream.body) {
@@ -225,7 +233,7 @@ pub fn forward(
             .bytes()
             .any(|byte| byte == b'\r' || byte == b'\n' || byte == 0)
         {
-            return Err(ProxyError::Upstream);
+            return Err(ProxyError::Headers);
         }
     }
     if upstream
@@ -1044,7 +1052,10 @@ mod auth_header_tests {
             Some("Bearer a\nX: y"),
         );
         reader.join().unwrap();
-        assert!(err.is_err());
+        match err {
+            Err(err) => assert_eq!(err.to_string(), "headers"),
+            Ok(_) => panic!("a newline in authorization was accepted"),
+        }
         let sent = seen.lock().unwrap();
         let sent = String::from_utf8_lossy(&sent);
         assert!(
@@ -1469,6 +1480,7 @@ mod coverage_edges {
         assert_eq!(ProxyError::Session.to_string(), "session");
         assert_eq!(ProxyError::Body.to_string(), "body");
         assert_eq!(ProxyError::Client.to_string(), "client");
+        assert_eq!(ProxyError::Headers.to_string(), "headers");
         assert_eq!(ProxyError::Upstream.to_string(), "upstream");
         assert!(ProxyError::Vault(VaultError::Missing)
             .to_string()
@@ -1732,7 +1744,12 @@ mod coverage_edges {
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"\"\\\b\f\r\/"}}}"#,
         )
         .unwrap();
-        assert!(escapes.contains("result"), "{escapes}");
+        assert!(escapes.contains("\\u0008"), "{escapes}");
+        assert!(escapes.contains("\\u000c"), "{escapes}");
+        assert!(escapes.contains("\\r/"), "{escapes}");
+        assert!(escapes.contains("\\\""), "{escapes}");
+        assert!(escapes.contains("\\\\"), "{escapes}");
+        assert!(!escapes.contains("isError"), "{escapes}");
         assert!(decode_json_string(r#"\q"#).is_err());
         assert!(decode_json_string(r#"\uD800\uD800"#).is_err());
         assert!(decode_json_string(r#"\"#).is_err());
@@ -1778,7 +1795,7 @@ mod coverage_edges {
     }
 
     #[test]
-    fn a_closed_socket_and_a_failed_write_are_upstream_errors() {
+    fn a_dropped_client_is_body_and_a_failed_write_is_upstream() {
         let dir = std::env::temp_dir().join(format!("hushid-proxy-serve-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1789,7 +1806,7 @@ mod coverage_edges {
         let client = TcpStream::connect(addr).unwrap();
         drop(client);
         let err = handle.join().unwrap().unwrap_err();
-        assert_ne!(err.to_string(), "upstream", "{err}");
+        assert_eq!(err.to_string(), "body", "{err}");
 
         struct FailSecond {
             writes: usize,
@@ -1812,14 +1829,16 @@ mod coverage_edges {
                 Ok(())
             }
         }
-        assert!(exchange(
+        match exchange(
             &mut FailSecond { writes: 0 },
             "/v1/chat/completions",
             "host:80",
             "{}",
-            None
-        )
-        .is_err());
+            None,
+        ) {
+            Err(err) => assert_eq!(err.to_string(), "upstream"),
+            Ok(_) => panic!("a failed upstream write was accepted"),
+        }
         assert!(completions_url("http://?x=1").is_err());
         assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"5").is_err());
         assert!(decode_chunked(&mut Cursor::new(Vec::new()), b"\xff\r\n").is_err());
@@ -2033,6 +2052,35 @@ mod coverage_edges {
         assert!(response.contains("\"length\""), "{response}");
         assert!(!response.contains("upstream"), "{response}");
         assert!(serve.join().unwrap().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_newline_in_authorization_is_headers_not_upstream() {
+        let dir = std::env::temp_dir().join(format!(
+            "hushid-proxy-auth-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let proxy =
+            Proxy::bind("127.0.0.1:0", "http://127.0.0.1:9", &dir, Glossary::empty()).unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[
+                ("x-hushid-session", "demo"),
+                ("authorization", "Bearer a\nX: y"),
+            ],
+            b"{}",
+        ));
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert!(response.contains("\"headers\""), "{response}");
+        assert!(!response.contains("upstream"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

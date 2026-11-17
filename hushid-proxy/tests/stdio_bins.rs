@@ -69,6 +69,11 @@ fn the_mcp_binary_frames_a_call_and_stops_on_a_bad_header() {
     let missing_file = dir.join("missing.txt");
     let bad_glossary = mcp(Some(&dir), Some(&missing_file), b"");
     assert_eq!(bad_glossary.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&bad_glossary.stderr).contains("glossary"),
+        "{:?}",
+        bad_glossary.stderr
+    );
 
     let quiet = mcp(Some(&dir), Some(&glossary), b"");
     assert_eq!(quiet.status.code(), Some(0), "{:?}", quiet.stderr);
@@ -86,29 +91,23 @@ fn the_mcp_binary_frames_a_call_and_stops_on_a_bad_header() {
 
     let mut long = vec![b'A'; 1100];
     long.extend(b"\r\n\r\n");
-    assert_eq!(mcp(Some(&dir), None, &long).status.code(), Some(0));
-    assert_eq!(
-        mcp(Some(&dir), None, b"\xff\r\n\r\n").status.code(),
-        Some(0)
-    );
-    assert_eq!(
-        mcp(Some(&dir), None, b"Content-Length: no\r\n\r\n")
-            .status
-            .code(),
-        Some(0)
-    );
-    assert_eq!(
-        mcp(Some(&dir), None, b"Content-Length: 10\r\n\r\nab")
-            .status
-            .code(),
-        Some(0)
-    );
-    assert_eq!(
-        mcp(Some(&dir), None, b"Content-Length: 1\r\n\r\n\xff")
-            .status
-            .code(),
-        Some(0)
-    );
+    for stdin in [
+        long.as_slice(),
+        b"\xff\r\n\r\n".as_slice(),
+        b"Content-Length: no\r\n\r\n".as_slice(),
+        b"Content-Length: 10\r\n\r\nab".as_slice(),
+        b"Content-Length: 1\r\n\r\n\xff".as_slice(),
+        b"\r\n\r\n".as_slice(),
+        b"Content-Length: 1048577\r\n\r\n".as_slice(),
+    ] {
+        let output = mcp(Some(&dir), None, stdin);
+        assert_eq!(output.status.code(), Some(1), "{stdin:?} {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("frame"),
+            "{stdin:?} {:?}",
+            output.stderr
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -184,6 +183,43 @@ fn the_proxy_binary_names_a_missing_flag() {
 }
 
 #[test]
+fn an_mcp_length_header_allows_case_and_a_space() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-length-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let message = r#"{"jsonrpc":"2.0","method":"ping"}"#;
+    let len = message.len();
+    for header in [
+        format!("content-length: {len}"),
+        format!("Content-Length : {len}"),
+        format!("CONTENT-LENGTH: {len}"),
+    ] {
+        let mut stdin = header.clone().into_bytes();
+        stdin.extend(b"\r\n\r\n");
+        stdin.extend(message.as_bytes());
+        let output = mcp(Some(&dir), None, &stdin);
+        assert_eq!(output.status.code(), Some(0), "{header} {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("result"),
+            "{header} {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    let bad = format!(
+        "Content-Length: {len}\r\nContent-Length: {}\r\n\r\n{message}",
+        len + 1
+    );
+    let output = mcp(Some(&dir), None, bad.as_bytes());
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("frame"),
+        "{:?}",
+        output.stderr
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_closed_stdout_stops_the_mcp_process() {
     let dir = std::env::temp_dir().join(format!("hushid-mcp-closed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -207,6 +243,11 @@ fn a_closed_stdout_stops_the_mcp_process() {
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(1), "{:?}", output.status);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("client"),
+        "{:?}",
+        output.stderr
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
