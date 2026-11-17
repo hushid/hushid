@@ -717,7 +717,12 @@ fn popular_names_are_opt_in() {
 #[test]
 fn quiet_surfaces_stay_out_of_the_tree() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    assert!(!root.join("README.md").exists());
+    let readme = fs::read_to_string(root.join("README.md")).unwrap();
+    let readme_lower = readme.to_ascii_lowercase();
+    assert!(!readme_lower.contains("anonym"), "{readme}");
+    assert!(!readme_lower.contains("law 25"), "{readme}");
+    assert!(!readme_lower.contains("law25"), "{readme}");
+    assert!(!readme_lower.contains("private mode"), "{readme}");
     assert!(!root.join(".github/FUNDING.yml").exists());
     let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
     assert!(manifest.contains("publish = false"));
