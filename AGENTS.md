@@ -4,7 +4,7 @@ Library crate. It replaces direct identifiers it recognizes with typed tokens. A
 
 ## Constraints
 
-- `README.md` is the public page. The GitHub description is set, and the topics are `rust` and `identifiers`. The README shows the ember mark and the CI, Security, Coverage, release, license, Scorecard, and FOSSA badges. Scorecard uses the public API shield. FOSSA uses the workflow badge for a push run. Homepage and FUNDING.yml stay unset. Do not publish the crate from this file. Do not add a crates.io or docs.rs badge until the crate is published.
+- `README.md` is the public page. The GitHub description is set, and the topics are `rust` and `identifiers`. The README shows the ember mark and the CI, Security, Coverage, release, license, Scorecard, FOSSA, and OpenSSF Best Practices badges. The Best Practices project id is 16867. Scorecard uses the public API shield. FOSSA uses the workflow badge for a push run. Homepage and FUNDING.yml stay unset. Do not publish the crate from this file. Do not add a crates.io or docs.rs badge until the crate is published.
 - The mark is `brand/ember.svg`. The repository social preview is generated from that file. The org picture is `brand/ember-avatar.svg`, that mark filling a square. Do not replace either with a different image.
 - `publish = false`. Do not publish the crate.
 - Do not describe this crate as anonymization, private mode, or Law 25 compliant.
