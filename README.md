@@ -12,6 +12,8 @@
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/hushid/hushid/badge)](https://securityscorecards.dev/viewer/?uri=github.com/hushid/hushid)
 [![FOSSA Status](https://github.com/hushid/hushid/actions/workflows/fossa.yml/badge.svg?event=push)](https://github.com/hushid/hushid/actions/workflows/fossa.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16867/badge)](https://www.bestpractices.dev/projects/16867)
+[![Docs](https://img.shields.io/badge/docs-hushid.github.io-blue)](https://hushid.github.io/hushid/)
 
 Hushid replaces a direct identifier it recognizes with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
 
@@ -19,7 +21,7 @@ The token looks like `h1_<kind>_<8 characters><check>`. A secret-shaped value be
 
 ## Add it to a crate
 
-The crate is not published to crates.io. Depend on a tag:
+Releases are published to crates.io. The 0.1.3 tag is not on crates.io yet. Until the next release, depend on the tag:
 
 ```toml
 [dependencies]
