@@ -4,9 +4,9 @@ Library crate. It replaces direct identifiers it recognizes with typed tokens. A
 
 ## Constraints
 
-- `README.md` is the public page. The GitHub description is set, and the topics are `rust` and `identifiers`. The README shows the ember mark and the CI, Security, Coverage, release, license, Scorecard, FOSSA, OpenSSF Best Practices, and docs badges. The Best Practices project id is 16867. Scorecard uses the public API shield. FOSSA uses the workflow badge for a push run. The GitHub homepage is `https://hushid.github.io/hushid/`, the mdBook in `docs/`. FUNDING.yml stays unset. Do not publish the crate from this file. Do not add a crates.io or docs.rs badge until the crate is published.
+- `README.md` is the public page. The GitHub description is set, and the topics are `rust` and `identifiers`. The README shows the ember mark and the CI, Security, Coverage, release, license, Scorecard, FOSSA, OpenSSF Best Practices, and docs badges. The Best Practices project id is 16867. Scorecard uses the public API shield. FOSSA uses the workflow badge for a push run. The GitHub homepage is `https://hushid.github.io/hushid/`, the mdBook in `docs/`. FUNDING.yml stays unset. Do not `cargo publish` from a laptop. A release tag publishes the `hushid` crate from `.github/workflows/publish-crates.yml`. `hushid-proxy` stays `publish = false`. Do not add a crates.io or docs.rs badge until the crate is on crates.io. Do not merge a release pull unless this chat names it and says yes.
 - The mark is `brand/ember.svg`. The repository social preview is generated from that file. The org picture is `brand/ember-avatar.svg`, that mark filling a square. Do not replace either with a different image.
-- `publish = false`. Do not publish the crate.
+- The `hushid` crate is published to crates.io when a release tag is pushed. `hushid-proxy` stays unpublished.
 - Do not describe this crate as anonymization, private mode, or Law 25 compliant.
 - No Bline types. No `gaze-recognizers` dependency.
 - Sign every commit with `git commit -s`. The sign-off email is `git config user.email`.

@@ -1,6 +1,6 @@
 # Install
 
-The crate is not published to crates.io. Depend on a tag:
+Releases are published to crates.io. The 0.1.3 tag is not on crates.io yet. Until the next release, depend on the tag:
 
 ```toml
 [dependencies]

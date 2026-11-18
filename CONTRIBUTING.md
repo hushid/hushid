@@ -6,7 +6,7 @@ Hushid replaces a recognized identifier with a typed token. The original stays i
 
 Open a pull request against `main`. The pull request form asks for the change and the checks. Sign every commit with `git commit -s`. The sign-off email is `git config user.email`.
 
-Do not publish the crate. `publish` stays `false`. The homepage is the mdBook in `docs/`. Do not add a second site or `FUNDING.yml`. Do not add a README badge that does not resolve. The passing badges are CI, Security, Coverage, the GitHub release, the Apache-2.0 license, Scorecard, FOSSA, OpenSSF Best Practices, and the docs site.
+Do not run `cargo publish` yourself. A release publishes the `hushid` crate. Leave `hushid-proxy` unpublished. The homepage is the mdBook in `docs/`. Do not add a second site or `FUNDING.yml`. Do not add a README badge that does not resolve. The passing badges are CI, Security, Coverage, the GitHub release, the Apache-2.0 license, Scorecard, FOSSA, OpenSSF Best Practices, and the docs site.
 
 Do not describe the crate as anonymization, private mode, or Law 25 compliant. Do not add a Bline type or a `gaze-recognizers` dependency.
 
