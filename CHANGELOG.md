@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4](https://github.com/hushid/hushid/compare/hushid-v0.1.3...hushid-v0.1.4) (2026-11-18)
+
+
+### Bug Fixes
+
+* decode a chunked chat request and answer a bad one ([#226](https://github.com/hushid/hushid/issues/226)) ([11dd696](https://github.com/hushid/hushid/commit/11dd696211f2aae5214875b7981e44571dffd02f)), closes [#225](https://github.com/hushid/hushid/issues/225)
+* keep a diff plus out of a domestic phone ([#235](https://github.com/hushid/hushid/issues/235)) ([3af70dd](https://github.com/hushid/hushid/commit/3af70ddc2d64e2371207c8d8ad3ab393e74df94c))
+* keep a stored address token on a later shield ([#231](https://github.com/hushid/hushid/issues/231)) ([1cb058f](https://github.com/hushid/hushid/commit/1cb058f65767cd65c9e00b8f5249a29383a24ed4))
+* name a bad authorization value and a bad MCP frame ([#229](https://github.com/hushid/hushid/issues/229)) ([bcb01a2](https://github.com/hushid/hushid/commit/bcb01a239bfe5ccbf5b898689585c5f984c4144a))
+* name a header or length failure and a broken MCP text escape ([#228](https://github.com/hushid/hushid/issues/228)) ([c63b9bc](https://github.com/hushid/hushid/commit/c63b9bc7093ab46c2e6e2e4d6092c0f1ca32f4ec))
+* refuse a shell that hides an identifier token in hex ([#234](https://github.com/hushid/hushid/issues/234)) ([3a1da78](https://github.com/hushid/hushid/commit/3a1da7828a9be4d97aae9def3ae8fb0556935ad9))
+* reuse the earliest token when an address was stored twice ([#232](https://github.com/hushid/hushid/issues/232)) ([cb1a0fe](https://github.com/hushid/hushid/commit/cb1a0fe51ebf5bc7d9b4c2c616db8a50f480796c))
+
 ## [0.1.3](https://github.com/hushid/hushid/compare/hushid-v0.1.2...hushid-v0.1.3) (2026-11-16)
 
 
