@@ -755,3 +755,19 @@ fn quiet_surfaces_stay_out_of_the_tree() {
         assert!(!text.contains("gaze"), "{}", path.display());
     }
 }
+
+#[test]
+fn install_snippet_tracks_the_0_1_line() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in ["README.md", "docs/getting-started/install.md"] {
+        let text = fs::read_to_string(root.join(relative)).unwrap();
+        assert!(
+            text.contains("hushid = \"0.1\""),
+            "{relative} should depend on the 0.1 line"
+        );
+        assert!(
+            !text.contains("hushid = \"0.1."),
+            "{relative} must not pin a patch"
+        );
+    }
+}
