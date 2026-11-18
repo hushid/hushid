@@ -14,10 +14,13 @@ fn exe(name: &str) -> std::path::PathBuf {
         }
     }
     let mut dir = std::env::current_exe().unwrap();
+    let names = [file.to_string(), format!("{file}.exe")];
     loop {
-        let candidate = dir.join(file);
-        if candidate.is_file() {
-            return candidate;
+        for name in &names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
         }
         if !dir.pop() {
             break;
