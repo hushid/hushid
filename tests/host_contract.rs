@@ -725,7 +725,15 @@ fn quiet_surfaces_stay_out_of_the_tree() {
     assert!(!readme_lower.contains("private mode"), "{readme}");
     assert!(!root.join(".github/FUNDING.yml").exists());
     let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
-    assert!(manifest.contains("publish = false"));
+    assert!(
+        !manifest.contains("publish = false"),
+        "the hushid crate is published with a release"
+    );
+    let proxy = fs::read_to_string(root.join("hushid-proxy/Cargo.toml")).unwrap();
+    assert!(
+        proxy.contains("publish = false"),
+        "hushid-proxy stays off crates.io"
+    );
     let lower = manifest.to_ascii_lowercase();
     assert!(!lower.contains("keywords"));
     for entry in fs::read_dir(root.join("src")).unwrap() {
