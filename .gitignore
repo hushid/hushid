@@ -5,3 +5,4 @@
 __pycache__/
 fuzz/target/
 fuzz/artifacts/
+book-output/
