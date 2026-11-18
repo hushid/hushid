@@ -1,6 +1,6 @@
 # Hushid
 
-Hushid replaces a direct identifier it recognizes with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
+Hushid replaces a direct identifier it recognizes, such as an email or a payment card, with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
 
 The token looks like `h1_<kind>_<8 characters><check>`. A secret-shaped value becomes `h1_secret` and is not stored, so it cannot be restored.
 
@@ -11,6 +11,8 @@ Email, a phone number with separators, a payment card, a SIN next to a cue, a RA
 ## What stays as written
 
 A city, a diagnosis, an account number with no recognized shape, a person who is not in the loaded glossary, and text inside an image or a PDF. The optional `ner` feature is off unless the host turns it on, and `shield_text` does not use it.
+
+The rest of this guide covers [what matches](what-matches.md), [what the replacement looks like](replacements.md), the [vault file](vault.md), and how a [host](host.md) judges a tool call.
 
 ## Security and license
 

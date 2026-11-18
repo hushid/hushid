@@ -1,12 +1,16 @@
 [package]
 name = "hushid"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 rust-version = "1.87"
 license = "Apache-2.0"
-description = "Replace recognized direct identifiers with tokens."
+description = "Replace a recognized identifier with a typed token. The original stays in a vault."
 repository = "https://github.com/hushid/hushid"
+homepage = "https://hushid.github.io/hushid/"
+documentation = "https://docs.rs/hushid"
 readme = "README.md"
+keywords = ["pii", "tokenization", "privacy", "identifier", "sensitive-data"]
+categories = ["text-processing"]
 
 [dependencies]
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }

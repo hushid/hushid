@@ -17,7 +17,7 @@
 [![Docs](https://img.shields.io/badge/docs-hushid.github.io-blue)](https://hushid.github.io/hushid/)
 [![docs.rs](https://img.shields.io/docsrs/hushid)](https://docs.rs/hushid)
 
-Hushid replaces a direct identifier it recognizes with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
+Hushid replaces a direct identifier it recognizes, such as an email or a payment card, with a typed token. The original bytes stay in a session vault and are copied back only when that vault is asked to restore a token it issued. A value no detector recognizes is left unchanged.
 
 The token looks like `h1_<kind>_<8 characters><check>`. A secret-shaped value becomes `h1_secret` and is not stored, so it cannot be restored.
 
@@ -25,10 +25,10 @@ The token looks like `h1_<kind>_<8 characters><check>`. A secret-shaped value be
 
 ```toml
 [dependencies]
-hushid = "0.1.4"
+hushid = "0.1"
 ```
 
-Rust 1.87 or newer.
+Cargo selects the latest 0.1 release. Rust 1.87 or newer.
 
 ## Replace and restore
 

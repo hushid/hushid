@@ -339,6 +339,29 @@ fn bline_builtin_tools_are_in_the_judge_list() {
             collect_tool_names(&path, &mut found);
         }
     }
+    for required in [
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
+        "browser_screenshot",
+        "browser_evaluate",
+        "web_llm_chat",
+        "lsp_diagnostics",
+        "lsp_hover",
+        "lsp_definition",
+        "lsp_references",
+        "lsp_symbols",
+        "scheduler_create",
+        "scheduler_list",
+        "scheduler_delete",
+    ] {
+        if root.join("crates/bline-browser/src/tools.rs").is_file() {
+            assert!(
+                found.contains(required),
+                "{required} sits below #[cfg(test)] and was not scanned"
+            );
+        }
+    }
     let known: BTreeSet<&str> = known_tool_sinks().iter().map(|(name, _)| *name).collect();
     let missing: Vec<_> = found
         .iter()
@@ -353,14 +376,7 @@ fn bline_builtin_tools_are_in_the_judge_list() {
 fn collect_tool_names(dir: &Path, found: &mut BTreeSet<String>) {
     if dir.is_file() {
         let text = fs::read_to_string(dir).unwrap();
-        for line in text.lines() {
-            if line.trim() == "#[cfg(test)]" {
-                break;
-            }
-            if let Some(name) = tool_name_on_line(line) {
-                found.insert(name);
-            }
-        }
+        collect_names_from_text(&text, found);
         return;
     }
     let entries = fs::read_dir(dir).unwrap();
@@ -380,6 +396,56 @@ fn collect_tool_names(dir: &Path, found: &mut BTreeSet<String>) {
             }
         }
     }
+}
+
+fn collect_names_from_text(text: &str, found: &mut BTreeSet<String>) {
+    let lines: Vec<&str> = text.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        if line.trim() == "#[cfg(test)]" && cfg_test_opens_the_test_module(&lines[index + 1..]) {
+            break;
+        }
+        if let Some(name) = tool_name_on_line(line) {
+            found.insert(name);
+        }
+    }
+}
+
+/// `#[cfg(test)]` on a helper stays in the production file. Stop only when
+/// that attribute opens `mod tests`, so names below the helper are still
+/// compared with `known_tool_sinks`.
+fn cfg_test_opens_the_test_module(rest: &[&str]) -> bool {
+    for line in rest {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
+            continue;
+        }
+        let Some(after) = trimmed.strip_prefix("mod tests") else {
+            return false;
+        };
+        return after.is_empty() || after.starts_with([' ', '\t', '{']);
+    }
+    false
+}
+
+#[test]
+fn tool_scan_keeps_production_names_below_a_cfg_test_helper() {
+    let text = r#"
+name: "already_listed"
+#[cfg(test)]
+fn shared_client_from_connected() {}
+name: "browser_navigate"
+#[cfg(test)]
+
+#[allow(unused)]
+mod tests {
+    name: "only_a_fixture"
+}
+"#;
+    let mut found = BTreeSet::new();
+    collect_names_from_text(text, &mut found);
+    assert!(found.contains("already_listed"));
+    assert!(found.contains("browser_navigate"));
+    assert!(!found.contains("only_a_fixture"));
 }
 
 fn tool_name_on_line(line: &str) -> Option<String> {

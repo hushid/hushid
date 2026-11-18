@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/hushid/hushid/compare/hushid-v0.1.4...hushid-v0.1.5) (2026-11-18)
+
+
+### Features
+
+* add search terms for the library ([#251](https://github.com/hushid/hushid/issues/251)) ([a682ccf](https://github.com/hushid/hushid/commit/a682ccfb5020912f7c5081d0f90db9a8f2f8e99e))
+
 ## [0.1.4](https://github.com/hushid/hushid/compare/hushid-v0.1.3...hushid-v0.1.4) (2026-11-18)
 
 

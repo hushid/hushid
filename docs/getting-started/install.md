@@ -2,7 +2,7 @@
 
 ```toml
 [dependencies]
-hushid = "0.1.4"
+hushid = "0.1"
 ```
 
-Rust 1.87 or newer.
+Cargo selects the latest 0.1 release. Rust 1.87 or newer.

@@ -7,3 +7,15 @@ cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
 ```
 
 `--glossary FILE` is optional. `HUSHID_VAULT_DIR` and `HUSHID_GLOSSARY` are the same settings as environment variables.
+
+The only path is `POST /v1/chat/completions`. The body is read up to 1 MiB. A redirect is not followed. The proxy does not forward the body until the request has been read.
+
+| What happened | Response |
+|---|---|
+| No `X-Hushid-Session` | HTTP 400 `{"error":"missing session"}` |
+| A session name the vault rejects | HTTP 400 `{"error":"bad session"}` |
+| A bad header, a bad `Content-Length`, or a carriage return in `Authorization` | HTTP 400 `{"error":"headers"}` or `{"error":"length"}`. The process stays up. A line break in the upstream URL is `upstream` and does dial. |
+| A bad chunk, or a body that is not UTF-8 | HTTP 400 `{"error":"body"}`. The process stays up. |
+| The vault file cannot be read or written | HTTP 500 `{"error":"vault"}` |
+| The upstream dial or write fails | HTTP 502 `{"error":"upstream"}` |
+| Restore fails | HTTP 502 `{"error":"restore"}`. The unrestored body is not forwarded. |

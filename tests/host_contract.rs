@@ -735,7 +735,16 @@ fn quiet_surfaces_stay_out_of_the_tree() {
         "hushid-proxy stays off crates.io"
     );
     let lower = manifest.to_ascii_lowercase();
-    assert!(!lower.contains("keywords"));
+    assert!(manifest.contains(
+        "keywords = [\"pii\", \"tokenization\", \"privacy\", \"identifier\", \"sensitive-data\"]"
+    ));
+    assert!(manifest.contains("categories = [\"text-processing\"]"));
+    assert!(manifest.contains("homepage = \"https://hushid.github.io/hushid/\""));
+    assert!(manifest.contains("documentation = \"https://docs.rs/hushid\""));
+    assert!(!lower.contains("anonym"), "{manifest}");
+    assert!(!lower.contains("law 25"), "{manifest}");
+    assert!(!lower.contains("law25"), "{manifest}");
+    assert!(!lower.contains("private mode"), "{manifest}");
     for entry in fs::read_dir(root.join("src")).unwrap() {
         let path = entry.unwrap().path();
         let text = fs::read_to_string(&path).unwrap().to_ascii_lowercase();
@@ -744,5 +753,21 @@ fn quiet_surfaces_stay_out_of_the_tree() {
         assert!(!text.contains("law25"), "{}", path.display());
         assert!(!text.contains("private mode"), "{}", path.display());
         assert!(!text.contains("gaze"), "{}", path.display());
+    }
+}
+
+#[test]
+fn install_snippet_tracks_the_0_1_line() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in ["README.md", "docs/getting-started/install.md"] {
+        let text = fs::read_to_string(root.join(relative)).unwrap();
+        assert!(
+            text.contains("hushid = \"0.1\""),
+            "{relative} should depend on the 0.1 line"
+        );
+        assert!(
+            !text.contains("hushid = \"0.1."),
+            "{relative} must not pin a patch"
+        );
     }
 }
