@@ -1,0 +1,14 @@
+[book]
+title = "Hushid"
+description = "Replaces a recognized identifier with a typed token. The original stays in a vault."
+authors = ["Sebastien Tardif"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "book-output"
+
+[output.html]
+git-repository-url = "https://github.com/hushid/hushid"
+edit-url-template = "https://github.com/hushid/hushid/edit/main/{path}"
+no-section-label = true
