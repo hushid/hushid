@@ -735,7 +735,16 @@ fn quiet_surfaces_stay_out_of_the_tree() {
         "hushid-proxy stays off crates.io"
     );
     let lower = manifest.to_ascii_lowercase();
-    assert!(!lower.contains("keywords"));
+    assert!(manifest.contains(
+        "keywords = [\"pii\", \"tokenization\", \"privacy\", \"identifier\", \"sensitive-data\"]"
+    ));
+    assert!(manifest.contains("categories = [\"text-processing\"]"));
+    assert!(manifest.contains("homepage = \"https://hushid.github.io/hushid/\""));
+    assert!(manifest.contains("documentation = \"https://docs.rs/hushid\""));
+    assert!(!lower.contains("anonym"), "{manifest}");
+    assert!(!lower.contains("law 25"), "{manifest}");
+    assert!(!lower.contains("law25"), "{manifest}");
+    assert!(!lower.contains("private mode"), "{manifest}");
     for entry in fs::read_dir(root.join("src")).unwrap() {
         let path = entry.unwrap().path();
         let text = fs::read_to_string(&path).unwrap().to_ascii_lowercase();
