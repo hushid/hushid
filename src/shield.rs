@@ -4,8 +4,9 @@ use crate::digits::{digit_kind, luhn_kind, same_shape};
 use crate::glossary::Glossary;
 use crate::rewrite;
 use crate::surrogate;
-use crate::token::{Kind, TokenError, SECRET_MARK};
+use crate::token::{random_token, Kind, TokenError, SECRET_MARK};
 use crate::vault::Vault;
+use std::collections::BTreeMap;
 
 #[cfg(feature = "ner")]
 use crate::ner::Ner;
@@ -28,9 +29,11 @@ pub enum Names<'a> {
 /// [`Operator::Token`] is the default. [`Operator::Digits`] keeps the
 /// shape of a phone, a card, or a SIN. [`Operator::Surrogate`] writes a
 /// stand-in of the same kind so the sentence still reads.
-/// [`Operator::Mask`] is for a display or a log and is not restored.
-/// Email, address, and the other kinds still use a token under
-/// [`Operator::Digits`]. A secret still becomes [`SECRET_MARK`].
+/// [`Operator::Forget`] writes the same token shape as [`Operator::Token`]
+/// and does not store the original. [`Operator::Mask`] is for a display
+/// or a log and is not restored. Email, address, and the other kinds
+/// still use a token under [`Operator::Digits`]. A secret still becomes
+/// [`SECRET_MARK`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Operator {
     #[default]
@@ -45,6 +48,10 @@ pub enum Operator {
     Surrogate,
     /// Irreversible display text. The original bytes are not stored.
     Mask,
+    /// A typed token with nothing stored behind it. The same bytes share
+    /// one token inside the call. A later call mints another, including
+    /// when the vault already holds those bytes.
+    Forget,
 }
 
 /// Replace recognized identifiers in `text`.
@@ -123,6 +130,7 @@ pub(crate) fn shield_in_context(
     let mut audit = AuditRecord::default();
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
+    let mut forgotten = None;
     for hit in hits {
         let (start, end) = span_of(&hit);
         if start < origin || end > limit {
@@ -145,6 +153,10 @@ pub(crate) fn shield_in_context(
                     Operator::Digits if digit_kind(kind) => mint_digits(vault, kind, surface)?,
                     Operator::Surrogate => mint_surrogate(vault, kind, surface)?,
                     Operator::Mask => mask_for(kind, surface),
+                    Operator::Forget => {
+                        let seen = forgotten.get_or_insert_with(BTreeMap::new);
+                        mint_forgotten(seen, kind, surface)?
+                    }
                     Operator::Token | Operator::Digits => {
                         reuse_or_issue(vault, &stored, kind, surface)?
                     }
@@ -190,6 +202,20 @@ fn mint_surrogate(vault: &mut Vault, kind: Kind, surface: &str) -> Result<String
         }
     }
     Err(TokenError::Surrogate)
+}
+
+fn mint_forgotten(
+    seen: &mut BTreeMap<Vec<u8>, String>,
+    kind: Kind,
+    surface: &str,
+) -> Result<String, TokenError> {
+    let bytes = surface.as_bytes();
+    if let Some(token) = seen.get(bytes) {
+        return Ok(token.clone());
+    }
+    let token = random_token(kind)?;
+    seen.insert(bytes.to_vec(), token.clone());
+    Ok(token)
 }
 
 fn mask_for(kind: Kind, surface: &str) -> String {
