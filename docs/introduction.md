@@ -12,6 +12,8 @@ Email, a phone number with separators, a payment card, a SIN next to a cue, a RA
 
 A city, a diagnosis, an account number with no recognized shape, a person who is not in the loaded glossary, and text inside an image or a PDF. The optional `ner` feature is off unless the host turns it on, and `shield_text` does not use it.
 
+The rest of this guide covers [what matches](what-matches.md), [what the replacement looks like](replacements.md), the [vault file](vault.md), and how a [host](host.md) judges a tool call.
+
 ## Security and license
 
 Report a vulnerability through [GitHub security advisories](https://github.com/hushid/hushid/security/advisories/new). The license is [Apache-2.0](https://github.com/hushid/hushid/blob/main/LICENSE).
