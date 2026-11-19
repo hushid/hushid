@@ -241,6 +241,70 @@ fn mcp_shield_and_restore() {
 }
 
 #[test]
+fn mcp_restore_keeps_a_secret_mark_beside_an_email() {
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    let email = "ada@example.com";
+    let phone = "+44 (20) 7946 0958";
+    let text =
+        format!("Write {email} and call {phone}. Note {secret}. Marie lives in Springfield.");
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-reply-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let glossary = Glossary::empty();
+    let call = mcp_message(
+        &dir,
+        &glossary,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"shield","arguments":{{"session":"demo","text":"{text}"}}}}}}"#
+        ),
+    )
+    .unwrap();
+    assert!(!call.contains(email), "{call}");
+    assert!(!call.contains(secret), "{call}");
+    assert!(call.contains("h1_secret"), "{call}");
+    let token = call
+        .split("h1_email_")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let token = format!("h1_email_{token}");
+    let shielded = format!(
+        "Write {token} and call h1_phone_{phone_tail}. Note h1_secret. Marie lives in Springfield.",
+        phone_tail = call
+            .split("h1_phone_")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+    );
+    let restored = mcp_message(
+        &dir,
+        &glossary,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"restore","arguments":{{"session":"demo","text":"{shielded}"}}}}}}"#
+        ),
+    )
+    .unwrap();
+    assert!(!restored.contains("isError"), "{restored}");
+    assert!(restored.contains(email), "{restored}");
+    assert!(restored.contains(phone), "{restored}");
+    assert!(restored.contains("h1_secret"), "{restored}");
+    assert!(restored.contains("Springfield"), "{restored}");
+    assert!(!restored.contains(secret), "{restored}");
+    let unknown = mcp_message(
+        &dir,
+        &glossary,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"restore","arguments":{"session":"demo","text":"h1_email_AAAAAAAAR"}}}"#,
+    )
+    .unwrap();
+    assert!(unknown.contains("isError"), "{unknown}");
+    assert!(!unknown.contains("h1_email_"), "{unknown}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn mcp_session_is_the_top_level_field() {
     let dir = std::env::temp_dir().join(format!("hushid-mcp-session-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

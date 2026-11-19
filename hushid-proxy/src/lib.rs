@@ -739,7 +739,7 @@ fn mcp_tool(
         save_session(vault_dir, session, &vault).map_err(|_| "vault")?;
         out
     } else if name == "restore" {
-        vault.restore_write(text).map_err(|_| "restore")?
+        vault.restore_reply(text).map_err(|_| "restore")?
     } else {
         return Err("tool");
     };
