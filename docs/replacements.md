@@ -1,6 +1,6 @@
 # Replacements
 
-`shield_text` uses `Operator::Token`. The other operators are `shield_text_with`.
+`shield_text` uses `Operator::Token`. The other operators are `shield_text_with`. `shield_json_strings` uses `Operator::Token`. `shield_json_strings_with` takes the same operators. A JSON number stays a quoted token for `Token`, `Digits`, and `Surrogate`, so restore can write it back as a number. `Forget` and `Mask` do not store that number.
 
 | Operator | What you see | Restore |
 |---|---|---|

@@ -44,7 +44,7 @@ assert_eq!(restored, "Write ada@example.com");
 
 `Glossary::empty()` matches no names. A host that wants the optional name list passes the path `glossary/popular-names.txt` to `Glossary::load`. That file is not loaded on its own.
 
-`shield_text` writes tokens. `shield_text_with` can write digit stand-ins or a same-kind stand-in instead. Those stand-ins restore to the original bytes as well. `Operator::Forget` writes a token and does not store the original, so restore fails. A mask is for a display or a log and is not restored.
+`shield_text` writes tokens. `shield_text_with` can write digit stand-ins or a same-kind stand-in instead. Those stand-ins restore to the original bytes as well. `Operator::Forget` writes a token and does not store the original, so restore fails. A mask is for a display or a log and is not restored. `shield_json_strings` stores tokens. `shield_json_strings_with` takes the same operators, including `Operator::Forget`.
 
 ## What a detector recognizes
 

@@ -84,7 +84,28 @@ pub fn shield_text_with(
     text: &str,
     operator: Operator,
 ) -> Result<(String, AuditRecord), TokenError> {
-    shield_in_context(vault, glossary, "", text, "", operator, Names::Off)
+    let mut forgotten = BTreeMap::new();
+    shield_in_context(
+        vault,
+        glossary,
+        "",
+        text,
+        "",
+        &mut ShieldOp {
+            operator,
+            forgotten: &mut forgotten,
+        },
+        Names::Off,
+    )
+}
+
+/// The operator for one shield, plus tokens already minted by [`Operator::Forget`].
+///
+/// The map lives for the whole call. Two JSON strings in one document share it,
+/// so the same bytes keep one forgotten token. A later call passes a new map.
+pub(crate) struct ShieldOp<'a> {
+    pub operator: Operator,
+    pub forgotten: &'a mut BTreeMap<Vec<u8>, String>,
 }
 
 /// Shield `text`. `before` and `after` are cue context only.
@@ -97,9 +118,10 @@ pub(crate) fn shield_in_context(
     before: &str,
     text: &str,
     after: &str,
-    operator: Operator,
+    op: &mut ShieldOp<'_>,
     names: Names<'_>,
 ) -> Result<(String, AuditRecord), TokenError> {
+    let operator = op.operator;
     let mut scan = String::with_capacity(before.len() + text.len() + after.len());
     scan.push_str(before);
     scan.push_str(text);
@@ -130,7 +152,6 @@ pub(crate) fn shield_in_context(
     let mut audit = AuditRecord::default();
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
-    let mut forgotten = None;
     for hit in hits {
         let (start, end) = span_of(&hit);
         if start < origin || end > limit {
@@ -153,10 +174,7 @@ pub(crate) fn shield_in_context(
                     Operator::Digits if digit_kind(kind) => mint_digits(vault, kind, surface)?,
                     Operator::Surrogate => mint_surrogate(vault, kind, surface)?,
                     Operator::Mask => mask_for(kind, surface),
-                    Operator::Forget => {
-                        let seen = forgotten.get_or_insert_with(BTreeMap::new);
-                        mint_forgotten(seen, kind, surface)?
-                    }
+                    Operator::Forget => mint_forgotten(op.forgotten, kind, surface)?,
                     Operator::Token | Operator::Digits => {
                         reuse_or_issue(vault, &stored, kind, surface)?
                     }
@@ -204,7 +222,7 @@ fn mint_surrogate(vault: &mut Vault, kind: Kind, surface: &str) -> Result<String
     Err(TokenError::Surrogate)
 }
 
-fn mint_forgotten(
+pub(crate) fn mint_forgotten(
     seen: &mut BTreeMap<Vec<u8>, String>,
     kind: Kind,
     surface: &str,
@@ -218,7 +236,7 @@ fn mint_forgotten(
     Ok(token)
 }
 
-fn mask_for(kind: Kind, surface: &str) -> String {
+pub(crate) fn mask_for(kind: Kind, surface: &str) -> String {
     let mask = match kind {
         Kind::Email => "***@***",
         Kind::Phone => "***-***-****",

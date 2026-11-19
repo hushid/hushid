@@ -1,4 +1,7 @@
-use hushid::{shield_text, shield_text_with, Glossary, Operator, RestoreError, Vault};
+use hushid::{
+    restore_json_write, shield_json_strings, shield_json_strings_with, shield_text,
+    shield_text_with, Glossary, JsonError, Operator, RestoreError, Session, Vault,
+};
 
 fn email_tokens(text: &str) -> Vec<&str> {
     let mut found = Vec::new();
@@ -82,6 +85,192 @@ fn forget_marks_a_secret_and_leaves_a_city() {
     assert!(!out.contains(secret), "{out}");
     assert!(!out.contains("ada@example.com"), "{out}");
     assert!(vault.is_empty());
+}
+
+#[test]
+fn json_forget_drops_the_address_and_restore_fails() {
+    let input = r#"{"content":"mail marie@example.com"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), input, Operator::Forget).unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.contains("h1_email_"), "{out}");
+    assert!(!out.contains("marie@example.com"), "{out}");
+    assert!(vault.is_empty());
+    assert!(matches!(
+        restore_json_write(&vault, &out),
+        Err(JsonError::Restore(RestoreError::Unresolved { .. }))
+    ));
+}
+
+#[test]
+fn json_forget_shares_one_token_inside_the_call() {
+    let input = r#"{"a":"marie@example.com","b":"see marie@example.com and marie@example.com"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), input, Operator::Forget).unwrap();
+    assert_eq!(audit.email, 3, "{out}");
+    let tokens = email_tokens(&out);
+    assert_eq!(tokens.len(), 3, "{out}");
+    assert_eq!(tokens[0], tokens[1], "{out}");
+    assert_eq!(tokens[1], tokens[2], "{out}");
+    assert!(vault.is_empty());
+
+    let nested = r#"{"note":"{\"a\":\"marie@example.com\"}","b":"marie@example.com"}"#;
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), nested, Operator::Forget).unwrap();
+    assert_eq!(audit.email, 2, "{out}");
+    let tokens = email_tokens(&out);
+    assert_eq!(tokens.len(), 2, "{out}");
+    assert_eq!(tokens[0], tokens[1], "{out}");
+    assert!(vault.is_empty());
+}
+
+#[test]
+fn json_forget_mints_again_and_skips_a_stored_token() {
+    let input = r#"{"content":"marie@example.com"}"#;
+    let mut vault = Vault::new();
+    let (stored, _) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
+    assert_eq!(vault.len(), 1);
+    let (forgotten, _) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), input, Operator::Forget).unwrap();
+    assert_ne!(stored, forgotten, "{forgotten}");
+    assert_eq!(vault.len(), 1);
+    assert_eq!(restore_json_write(&vault, &stored).unwrap(), input);
+    assert!(matches!(
+        restore_json_write(&vault, &forgotten),
+        Err(JsonError::Restore(RestoreError::Unresolved { .. }))
+    ));
+
+    let mut fresh = Vault::new();
+    let (first, _) =
+        shield_json_strings_with(&mut fresh, &Glossary::empty(), input, Operator::Forget).unwrap();
+    let (second, _) =
+        shield_json_strings_with(&mut fresh, &Glossary::empty(), input, Operator::Forget).unwrap();
+    assert_ne!(first, second);
+    assert!(fresh.is_empty());
+}
+
+#[test]
+fn json_token_still_stores_and_reuses_the_address() {
+    let input = r#"{"a":"marie@example.com","b":"marie@example.com"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
+    assert_eq!(audit.email, 2, "{out}");
+    assert_eq!(vault.len(), 1, "{out}");
+    let tokens = email_tokens(&out);
+    assert_eq!(tokens.len(), 2, "{out}");
+    assert_eq!(tokens[0], tokens[1], "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
+
+    let later = r#"{"content":"see marie@example.com"}"#;
+    let (again, audit) = shield_json_strings(&mut vault, &Glossary::empty(), later).unwrap();
+    assert_eq!(audit.email, 1, "{again}");
+    assert!(again.contains(tokens[0]), "{again}");
+    assert_eq!(vault.len(), 1);
+}
+
+#[test]
+fn json_forget_drops_a_card_number_and_a_secret_tail() {
+    let card = "4111111111111111";
+    let input = format!(r#"{{"visa":{card},"card":{card}}}"#);
+    let mut vault = Vault::new();
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), &input, Operator::Forget).unwrap();
+    assert_eq!(audit.card, 2, "{out}");
+    assert!(!out.contains(card), "{out}");
+    let tokens = card_tokens(&out);
+    assert_eq!(tokens.len(), 2, "{out}");
+    assert_eq!(tokens[0], tokens[1], "{out}");
+    assert!(tokens[0].starts_with("h1_card_"), "{out}");
+    assert!(vault.is_empty());
+    assert!(vault.get(tokens[0]).is_none());
+    assert!(matches!(
+        restore_json_write(&vault, &out),
+        Err(JsonError::Restore(RestoreError::Unresolved { .. }))
+    ));
+
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    let assigned = format!(r#"{{"MY_API_KEY":"{secret} ada@example.com"}}"#);
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), &assigned, Operator::Forget)
+            .unwrap();
+    assert_eq!(audit.secret, 1, "{out}");
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.contains("h1_secret"), "{out}");
+    assert!(out.contains("h1_email_"), "{out}");
+    assert!(!out.contains(secret), "{out}");
+    assert!(!out.contains("ada@example.com"), "{out}");
+    assert!(vault.is_empty());
+    assert!(restore_json_write(&vault, &out).is_err());
+}
+
+#[test]
+fn json_mask_stores_nothing_for_an_email_or_a_card_number() {
+    let mut vault = Vault::new();
+    let (out, audit) = shield_json_strings_with(
+        &mut vault,
+        &Glossary::empty(),
+        r#"{"content":"ada@example.com"}"#,
+        Operator::Mask,
+    )
+    .unwrap();
+    assert_eq!(audit.email, 1, "{out}");
+    assert!(out.contains("***@***"), "{out}");
+    assert!(!out.contains("ada@example.com"), "{out}");
+    assert!(vault.is_empty());
+
+    let (out, audit) = shield_json_strings_with(
+        &mut vault,
+        &Glossary::empty(),
+        r#"{"visa":4111111111111111}"#,
+        Operator::Mask,
+    )
+    .unwrap();
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.contains("**** **** **** ****"), "{out}");
+    assert!(!out.contains("4111111111111111"), "{out}");
+    assert!(vault.is_empty());
+}
+
+#[test]
+fn session_forget_keeps_the_projection_and_stores_nothing() {
+    let mut session = Session::new(Glossary::empty());
+    let index = session
+        .shield_message_with("ada@example.com and ada@example.com", Operator::Forget)
+        .unwrap();
+    let projection = session.replay()[index].projection.clone();
+    let tokens = email_tokens(&projection);
+    assert_eq!(tokens.len(), 2, "{projection}");
+    assert_eq!(tokens[0], tokens[1], "{projection}");
+    assert!(session.vault().is_empty());
+    assert!(matches!(
+        session.vault().restore_write(&projection),
+        Err(RestoreError::Unresolved { .. })
+    ));
+
+    let second = session
+        .shield_message_with("ada@example.com", Operator::Forget)
+        .unwrap();
+    assert_ne!(
+        session.replay()[index].projection,
+        session.replay()[second].projection
+    );
+    assert!(session.vault().is_empty());
+}
+
+fn card_tokens(text: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("h1_card_") {
+        let token = &rest[start..];
+        let end = token
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(token.len());
+        found.push(&token[..end]);
+        rest = &token[end..];
+    }
+    found
 }
 
 #[test]

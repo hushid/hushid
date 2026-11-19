@@ -1,8 +1,9 @@
 use crate::audit::AuditRecord;
 use crate::glossary::Glossary;
-use crate::shield::{shield_in_context, Names, Operator};
+use crate::shield::{shield_in_context, Names, Operator, ShieldOp};
 use crate::token::TokenError;
 use crate::vault::{Vault, VaultError};
+use std::collections::BTreeMap;
 
 #[cfg(feature = "ner")]
 use crate::ner::Ner;
@@ -96,21 +97,42 @@ impl Session {
     }
 
     pub fn shield_message(&mut self, text: &str) -> Result<usize, TokenError> {
-        #[cfg(feature = "ner")]
-        if let Some(ner) = self.ner.clone() {
-            return self.store_projection(text, Names::On(&ner));
-        }
-        self.store_projection(text, Names::Off)
+        self.shield_message_with(text, Operator::Token)
     }
 
-    fn store_projection(&mut self, text: &str, names: Names<'_>) -> Result<usize, TokenError> {
+    /// [`Self::shield_message`] with an explicit operator.
+    ///
+    /// [`Operator::Forget`] keeps the projection and does not store the
+    /// original bytes. A later message mints another token.
+    pub fn shield_message_with(
+        &mut self,
+        text: &str,
+        operator: Operator,
+    ) -> Result<usize, TokenError> {
+        #[cfg(feature = "ner")]
+        if let Some(ner) = self.ner.clone() {
+            return self.store_projection(text, Names::On(&ner), operator);
+        }
+        self.store_projection(text, Names::Off, operator)
+    }
+
+    fn store_projection(
+        &mut self,
+        text: &str,
+        names: Names<'_>,
+        operator: Operator,
+    ) -> Result<usize, TokenError> {
+        let mut forgotten = BTreeMap::new();
         let (projection, audit) = shield_in_context(
             &mut self.vault,
             &self.glossary,
             "",
             text,
             "",
-            Operator::Token,
+            &mut ShieldOp {
+                operator,
+                forgotten: &mut forgotten,
+            },
             names,
         )?;
         self.audits.push(audit);
