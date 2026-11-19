@@ -98,6 +98,9 @@ fn unpack(bytes: &[u8]) -> Result<(String, Vec<String>), SealError> {
     let (vault_bytes, rest) = rest.split_at(vault_len);
     let vault_text = String::from_utf8(vault_bytes.to_vec()).map_err(|_| SealError::Transcript)?;
     let (count, mut rest) = read_u64(rest)?;
+    if count > rest.len() / 8 {
+        return Err(SealError::Transcript);
+    }
     let mut messages = Vec::with_capacity(count);
     for _ in 0..count {
         let (len, next) = read_u64(rest)?;
@@ -199,5 +202,16 @@ mod tests {
                 .to_string(),
             "sealed transcript is corrupt"
         );
+    }
+
+    #[test]
+    fn open_rejects_a_message_count_larger_than_the_bytes() {
+        let mut plain = vec![0u8; 16];
+        plain[8..16].copy_from_slice(&u64::MAX.to_le_bytes());
+        let mut key = [0u8; 32];
+        getrandom::fill(&mut key).unwrap();
+        let blob = sealed(&plain, &key);
+        let err = open(&blob, &key).unwrap_err();
+        assert!(matches!(err, SealError::Transcript), "{err:?}");
     }
 }
