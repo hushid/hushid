@@ -1,9 +1,10 @@
 use crate::audit::AuditRecord;
 use crate::detect::{assignment_secret_prefix, find_hits, Hit};
 use crate::glossary::Glossary;
-use crate::shield::{shield_in_context, Operator};
+use crate::shield::{mask_for, mint_forgotten, shield_in_context, Operator, ShieldOp};
 use crate::token::{find_h1, parse_token_at, secret_mark_at, TokenError, SECRET_MARK};
 use crate::vault::{RestoreError, Vault};
+use std::collections::BTreeMap;
 use std::fmt;
 
 const MAX_JSON_DEPTH: u8 = 8;
@@ -35,20 +36,67 @@ impl std::error::Error for JsonError {}
 
 /// Shield JSON string values, object keys, and numbers the detectors recognize.
 ///
-/// A number is replaced with a quoted token and restored as a number. A string
-/// whose text is itself a JSON object or array is shielded again. A cue beside
-/// a string or a key counts the same way it does in plain text, including a
-/// value inside that nested document. A key that names an API-key assignment
-/// masks that value with the shared secret mark, and the value is not stored.
-/// Keys and numbers that no detector recognizes stay as they are.
+/// This uses [`Operator::Token`]. [`shield_json_strings_with`] takes an
+/// operator. A number is replaced with a quoted token and restored as a
+/// number. A string whose text is itself a JSON object or array is shielded
+/// again. A cue beside a string or a key counts the same way it does in plain
+/// text, including a value inside that nested document. A key that names an
+/// API-key assignment masks that value with the shared secret mark, and the
+/// value is not stored. Keys and numbers that no detector recognizes stay as
+/// they are.
 pub fn shield_json_strings(
     vault: &mut Vault,
     glossary: &Glossary,
     input: &str,
 ) -> Result<(String, AuditRecord), JsonError> {
+    shield_json_strings_with(vault, glossary, input, Operator::Token)
+}
+
+/// [`shield_json_strings`] with an explicit operator.
+///
+/// [`Operator::Forget`] writes a token and stores nothing. The same bytes
+/// share one token inside this call, including two strings and a number.
+/// A later call mints another token. A token already in the vault is not
+/// reused. [`Operator::Mask`] does not store either. A JSON number stays a
+/// quoted token for [`Operator::Token`], [`Operator::Digits`], and
+/// [`Operator::Surrogate`], so [`restore_json_write`] can write it back as
+/// a number.
+///
+/// ```
+/// use hushid::{restore_json_write, shield_json_strings_with, Glossary, Operator, Vault};
+///
+/// let mut vault = Vault::new();
+/// let input = r#"{"content":"mail marie@example.com"}"#;
+/// let (out, _) =
+///     shield_json_strings_with(&mut vault, &Glossary::empty(), input, Operator::Forget).unwrap();
+/// assert!(out.contains("h1_email_"));
+/// assert!(!out.contains("marie@example.com"));
+/// assert!(vault.is_empty());
+/// assert!(restore_json_write(&vault, &out).is_err());
+/// ```
+pub fn shield_json_strings_with(
+    vault: &mut Vault,
+    glossary: &Glossary,
+    input: &str,
+    operator: Operator,
+) -> Result<(String, AuditRecord), JsonError> {
     let mut audit = AuditRecord::default();
-    let text = shield_document(vault, glossary, input, &mut audit, 0, ("", ""))?;
+    let mut forgotten = BTreeMap::new();
+    let mut state = JsonState {
+        audit: &mut audit,
+        forgotten: &mut forgotten,
+        depth: 0,
+        operator,
+    };
+    let text = shield_document(vault, glossary, input, &mut state, ("", ""))?;
     Ok((text, audit))
+}
+
+struct JsonState<'a> {
+    audit: &'a mut AuditRecord,
+    forgotten: &'a mut BTreeMap<Vec<u8>, String>,
+    depth: u8,
+    operator: Operator,
 }
 
 /// Restore JSON keys, string values, and numbers. An unresolved `h1_` span fails.
@@ -102,8 +150,7 @@ fn shield_document(
     vault: &mut Vault,
     glossary: &Glossary,
     input: &str,
-    audit: &mut AuditRecord,
-    depth: u8,
+    state: &mut JsonState<'_>,
     context: (&str, &str),
 ) -> Result<String, JsonError> {
     let (outer_before, outer_after) = context;
@@ -124,14 +171,13 @@ fn shield_document(
                 assignment_secret_prefix(&input[..index + 1], &decoded)
             };
             let mapped = if let Some(secret_end) = secret_end {
-                mask_assignment_value(vault, glossary, &decoded, secret_end, audit)?
+                mask_assignment_value(vault, glossary, &decoded, secret_end, state)?
             } else {
                 shield_decoded(
                     vault,
                     glossary,
                     &decoded,
-                    audit,
-                    depth,
+                    state,
                     is_key,
                     (&before_ctx, &after_ctx),
                 )?
@@ -145,7 +191,7 @@ fn shield_document(
         if let Some(end) = parse_number(input, index) {
             if let Some(hit) = covering_hit(&hits, index, end) {
                 let raw = &input[index..end];
-                let token = token_for_hit(vault, audit, hit, raw.as_bytes())?;
+                let token = token_for_hit(vault, state, hit, raw.as_bytes())?;
                 out.push('"');
                 out.push_str(&token);
                 out.push('"');
@@ -170,7 +216,7 @@ fn mask_assignment_value(
     glossary: &Glossary,
     decoded: &str,
     secret_end: usize,
-    audit: &mut AuditRecord,
+    state: &mut JsonState<'_>,
 ) -> Result<String, JsonError> {
     let mut mapped = SECRET_MARK.to_string();
     if secret_end < decoded.len() {
@@ -180,14 +226,17 @@ fn mask_assignment_value(
             "",
             &decoded[secret_end..],
             "",
-            Operator::Token,
+            &mut ShieldOp {
+                operator: state.operator,
+                forgotten: state.forgotten,
+            },
             crate::shield::Names::Off,
         )
         .map_err(JsonError::Token)?;
         mapped.push_str(&rest);
-        audit.merge(&part);
+        state.audit.merge(&part);
     }
-    audit.secret += 1;
+    state.audit.secret += 1;
     Ok(mapped)
 }
 
@@ -195,13 +244,15 @@ fn shield_decoded(
     vault: &mut Vault,
     glossary: &Glossary,
     decoded: &str,
-    audit: &mut AuditRecord,
-    depth: u8,
+    state: &mut JsonState<'_>,
     is_key: bool,
     context: (&str, &str),
 ) -> Result<String, JsonError> {
-    if !is_key && depth < MAX_JSON_DEPTH && is_json_document(decoded) {
-        return shield_document(vault, glossary, decoded, audit, depth + 1, context);
+    if !is_key && state.depth < MAX_JSON_DEPTH && is_json_document(decoded) {
+        state.depth += 1;
+        let result = shield_document(vault, glossary, decoded, state, context);
+        state.depth -= 1;
+        return result;
     }
     let (before, after) = context;
     let (shielded, part) = shield_in_context(
@@ -210,30 +261,45 @@ fn shield_decoded(
         before,
         decoded,
         after,
-        Operator::Token,
+        &mut ShieldOp {
+            operator: state.operator,
+            forgotten: state.forgotten,
+        },
         crate::shield::Names::Off,
     )
     .map_err(JsonError::Token)?;
-    audit.merge(&part);
+    state.audit.merge(&part);
     Ok(shielded)
 }
 
 fn token_for_hit(
     vault: &mut Vault,
-    audit: &mut AuditRecord,
+    state: &mut JsonState<'_>,
     hit: &Hit,
     surface: &[u8],
 ) -> Result<String, JsonError> {
     match hit {
         Hit::Secret { .. } => {
-            audit.secret += 1;
+            state.audit.secret += 1;
             Ok(SECRET_MARK.to_string())
         }
         Hit::Reversible { kind, .. } => {
-            let token = vault
-                .issue_json_number(*kind, surface)
-                .map_err(JsonError::Token)?;
-            audit.bump(*kind);
+            let token = match state.operator {
+                Operator::Forget => {
+                    let text = std::str::from_utf8(surface)
+                        .map_err(|_| JsonError::Token(TokenError::Payload))?;
+                    mint_forgotten(state.forgotten, *kind, text).map_err(JsonError::Token)?
+                }
+                Operator::Mask => {
+                    let text = std::str::from_utf8(surface)
+                        .map_err(|_| JsonError::Token(TokenError::Payload))?;
+                    mask_for(*kind, text)
+                }
+                Operator::Token | Operator::Digits | Operator::Surrogate => vault
+                    .issue_json_number(*kind, surface)
+                    .map_err(JsonError::Token)?,
+            };
+            state.audit.bump(*kind);
             Ok(token)
         }
     }

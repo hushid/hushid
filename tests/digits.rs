@@ -1,4 +1,7 @@
-use hushid::{shield_text, shield_text_with, Glossary, Operator, Vault};
+use hushid::{
+    restore_json_write, shield_json_strings_with, shield_text, shield_text_with, Glossary,
+    Operator, Vault,
+};
 
 fn luhn_ok(digits: &[u8]) -> bool {
     let mut sum = 0;
@@ -84,4 +87,29 @@ fn digit_stand_in_round_trips_through_the_vault_file() {
     let loaded = Vault::load(&path).expect("load");
     let _ = std::fs::remove_file(&path);
     assert_eq!(loaded.restore_write(&out).unwrap(), card);
+}
+
+#[test]
+fn digits_rewrite_a_phone_inside_a_json_string() {
+    let input = r#"{"note":"call 416-555-0123 today"}"#;
+    let mut vault = Vault::new();
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), input, Operator::Digits).unwrap();
+    assert_eq!(audit.phone, 1, "{out}");
+    assert!(!out.contains("h1_phone"), "{out}");
+    assert!(!out.contains("416-555-0123"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
+}
+
+#[test]
+fn digits_keep_a_json_number_as_a_restorable_token() {
+    let input = r#"{"visa":4111111111111111}"#;
+    let mut vault = Vault::new();
+    let (out, audit) =
+        shield_json_strings_with(&mut vault, &Glossary::empty(), input, Operator::Digits).unwrap();
+    assert_eq!(audit.card, 1, "{out}");
+    assert!(out.contains("h1_card_"), "{out}");
+    assert!(!out.contains("4111111111111111"), "{out}");
+    assert_eq!(vault.len(), 1);
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
 }
