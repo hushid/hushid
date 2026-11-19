@@ -4,7 +4,8 @@
 //! same vault rules as the library. The clear request is not written beside
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
-//! fragment is dropped. A restored body keeps the upstream status. A reply
+//! fragment is dropped. A restored body keeps the upstream status and the
+//! upstream content type. An event stream stays `text/event-stream`. A reply
 //! that quotes `h1_secret` keeps that mark and still restores other tokens.
 //! An unknown `h1_` token is a 502 and is not forwarded. A request with no `Content-Length`
 //! is read until the connection closes, the same as a response, up to 1 MiB.
@@ -215,13 +216,14 @@ impl Proxy {
                 String::from_utf8_lossy(&upstream.body).into_owned()
             }
         };
-        http_response(upstream.status, restored.as_bytes())
+        http_response_typed(upstream.status, &upstream.content_type, restored.as_bytes())
     }
 }
 
 pub struct UpstreamReply {
     pub status: u16,
     pub body: Vec<u8>,
+    pub content_type: String,
 }
 
 pub fn forward(
@@ -302,8 +304,24 @@ fn exchange(
     }
     Ok(UpstreamReply {
         status: response.status,
+        content_type: response_media_type(&response),
         body: response.body,
     })
+}
+
+fn response_media_type(response: &HttpRequest) -> String {
+    let Some(value) = response.header("content-type") else {
+        return "application/json".to_string();
+    };
+    if value.is_empty()
+        || value.len() > 200
+        || value
+            .bytes()
+            .any(|byte| byte == b'\r' || byte == b'\n' || byte == 0 || byte.is_ascii_control())
+    {
+        return "application/json".to_string();
+    }
+    value.to_string()
 }
 
 fn tls_connector() -> Result<native_tls::TlsConnector, ProxyError> {
@@ -644,6 +662,10 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 }
 
 fn http_response(status: u16, body: &[u8]) -> String {
+    http_response_typed(status, "application/json", body)
+}
+
+fn http_response_typed(status: u16, content_type: &str, body: &[u8]) -> String {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -653,7 +675,7 @@ fn http_response(status: u16, body: &[u8]) -> String {
         _ => "Error",
     };
     format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         String::from_utf8_lossy(body)
     )
@@ -1656,6 +1678,93 @@ mod coverage_edges {
         ));
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         assert!(response.contains("h1_secret"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_streamed_reply_keeps_the_event_stream_type() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-sse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let request = read_http(&mut stream).unwrap();
+            let text = String::from_utf8_lossy(&request.body);
+            let marker = "\"content\":\"";
+            let start = text.find(marker).unwrap() + marker.len();
+            let end = start + text[start..].find('"').unwrap();
+            let content = &text[start..end];
+            let sse = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{content}\"}}}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let raw = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}",
+                sse.len()
+            );
+            let _ = stream.write_all(raw.as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            br#"{"model":"local","messages":[{"role":"user","content":"Write ada@example.com"}]}"#,
+        ));
+        assert!(
+            response.contains("Content-Type: text/event-stream\r\n"),
+            "{response}"
+        );
+        assert!(
+            !response.contains("Content-Type: application/json"),
+            "{response}"
+        );
+        assert!(response.contains("ada@example.com"), "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
+        assert!(response.contains("data: [DONE]"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_content_type_stays_json() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-type-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let _ = read_http(&mut stream);
+            let raw = b"HTTP/1.1 200 OK\r\nContent-Type:\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}";
+            let _ = stream.write_all(raw);
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            b"{}",
+        ));
+        assert!(
+            response.contains("Content-Type: application/json\r\n"),
+            "{response}"
+        );
+        assert!(response.contains("{\"ok\":true}"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
