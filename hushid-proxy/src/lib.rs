@@ -91,8 +91,49 @@ pub fn session_path(dir: &Path, session: &str) -> Option<PathBuf> {
     Some(dir.join(format!("{session}.vault")))
 }
 
-pub fn load_session(dir: &Path, session: &str) -> Result<Vault, ProxyError> {
+/// A case-insensitive volume opens `WinCase.vault` when the caller asked
+/// for `wincase.vault`. That would load the other session.
+fn case_collides(dir: &Path, file_name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return false;
+        };
+        let mut exact = false;
+        let mut other_case = false;
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if name == file_name {
+                exact = true;
+            } else if name.eq_ignore_ascii_case(file_name) {
+                other_case = true;
+            }
+        }
+        other_case && !exact
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (dir, file_name);
+        false
+    }
+}
+
+fn session_file(dir: &Path, session: &str) -> Result<PathBuf, ProxyError> {
     let path = session_path(dir, session).ok_or(ProxyError::Session)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(ProxyError::Session)?;
+    if case_collides(dir, file_name) {
+        return Err(ProxyError::Session);
+    }
+    Ok(path)
+}
+
+pub fn load_session(dir: &Path, session: &str) -> Result<Vault, ProxyError> {
+    let path = session_file(dir, session)?;
     if !path.exists() {
         return Ok(Vault::new());
     }
@@ -100,7 +141,7 @@ pub fn load_session(dir: &Path, session: &str) -> Result<Vault, ProxyError> {
 }
 
 pub fn save_session(dir: &Path, session: &str, vault: &Vault) -> Result<(), ProxyError> {
-    let path = session_path(dir, session).ok_or(ProxyError::Session)?;
+    let path = session_file(dir, session)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| ProxyError::Vault(hushid::VaultError::Io(err)))?;
     }
@@ -193,8 +234,11 @@ impl Proxy {
         let Ok(shielded) = shield_chat(body, &mut vault, &self.glossary) else {
             return http_response(400, br#"{"error":"body"}"#);
         };
-        if save_session(&self.vault_dir, session, &vault).is_err() {
-            return http_response(500, br#"{"error":"vault"}"#);
+        if let Err(err) = save_session(&self.vault_dir, session, &vault) {
+            return match err {
+                ProxyError::Session => http_response(400, br#"{"error":"bad session"}"#),
+                _ => http_response(500, br#"{"error":"vault"}"#),
+            };
         }
         let upstream = match forward(&self.upstream, &shielded, request.header("authorization")) {
             Ok(reply) => reply,

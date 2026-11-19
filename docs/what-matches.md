@@ -14,7 +14,7 @@ A cue has to sit within 40 characters of the value, unless the row below says th
 | Postal code | A Canadian postal code next to `postal code`, `code postal`, or a street address in the same 40-character window. | A bare `A1A 1A1`. |
 | Address | A civic number and a street type, such as `123 rue Saint-Denis`. | A city name on its own. |
 | Birth date | A real calendar date within 40 characters of a cue such as `date of birth`, `DOB`, `née le`, or `born`. `born` counts only inside the same sentence. | A date with no cue. A day that month does not have. |
-| Name | A spelling in the glossary the host loaded, including that spelling with the accents removed. | A person who is not in that list. A different accent does not match. `Glossary::empty()` matches no names. The file `glossary/popular-names.txt` is not loaded on its own. |
+| Name | A spelling in the glossary the host loaded, including that spelling with the accents removed. | A person who is not in that list. A different accent does not match. `Glossary::empty()` matches no names. The file `glossary/popular-names.txt` is not loaded on its own. A UTF-8 BOM at the start of a line is ignored. |
 | Secret | A recognized secret shape. The replacement is `h1_secret`, and the value is not stored. | A secret shape this crate does not recognize. |
 
 The optional `ner` feature is off unless the host turns it on. `shield_text` does not use it.
