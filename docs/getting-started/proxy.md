@@ -19,4 +19,5 @@ The only path is `POST /v1/chat/completions`. The body is read up to 1 MiB. A re
 | The vault file cannot be read or written | HTTP 500 `{"error":"vault"}` |
 | The upstream dial or write fails | HTTP 502 `{"error":"upstream"}` |
 | The reply quotes `h1_secret` | HTTP 200. That mark stays, other tokens are restored, and the secret is not copied back. |
+| The upstream names a content type | That type is kept. An event stream stays `text/event-stream`. A missing or unsafe type is `application/json`. |
 | The reply contains an `h1_` token this vault did not issue | HTTP 502 `{"error":"restore"}`. The unrestored body is not forwarded. |
