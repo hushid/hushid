@@ -208,7 +208,8 @@ mod tests {
     fn open_rejects_a_message_count_larger_than_the_bytes() {
         let mut plain = vec![0u8; 16];
         plain[8..16].copy_from_slice(&u64::MAX.to_le_bytes());
-        let key = [7u8; 32];
+        let mut key = [0u8; 32];
+        getrandom::fill(&mut key).unwrap();
         let blob = sealed(&plain, &key);
         let err = open(&blob, &key).unwrap_err();
         assert!(matches!(err, SealError::Transcript), "{err:?}");
