@@ -68,7 +68,10 @@ impl Glossary {
     fn parse(text: &str) -> Self {
         let mut terms = Vec::new();
         for line in text.lines() {
-            let line = line.trim();
+            // Notepad writes a UTF-8 BOM on the first line. It is not
+            // whitespace, so trim leaves it on the name and that name
+            // never matches.
+            let line = line.trim().trim_start_matches('\u{feff}');
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }

@@ -42,7 +42,7 @@ let restored = vault.restore_write(&shielded).unwrap();
 assert_eq!(restored, "Write ada@example.com");
 ```
 
-`Glossary::empty()` matches no names. A host that wants the optional name list passes the path `glossary/popular-names.txt` to `Glossary::load`. That file is not loaded on its own.
+`Glossary::empty()` matches no names. A host that wants the optional name list passes the path `glossary/popular-names.txt` to `Glossary::load`. That file is not loaded on its own. A UTF-8 BOM at the start of a line is ignored.
 
 `shield_text` writes tokens. `shield_text_with` can write digit stand-ins or a same-kind stand-in instead. Those stand-ins restore to the original bytes as well. `Operator::Forget` writes a token and does not store the original, so restore fails. A mask is for a display or a log and is not restored. `shield_json_strings` stores tokens. `shield_json_strings_with` takes the same operators, including `Operator::Forget`.
 
@@ -56,7 +56,7 @@ A city, a diagnosis, an account number with no recognized shape, a person who is
 
 ## Chat proxy
 
-From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The reply keeps the upstream content type and the status reason. A secret in the request becomes `h1_secret` upstream. A reply that quotes that mark keeps the mark and still restores the other tokens. The secret is not stored, so it is not copied back. The session header is `X-Hushid-Session`.
+From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The reply keeps the upstream content type and the status reason. A secret in the request becomes `h1_secret` upstream. A reply that quotes that mark keeps the mark and still restores the other tokens. The secret is not stored, so it is not copied back. The session header is `X-Hushid-Session`. On a case-insensitive volume, a session name that would open another session's file is rejected.
 
 ```text
 cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
