@@ -248,14 +248,22 @@ impl Vault {
     }
 
     pub fn restore_display(&self, text: &str) -> String {
-        match walk(text, self, false) {
+        match walk(text, self, false, false) {
             Ok(restored) => restored,
             Err(_) => text.to_string(),
         }
     }
 
     pub fn restore_write(&self, text: &str) -> Result<String, RestoreError> {
-        walk(text, self, true)
+        walk(text, self, true, false)
+    }
+
+    /// Restore issued tokens for a reply the caller will read.
+    ///
+    /// `h1_secret` stays the mark. The secret was not stored, so it is
+    /// not copied back. An unknown `h1_` token is still an error.
+    pub fn restore_reply(&self, text: &str) -> Result<String, RestoreError> {
+        walk(text, self, true, true)
     }
 
     /// Write the map to `path` as mode `0600` on Unix.
@@ -437,7 +445,12 @@ fn digit_match<'a>(vault: &'a Vault, text: &str, index: usize) -> Option<(usize,
     best.map(|(stand_in, surface)| (index + stand_in.len(), surface))
 }
 
-fn walk(text: &str, vault: &Vault, strict: bool) -> Result<String, RestoreError> {
+fn walk(
+    text: &str,
+    vault: &Vault,
+    strict: bool,
+    keep_secret_mark: bool,
+) -> Result<String, RestoreError> {
     let mut out = String::with_capacity(text.len());
     let mut index = 0;
     while index < text.len() {
@@ -458,7 +471,7 @@ fn walk(text: &str, vault: &Vault, strict: bool) -> Result<String, RestoreError>
         };
         out.push_str(&text[index..at]);
         if let Some(end) = secret_mark_at(text, at) {
-            if strict {
+            if strict && !keep_secret_mark {
                 return Err(RestoreError::SecretMark { at });
             }
             out.push_str(&text[at..end]);

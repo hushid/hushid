@@ -801,3 +801,86 @@ fn proxy_cli_bad_listen() {
     assert!(stderr.contains("not-a-socket"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+#[allow(clippy::while_let_loop)]
+fn proxy_echo_restores_an_email_beside_a_secret_mark() {
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    let email = "ada@example.com";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 2048];
+        loop {
+            let Ok(read) = stream.read(&mut chunk) else {
+                break;
+            };
+            if read == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..read]);
+            let Some(header_end) = buf.windows(4).position(|window| window == b"\r\n\r\n") else {
+                continue;
+            };
+            let header = std::str::from_utf8(&buf[..header_end]).unwrap_or("");
+            let length = header
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            if buf.len() < header_end + 4 + length {
+                continue;
+            }
+            let body = buf[header_end + 4..header_end + 4 + length].to_vec();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                std::str::from_utf8(&body).unwrap_or("")
+            );
+            let _ = stream.write_all(response.as_bytes());
+            break;
+        }
+    });
+    let dir = std::env::temp_dir().join(format!("hushid-proxy-echo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let proxy = Proxy::bind(
+        "127.0.0.1:0",
+        &format!("http://127.0.0.1:{port}"),
+        &dir,
+        Glossary::empty(),
+    )
+    .unwrap();
+    let proxy_port = proxy.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let _ = proxy.serve_one();
+    });
+    let text = format!("Write {email} and note {secret}. Marie lives in Springfield.");
+    let body = format!(r#"{{"model":"local","messages":[{{"role":"user","content":"{text}"}}]}}"#);
+    let request = format!(
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Hushid-Session: demo\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains(email), "{response}");
+    assert!(response.contains("h1_secret"), "{response}");
+    assert!(response.contains("Springfield"), "{response}");
+    assert!(response.contains("Marie"), "{response}");
+    assert!(!response.contains(secret), "{response}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
