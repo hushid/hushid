@@ -32,7 +32,7 @@ pub use config::{
     IdentifiersConfig, Mode, NonTextRefused,
 };
 pub use glossary::Glossary;
-pub use json::{restore_json_write, shield_json_strings, JsonError};
+pub use json::{restore_json_reply, restore_json_write, shield_json_strings, JsonError};
 #[cfg(feature = "ner")]
 pub use ner::{Ner, NerError};
 pub use seal::{open as open_sealed, seal as seal_transcript, SealError};

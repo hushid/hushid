@@ -53,13 +53,38 @@ pub fn shield_json_strings(
 
 /// Restore JSON keys, string values, and numbers. An unresolved `h1_` span fails.
 pub fn restore_json_write(vault: &Vault, input: &str) -> Result<String, JsonError> {
-    let text = restore_document(vault, input, 0)?;
+    let text = restore_document(vault, input, 0, false)?;
     // A restored email can itself start with `h1_`. That text is not a
     // token. A real token shape, or `h1_secret`, still fails the write.
     if let Some(at) = unresolved_mark(&text) {
         return Err(JsonError::Restore(RestoreError::Unresolved { at }));
     }
     Ok(text)
+}
+
+/// Restore a chat reply. Issued tokens come back. `h1_secret` stays the
+/// mark, because the secret was not stored. An unknown token still fails.
+pub fn restore_json_reply(vault: &Vault, input: &str) -> Result<String, JsonError> {
+    let text = restore_document(vault, input, 0, true)?;
+    if let Some(at) = unresolved_token(&text) {
+        return Err(JsonError::Restore(RestoreError::Unresolved { at }));
+    }
+    Ok(text)
+}
+
+fn unresolved_token(text: &str) -> Option<usize> {
+    let mut index = 0;
+    while let Some(at) = find_h1(text, index) {
+        if let Some(end) = secret_mark_at(text, at) {
+            index = end;
+            continue;
+        }
+        if parse_token_at(text, at).is_some() {
+            return Some(at);
+        }
+        index = at + 3;
+    }
+    None
 }
 
 fn unresolved_mark(text: &str) -> Option<usize> {
@@ -214,7 +239,12 @@ fn token_for_hit(
     }
 }
 
-fn restore_document(vault: &Vault, input: &str, depth: u8) -> Result<String, JsonError> {
+fn restore_document(
+    vault: &Vault,
+    input: &str,
+    depth: u8,
+    reply: bool,
+) -> Result<String, JsonError> {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
     let mut index = 0;
@@ -231,7 +261,9 @@ fn restore_document(vault: &Vault, input: &str, depth: u8) -> Result<String, Jso
                 }
             }
             let mapped = if !is_key && depth < MAX_JSON_DEPTH && is_json_document(&decoded) {
-                restore_document(vault, &decoded, depth + 1)?
+                restore_document(vault, &decoded, depth + 1, reply)?
+            } else if reply {
+                vault.restore_reply(&decoded).map_err(JsonError::Restore)?
             } else {
                 vault.restore_write(&decoded).map_err(JsonError::Restore)?
             };

@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use hushid::{
-    classify, judge, known_tool_sinks, permissions_view, shield_text, Glossary, Judgment, Sink,
-    Vault, VaultError,
+    classify, judge, known_tool_sinks, permissions_view, restore_json_reply, restore_json_write,
+    shield_text, Glossary, Judgment, Sink, Vault, VaultError,
 };
 
 fn shielded_email() -> (Vault, String) {
@@ -48,6 +48,18 @@ fn write_fails_on_unresolved_token_and_on_secret_mark() {
         Judgment::WriteRejected { .. }
     ));
     assert!(vault.restore_write("keep h1_secret").is_err());
+}
+
+#[test]
+fn reply_keeps_a_secret_mark_and_restores_an_email() {
+    let (vault, token) = shielded_email();
+    let body = format!(r#"{{"content":"see {token} and h1_secret"}}"#);
+    let restored = restore_json_reply(&vault, &body).unwrap();
+    assert!(restored.contains("marie+tag@example.com"), "{restored}");
+    assert!(restored.contains("h1_secret"), "{restored}");
+    assert!(restore_json_write(&vault, &body).is_err());
+    let unknown = format!(r#"{{"content":"{token} and h1_email_AAAAAAAAR"}}"#);
+    assert!(restore_json_reply(&vault, &unknown).is_err());
 }
 
 #[test]

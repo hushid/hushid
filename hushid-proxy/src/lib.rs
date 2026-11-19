@@ -4,8 +4,9 @@
 //! same vault rules as the library. The clear request is not written beside
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
-//! fragment is dropped. A restored body keeps the upstream status; a failed
-//! restore is a 502 and is not forwarded. A request with no `Content-Length`
+//! fragment is dropped. A restored body keeps the upstream status. A reply
+//! that quotes `h1_secret` keeps that mark and still restores other tokens.
+//! An unknown `h1_` token is a 502 and is not forwarded. A request with no `Content-Length`
 //! is read until the connection closes, the same as a response, up to 1 MiB.
 //! A chunked body is assembled the same way, for a request and for a
 //! response. A body shorter than a declared
@@ -73,7 +74,7 @@ pub fn shield_chat(
 }
 
 pub fn restore_chat(body: &str, vault: &Vault) -> Result<String, JsonError> {
-    hushid::restore_json_write(vault, body)
+    hushid::restore_json_reply(vault, body)
 }
 
 pub fn session_path(dir: &Path, session: &str) -> Option<PathBuf> {
@@ -1627,7 +1628,7 @@ mod coverage_edges {
     }
 
     #[test]
-    fn an_unrestored_upstream_secret_is_not_forwarded() {
+    fn a_secret_mark_in_the_reply_stays_a_mark() {
         let dir = std::env::temp_dir().join(format!("hushid-proxy-restore-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1653,9 +1654,41 @@ mod coverage_edges {
             &[("X-Hushid-Session", "demo")],
             b"{}",
         ));
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains("h1_secret"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unknown_token_in_the_reply_is_not_forwarded() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-unknown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let _ = read_http(&mut stream);
+            let body = br#"{"completion":"h1_email_AAAAAAAAR"}"#;
+            let _ = stream.write_all(http_response(200, body).as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            b"{}",
+        ));
         assert!(response.starts_with("HTTP/1.1 502"), "{response}");
         assert!(response.contains("restore"), "{response}");
-        assert!(!response.contains("h1_secret"), "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

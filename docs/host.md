@@ -2,7 +2,7 @@
 
 `shield_text` returns the rewritten text and an `AuditRecord`. The record counts each kind. It does not contain the original values, so a log can say how many emails were replaced without writing the addresses.
 
-`shield_json_strings` walks string values in a JSON document, including a string that is itself JSON. A key that names an API-key assignment is replaced with `h1_secret` and is not stored. A number or a key that no detector recognizes stays as it is. `restore_json_write` fails when an `h1_` token is still unresolved.
+`shield_json_strings` walks string values in a JSON document, including a string that is itself JSON. A key that names an API-key assignment is replaced with `h1_secret` and is not stored. A number or a key that no detector recognizes stays as it is. `restore_json_write` fails when an `h1_` token is still unresolved. `restore_json_reply` is what the chat proxy uses for a model reply: issued tokens come back, and `h1_secret` stays the mark.
 
 `judge` decides what a finished tool call may do with those tokens.
 
