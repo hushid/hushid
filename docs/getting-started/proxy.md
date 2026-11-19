@@ -14,7 +14,7 @@ The only path is `POST /v1/chat/completions`. The body is read up to 1 MiB. A re
 |---|---|
 | No `X-Hushid-Session` | HTTP 400 `{"error":"missing session"}` |
 | A session name the vault rejects | HTTP 400 `{"error":"bad session"}` |
-| A bad header, a bad `Content-Length`, or a carriage return in `Authorization` | HTTP 400 `{"error":"headers"}` or `{"error":"length"}`. The process stays up. A line break in the upstream URL is `upstream` and does dial. |
+| A bad header, a bad `Content-Length`, or a carriage return in `Authorization` | HTTP 400 `{"error":"headers"}` or `{"error":"length"}`. The process stays up. A line break in the upstream URL is HTTP 502 `{"error":"upstream"}` before the proxy opens a socket. The process stays up. |
 | A bad chunk, or a body that is not UTF-8 | HTTP 400 `{"error":"body"}`. The process stays up. |
 | The vault file cannot be read or written | HTTP 500 `{"error":"vault"}` |
 | The upstream dial or write fails | HTTP 502 `{"error":"upstream"}` |
