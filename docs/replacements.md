@@ -14,4 +14,4 @@ A secret is not one of those operators. Every recognized secret becomes the same
 
 A repeat of the same address inside one `shield_text` call gets its own token. A later call that sees an address already in the vault reuses the token that was stored first.
 
-`restore_write` fails when the text contains `h1_secret` or an `h1_` token this vault did not issue. The check character has to match. A token from another vault is not restored. `restore_json_reply` keeps `h1_secret` and still restores a token this vault issued. The chat proxy uses that for a model reply.
+`restore_write` fails when the text contains `h1_secret` or an `h1_` token this vault did not issue. The check character has to match. A token from another vault is not restored. `restore_json_reply` keeps `h1_secret` and still restores a token this vault issued. The chat proxy uses that for a model reply. The MCP `restore` tool uses `restore_reply` the same way.
