@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.6](https://github.com/hushid/hushid/compare/hushid-v0.1.5...hushid-v0.1.6) (2026-11-19)
+
+
+### Features
+
+* issue a token without storing the original ([#261](https://github.com/hushid/hushid/issues/261)) ([ff62a68](https://github.com/hushid/hushid/commit/ff62a68eadb926d504f8189f657cf9d2c8857915))
+
+
+### Bug Fixes
+
+* find proxy binaries on Windows and bump patch deps ([#262](https://github.com/hushid/hushid/issues/262)) ([09d2895](https://github.com/hushid/hushid/commit/09d2895a4867d82f9a999f9078a863f876037d20))
+* keep a secret mark in a chat reply ([#263](https://github.com/hushid/hushid/issues/263)) ([5559640](https://github.com/hushid/hushid/commit/5559640d91fd4e4fe01382e85040cfc71b594e64))
+* keep scanning tool names after a cfg(test) helper ([#258](https://github.com/hushid/hushid/issues/258)) ([4b58958](https://github.com/hushid/hushid/commit/4b5895834321e9358089ba50934f31d0b71ce878)), closes [#256](https://github.com/hushid/hushid/issues/256)
+* keep the upstream content type on a chat reply ([#265](https://github.com/hushid/hushid/issues/265)) ([297f5cd](https://github.com/hushid/hushid/commit/297f5cddd8bbe2d58bb45f17b513dd394aa464c4))
+* keep the upstream status reason on a chat reply ([#266](https://github.com/hushid/hushid/issues/266)) ([7fd7f2f](https://github.com/hushid/hushid/commit/7fd7f2f3cbe8144105d344fa7cf7b519e2b0469c))
+* reject a sealed message count that cannot fit ([#267](https://github.com/hushid/hushid/issues/267)) ([dee2210](https://github.com/hushid/hushid/commit/dee221010d5c0506bca4bab6b2a06fdeeb1cfebd))
+* restore an MCP sentence that includes a secret mark ([#264](https://github.com/hushid/hushid/issues/264)) ([291570f](https://github.com/hushid/hushid/commit/291570f1009237b20fa4d39a188617a00acfb52a))
+
 ## [0.1.5](https://github.com/hushid/hushid/compare/hushid-v0.1.4...hushid-v0.1.5) (2026-11-18)
 
 
