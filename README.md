@@ -56,7 +56,7 @@ A city, a diagnosis, an account number with no recognized shape, a person who is
 
 ## Chat proxy
 
-From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The reply keeps the upstream content type. A secret in the request becomes `h1_secret` upstream. A reply that quotes that mark keeps the mark and still restores the other tokens. The secret is not stored, so it is not copied back. The session header is `X-Hushid-Session`.
+From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The reply keeps the upstream content type and the status reason. A secret in the request becomes `h1_secret` upstream. A reply that quotes that mark keeps the mark and still restores the other tokens. The secret is not stored, so it is not copied back. The session header is `X-Hushid-Session`.
 
 ```text
 cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR

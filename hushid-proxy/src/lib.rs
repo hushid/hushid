@@ -5,7 +5,8 @@
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
 //! fragment is dropped. A restored body keeps the upstream status and the
-//! upstream content type. An event stream stays `text/event-stream`. A reply
+//! upstream content type. An event stream stays `text/event-stream`. The
+//! status reason is kept, so a rate limit stays `429 Too Many Requests`. A reply
 //! that quotes `h1_secret` keeps that mark and still restores other tokens.
 //! An unknown `h1_` token is a 502 and is not forwarded. A request with no `Content-Length`
 //! is read until the connection closes, the same as a response, up to 1 MiB.
@@ -216,7 +217,12 @@ impl Proxy {
                 String::from_utf8_lossy(&upstream.body).into_owned()
             }
         };
-        http_response_typed(upstream.status, &upstream.content_type, restored.as_bytes())
+        http_response_typed(
+            upstream.status,
+            &safe_reason(upstream.status, &upstream.reason),
+            &upstream.content_type,
+            restored.as_bytes(),
+        )
     }
 }
 
@@ -224,6 +230,7 @@ pub struct UpstreamReply {
     pub status: u16,
     pub body: Vec<u8>,
     pub content_type: String,
+    pub reason: String,
 }
 
 pub fn forward(
@@ -305,6 +312,7 @@ fn exchange(
     Ok(UpstreamReply {
         status: response.status,
         content_type: response_media_type(&response),
+        reason: response.reason,
         body: response.body,
     })
 }
@@ -440,6 +448,7 @@ struct HttpRequest {
     method: String,
     path: String,
     status: u16,
+    reason: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
@@ -487,6 +496,11 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         (String::new(), String::new(), status)
     } else {
         (first.to_string(), second.to_string(), 0)
+    };
+    let reason = if is_response {
+        start.splitn(3, ' ').nth(2).unwrap_or("").trim().to_string()
+    } else {
+        String::new()
     };
     let mut headers = Vec::new();
     let mut length = 0usize;
@@ -550,6 +564,7 @@ fn read_http(stream: &mut impl Read) -> std::io::Result<HttpRequest> {
         method,
         path,
         status,
+        reason,
         headers,
         body,
     })
@@ -661,19 +676,30 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-fn http_response(status: u16, body: &[u8]) -> String {
-    http_response_typed(status, "application/json", body)
-}
-
-fn http_response_typed(status: u16, content_type: &str, body: &[u8]) -> String {
-    let reason = match status {
+fn status_reason(status: u16) -> &'static str {
+    match status {
         200 => "OK",
         400 => "Bad Request",
         404 => "Not Found",
         500 => "Error",
         502 => "Bad Gateway",
         _ => "Error",
-    };
+    }
+}
+
+fn safe_reason(status: u16, reason: &str) -> String {
+    if reason.is_empty() || reason.len() > 80 || reason.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return status_reason(status).to_string();
+    }
+    reason.to_string()
+}
+
+fn http_response(status: u16, body: &[u8]) -> String {
+    http_response_typed(status, status_reason(status), "application/json", body)
+}
+
+fn http_response_typed(status: u16, reason: &str, content_type: &str, body: &[u8]) -> String {
     format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
@@ -1470,6 +1496,7 @@ mod coverage_edges {
             method: method.to_string(),
             path: path.to_string(),
             status: 0,
+            reason: String::new(),
             headers: headers
                 .iter()
                 .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
@@ -1765,6 +1792,52 @@ mod coverage_edges {
             "{response}"
         );
         assert!(response.contains("{\"ok\":true}"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rate_limit_keeps_its_reason_and_restores_the_email() {
+        let dir = std::env::temp_dir().join(format!("hushid-proxy-429-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let request = read_http(&mut stream).unwrap();
+            let text = String::from_utf8_lossy(&request.body);
+            let marker = "\"content\":\"";
+            let start = text.find(marker).unwrap() + marker.len();
+            let end = start + text[start..].find('"').unwrap();
+            let content = &text[start..end];
+            let body =
+                format!("{{\"error\":{{\"message\":\"rate limit while reading {content}\"}}}}");
+            let raw = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(raw.as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            br#"{"model":"local","messages":[{"role":"user","content":"Write ada@example.com"}]}"#,
+        ));
+        assert!(
+            response.starts_with("HTTP/1.1 429 Too Many Requests\r\n"),
+            "{response}"
+        );
+        assert!(response.contains("ada@example.com"), "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
