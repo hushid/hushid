@@ -2395,7 +2395,7 @@ fn json_quote_between_an_api_key_name_and_the_value_still_masks_it() {
     let raw = format!(r#"{{"api_key":"{secret}"}}"#);
     let (vault, out, audit) = shield(&raw);
     assert_eq!(audit.secret, 1, "{raw} -> {out}");
-    assert_eq!(out, r#"{"h1_secret"}"#);
+    assert_eq!(out, r#"{"api_key":"h1_secret"}"#);
     assert!(!out.contains(&secret), "{out}");
     assert!(!vault.holds_surface(secret.as_bytes()));
     assert!(vault.restore_write(&out).is_err());
@@ -2597,7 +2597,11 @@ fn hyphen_mark_in_an_api_key_name_still_masks_the_value() {
         let raw = format!(r#"{{"api{mark}key":"{secret}"}}"#);
         let (vault, out, audit) = shield(&raw);
         assert_eq!(audit.secret, 1, "{raw} -> {out}");
-        assert_eq!(out, r#"{"h1_secret"}"#, "{raw} -> {out}");
+        assert_eq!(
+            out,
+            format!(r#"{{"api{mark}key":"h1_secret"}}"#),
+            "{raw} -> {out}"
+        );
         assert!(!vault.holds_surface(secret.as_bytes()), "{raw}");
 
         let documents = [
@@ -2701,7 +2705,11 @@ fn whitespace_inside_an_api_key_name_still_masks_the_value() {
         let raw = format!(r#"{{"api{gap}key":"{secret}"}}"#);
         let (vault, out, audit) = shield(&raw);
         assert_eq!(audit.secret, 1, "{raw:?} -> {out}");
-        assert_eq!(out, r#"{"h1_secret"}"#, "{raw:?} -> {out}");
+        assert_eq!(
+            out,
+            format!(r#"{{"api{gap}key":"h1_secret"}}"#),
+            "{raw:?} -> {out}"
+        );
         assert!(!vault.holds_surface(secret.as_bytes()), "{raw:?}");
 
         let documents = [

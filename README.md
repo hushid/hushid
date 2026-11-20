@@ -44,7 +44,7 @@ assert_eq!(restored, "Write ada@example.com");
 
 `Glossary::empty()` matches no names. A host that wants the optional name list passes the path `glossary/popular-names.txt` to `Glossary::load`. That file is not loaded on its own. A UTF-8 BOM at the start of a line is ignored.
 
-`shield_text` writes tokens. `shield_text_with` can write digit stand-ins or a same-kind stand-in instead. Those stand-ins restore to the original bytes as well. `Operator::Forget` writes a token and does not store the original, so restore fails. A mask is for a display or a log and is not restored. `shield_json_strings` stores tokens. `shield_json_strings_with` takes the same operators, including `Operator::Forget`.
+`shield_text` writes tokens. When the whole text is a JSON object or array, it uses the JSON shield, so a recognized number becomes a quoted token and a later shield of that number reuses it. `shield_text_with` can write digit stand-ins or a same-kind stand-in instead. Those stand-ins restore to the original bytes as well. `Operator::Forget` writes a token and does not store the original. A local write of that token fails. A reply keeps the token and still restores a stored token. A mask is for a display or a log and is not restored. `shield_json_strings` stores tokens. `shield_json_strings_with` takes the same operators, including `Operator::Forget`.
 
 ## What a detector recognizes
 
@@ -56,7 +56,7 @@ A city, a diagnosis, an account number with no recognized shape, a person who is
 
 ## Chat proxy
 
-From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. On Windows, `localhost` listens on `127.0.0.1` and `::1`. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The reply keeps the upstream content type and the status reason. A secret in the request becomes `h1_secret` upstream. A reply that quotes that mark keeps the mark and still restores the other tokens. The secret is not stored, so it is not copied back. The session header is `X-Hushid-Session`. On a case-insensitive volume, a session name that would open another session's file is rejected.
+From a clone of this repository, `hushid-proxy` listens on `127.0.0.1:8078` unless `--listen` is set. On Windows, `localhost` listens on `127.0.0.1` and `::1`. It shields a chat request, forwards it to `--upstream`, and restores tokens in the response. The reply keeps the upstream content type and the status reason. A secret in the request becomes `h1_secret` upstream. A reply that quotes that mark keeps the mark and still restores the other tokens. A reply that quotes a token minted with `Forget` keeps that token the same way. The secret is not stored, so it is not copied back. The session header is `X-Hushid-Session`. On a case-insensitive volume, a session name that would open another session's file is rejected.
 
 ```text
 cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
@@ -66,7 +66,7 @@ cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
 
 ## MCP
 
-From a clone of this repository, `hushid-mcp` reads MCP frames on stdin and writes frames on stdout. `restore` copies back tokens this vault issued and leaves `h1_secret` as the mark. `HUSHID_VAULT_DIR` is required. `HUSHID_GLOSSARY` is optional.
+From a clone of this repository, `hushid-mcp` reads MCP frames on stdin and writes frames on stdout. `shield` uses `shield_text`, so a JSON object or array gets a quoted token for a recognized number. `restore` copies back tokens this vault issued, leaves `h1_secret` as the mark, and keeps a token minted with `Forget`. `HUSHID_VAULT_DIR` is required. `HUSHID_GLOSSARY` is optional.
 
 ```text
 HUSHID_VAULT_DIR=DIR cargo run -p hushid-proxy --bin hushid-mcp

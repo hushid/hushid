@@ -103,7 +103,9 @@ impl Session {
     /// [`Self::shield_message`] with an explicit operator.
     ///
     /// [`Operator::Forget`] keeps the projection and does not store the
-    /// original bytes. A later message mints another token.
+    /// original bytes. A later message mints another token. A JSON object
+    /// or array uses the JSON shield, so a recognized number is a quoted
+    /// token.
     pub fn shield_message_with(
         &mut self,
         text: &str,
@@ -122,6 +124,17 @@ impl Session {
         names: Names<'_>,
         operator: Operator,
     ) -> Result<usize, TokenError> {
+        if let Some(shielded) =
+            crate::json::shield_if_document(&mut self.vault, &self.glossary, text, operator)
+        {
+            let (projection, audit) = shielded?;
+            self.audits.push(audit);
+            self.messages.push(StoredMessage {
+                projection,
+                thinking: None,
+            });
+            return Ok(self.messages.len() - 1);
+        }
         let mut forgotten = BTreeMap::new();
         let (projection, audit) = shield_in_context(
             &mut self.vault,

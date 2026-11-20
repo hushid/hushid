@@ -57,10 +57,12 @@ pub fn shield_json_strings(
 /// [`Operator::Forget`] writes a token and stores nothing. The same bytes
 /// share one token inside this call, including two strings and a number.
 /// A later call mints another token. A token already in the vault is not
-/// reused. [`Operator::Mask`] does not store either. A JSON number stays a
-/// quoted token for [`Operator::Token`], [`Operator::Digits`], and
-/// [`Operator::Surrogate`], so [`restore_json_write`] can write it back as
-/// a number.
+/// reused. A reply keeps that token. [`Operator::Mask`] does not store
+/// either. A JSON number stays a quoted token for [`Operator::Token`],
+/// [`Operator::Digits`], and [`Operator::Surrogate`], so
+/// [`restore_json_write`] can write it back as a number. A later shield of
+/// the same number reuses that token. A token stored for those digits as a
+/// string is not reused.
 ///
 /// ```
 /// use hushid::{restore_json_write, shield_json_strings_with, Glossary, Operator, Vault};
@@ -111,23 +113,51 @@ pub fn restore_json_write(vault: &Vault, input: &str) -> Result<String, JsonErro
 }
 
 /// Restore a chat reply. Issued tokens come back. `h1_secret` stays the
-/// mark, because the secret was not stored. An unknown token still fails.
+/// mark, because the secret was not stored. A token minted with
+/// [`Operator::Forget`] stays in the text. A token this vault did not
+/// mint still fails.
 pub fn restore_json_reply(vault: &Vault, input: &str) -> Result<String, JsonError> {
     let text = restore_document(vault, input, 0, true)?;
-    if let Some(at) = unresolved_token(&text) {
+    if let Some(at) = unresolved_token(vault, &text) {
         return Err(JsonError::Restore(RestoreError::Unresolved { at }));
     }
     Ok(text)
 }
 
-fn unresolved_token(text: &str) -> Option<usize> {
+/// Shield `text` when it is one JSON object or array.
+///
+/// [`None`] means the text is prose, or another value, and the caller
+/// should use the text shield. A recognized number becomes a quoted token.
+pub(crate) fn shield_if_document(
+    vault: &mut Vault,
+    glossary: &Glossary,
+    text: &str,
+    operator: Operator,
+) -> Option<Result<(String, AuditRecord), TokenError>> {
+    if !is_json_document(text) {
+        return None;
+    }
+    Some(
+        match shield_json_strings_with(vault, glossary, text, operator) {
+            Ok(pair) => Ok(pair),
+            Err(JsonError::Token(err)) => Err(err),
+            Err(JsonError::Syntax { .. } | JsonError::Restore(_)) => Err(TokenError::Payload),
+        },
+    )
+}
+
+fn unresolved_token(vault: &Vault, text: &str) -> Option<usize> {
     let mut index = 0;
     while let Some(at) = find_h1(text, index) {
         if let Some(end) = secret_mark_at(text, at) {
             index = end;
             continue;
         }
-        if parse_token_at(text, at).is_some() {
+        if let Some(parsed) = parse_token_at(text, at) {
+            if parsed.check_ok && vault.forgot(&parsed.canonical) {
+                index = parsed.end;
+                continue;
+            }
             return Some(at);
         }
         index = at + 3;
@@ -288,16 +318,22 @@ fn token_for_hit(
                 Operator::Forget => {
                     let text = std::str::from_utf8(surface)
                         .map_err(|_| JsonError::Token(TokenError::Payload))?;
-                    mint_forgotten(state.forgotten, *kind, text).map_err(JsonError::Token)?
+                    mint_forgotten(vault, state.forgotten, *kind, text).map_err(JsonError::Token)?
                 }
                 Operator::Mask => {
                     let text = std::str::from_utf8(surface)
                         .map_err(|_| JsonError::Token(TokenError::Payload))?;
                     mask_for(*kind, text)
                 }
-                Operator::Token | Operator::Digits | Operator::Surrogate => vault
-                    .issue_json_number(*kind, surface)
-                    .map_err(JsonError::Token)?,
+                Operator::Token | Operator::Digits | Operator::Surrogate => {
+                    if let Some(token) = vault.first_json_number_token(*kind, surface) {
+                        token
+                    } else {
+                        vault
+                            .issue_json_number(*kind, surface)
+                            .map_err(JsonError::Token)?
+                    }
+                }
             };
             state.audit.bump(*kind);
             Ok(token)

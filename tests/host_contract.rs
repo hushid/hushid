@@ -1,7 +1,8 @@
 use hushid::{
     accept_non_text, format_token, parse_identifiers_config, restore_json_write,
-    shield_json_strings, shield_text, shielding_active, ArgumentBuffer, Glossary, HeldStream,
-    JsonError, Judgment, Kind, Mode, RestoreError, Session, Sink, Vault,
+    shield_json_strings, shield_json_strings_with, shield_text, shield_text_with, shielding_active,
+    ArgumentBuffer, Glossary, HeldStream, JsonError, Judgment, Kind, Mode, Operator, RestoreError,
+    Session, Sink, Vault,
 };
 use std::fs;
 use std::path::Path;
@@ -770,4 +771,163 @@ fn install_snippet_tracks_the_0_1_line() {
             "{relative} must not pin a patch"
         );
     }
+}
+
+fn card_tokens(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("h1_card_") {
+        let token = &rest[start..];
+        let end = token
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(token.len());
+        found.push(token[..end].to_string());
+        rest = &token[end..];
+    }
+    found
+}
+
+#[test]
+fn a_json_number_keeps_one_token_across_calls() {
+    let combined = r#"{"visa":4111111111111111,"email":"marie@example.com"}"#;
+    let mut vault = Vault::new();
+    let (first, _) = shield_json_strings(&mut vault, &Glossary::empty(), combined).unwrap();
+    let (second, _) = shield_json_strings(&mut vault, &Glossary::empty(), combined).unwrap();
+    assert_eq!(vault.len(), 2, "{first} {second}");
+    assert_eq!(card_tokens(&first), card_tokens(&second));
+    assert_eq!(restore_json_write(&vault, &first).unwrap(), combined);
+    assert_eq!(restore_json_write(&vault, &second).unwrap(), combined);
+
+    let only = r#"{"visa":4111111111111111}"#;
+    let mut numbers = Vault::new();
+    let (first, _) = shield_json_strings(&mut numbers, &Glossary::empty(), only).unwrap();
+    let (second, _) = shield_json_strings(&mut numbers, &Glossary::empty(), only).unwrap();
+    assert_eq!(numbers.len(), 1, "{first} {second}");
+    assert_eq!(card_tokens(&first), card_tokens(&second));
+    let path =
+        std::env::temp_dir().join(format!("hushid-json-number-{}.vault", std::process::id()));
+    numbers.save(&path).unwrap();
+    let saved = fs::read_to_string(&path).unwrap();
+    let _ = fs::remove_file(&path);
+    let records = saved
+        .lines()
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .count();
+    assert_eq!(records, 1, "{saved}");
+
+    let both = r#"{"visa":4111111111111111,"card":4111111111111111}"#;
+    let mut once = Vault::new();
+    let (out, audit) = shield_json_strings(&mut once, &Glossary::empty(), both).unwrap();
+    assert_eq!(audit.card, 2, "{out}");
+    assert_eq!(once.len(), 1, "{out}");
+    let tokens = card_tokens(&out);
+    assert_eq!(tokens.len(), 2, "{out}");
+    assert_eq!(tokens[0], tokens[1]);
+
+    let mut digits = Vault::new();
+    let (first, _) =
+        shield_json_strings_with(&mut digits, &Glossary::empty(), combined, Operator::Digits)
+            .unwrap();
+    let (second, _) =
+        shield_json_strings_with(&mut digits, &Glossary::empty(), combined, Operator::Digits)
+            .unwrap();
+    assert_eq!(digits.len(), 2, "{first} {second}");
+    assert_eq!(card_tokens(&first), card_tokens(&second));
+
+    let mut surrogates = Vault::new();
+    let (first, _) = shield_json_strings_with(
+        &mut surrogates,
+        &Glossary::empty(),
+        only,
+        Operator::Surrogate,
+    )
+    .unwrap();
+    let (second, _) = shield_json_strings_with(
+        &mut surrogates,
+        &Glossary::empty(),
+        only,
+        Operator::Surrogate,
+    )
+    .unwrap();
+    assert_eq!(surrogates.len(), 1, "{first} {second}");
+    assert_eq!(card_tokens(&first), card_tokens(&second));
+
+    let as_string = r#"{"card":"4111111111111111"}"#;
+    let mut mixed = Vault::new();
+    let (text, _) = shield_json_strings(&mut mixed, &Glossary::empty(), as_string).unwrap();
+    let (number, _) = shield_json_strings(&mut mixed, &Glossary::empty(), only).unwrap();
+    assert_eq!(mixed.len(), 2, "{text} {number}");
+    assert_ne!(card_tokens(&text), card_tokens(&number));
+    assert_eq!(restore_json_write(&mixed, &text).unwrap(), as_string);
+    assert_eq!(restore_json_write(&mixed, &number).unwrap(), only);
+
+    let mut forgotten = Vault::new();
+    let (first, _) =
+        shield_json_strings_with(&mut forgotten, &Glossary::empty(), only, Operator::Forget)
+            .unwrap();
+    let (second, _) =
+        shield_json_strings_with(&mut forgotten, &Glossary::empty(), only, Operator::Forget)
+            .unwrap();
+    assert!(forgotten.is_empty());
+    assert_ne!(first, second);
+    assert!(restore_json_write(&forgotten, &first).is_err());
+}
+
+#[test]
+fn text_shielding_quotes_a_json_number() {
+    let input = r#"{"visa":4111111111111111}"#;
+    let mut vault = Vault::new();
+    let (out, audit) = shield_text(&mut vault, &Glossary::empty(), input).unwrap();
+    assert_eq!(audit.card, 1, "{out}");
+    assert_eq!(vault.len(), 1);
+    let at = out.find("h1_card_").expect(&out);
+    assert_eq!(out.as_bytes()[at - 1], b'"', "{out}");
+    assert!(!out.contains("4111111111111111"), "{out}");
+    assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
+
+    let mut session = Session::new(Glossary::empty());
+    let index = session.shield_message(input).unwrap();
+    let projection = &session.replay()[index].projection;
+    let at = projection.find("h1_card_").expect(projection);
+    assert_eq!(projection.as_bytes()[at - 1], b'"', "{projection}");
+    assert_eq!(session.vault().len(), 1);
+
+    let mut forgotten = Session::new(Glossary::empty());
+    let index = forgotten
+        .shield_message_with(input, Operator::Forget)
+        .unwrap();
+    let projection = &forgotten.replay()[index].projection;
+    let at = projection.find("h1_card_").expect(projection);
+    assert_eq!(projection.as_bytes()[at - 1], b'"', "{projection}");
+    assert!(forgotten.vault().is_empty());
+    assert!(forgotten.vault().restore_write(projection).is_err());
+
+    let padded = "\n{\"visa\":4111111111111111}\n";
+    let (out, _) = shield_text(&mut Vault::new(), &Glossary::empty(), padded).unwrap();
+    assert!(out.starts_with('\n'), "{out}");
+    assert!(out.ends_with('\n'), "{out}");
+    let at = out.find("h1_card_").expect(&out);
+    assert_eq!(out.as_bytes()[at - 1], b'"', "{out}");
+
+    let prose = "Write ada@example.com today.";
+    let (out, _) = shield_text(&mut Vault::new(), &Glossary::empty(), prose).unwrap();
+    assert!(out.starts_with("Write h1_email_"), "{out}");
+    assert!(!out.contains('{'), "{out}");
+
+    let untouched = r#"{"n":1}"#;
+    let (out, audit) = shield_text(&mut Vault::new(), &Glossary::empty(), untouched).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, untouched);
+
+    let mixed = r#"note {"visa":4111111111111111}"#;
+    let (out, _) = shield_text_with(
+        &mut Vault::new(),
+        &Glossary::empty(),
+        mixed,
+        Operator::Token,
+    )
+    .unwrap();
+    let at = out.find("h1_card_").expect(&out);
+    assert_ne!(out.as_bytes()[at - 1], b'"', "{out}");
 }
