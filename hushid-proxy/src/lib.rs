@@ -169,6 +169,7 @@ enum Incoming {
     },
 }
 
+#[cfg(windows)]
 fn localhost_port(listen: &str) -> Option<u16> {
     let (host, port) = listen.rsplit_once(':')?;
     if !host.eq_ignore_ascii_case("localhost") {
