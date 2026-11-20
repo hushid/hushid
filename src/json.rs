@@ -124,6 +124,18 @@ pub fn restore_json_reply(vault: &Vault, input: &str) -> Result<String, JsonErro
     Ok(text)
 }
 
+/// Restore text a person will read.
+///
+/// A JSON object or array uses [`restore_json_reply`], so a number token
+/// becomes digits again. Other text uses [`Vault::restore_reply`].
+pub fn restore_readable(vault: &Vault, text: &str) -> Result<String, JsonError> {
+    if is_json_document(text) {
+        restore_json_reply(vault, text)
+    } else {
+        vault.restore_reply(text).map_err(JsonError::Restore)
+    }
+}
+
 /// Shield `text` when it is one JSON object or array.
 ///
 /// [`None`] means the text is prose, or another value, and the caller

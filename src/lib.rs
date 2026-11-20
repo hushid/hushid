@@ -33,8 +33,8 @@ pub use config::{
 };
 pub use glossary::Glossary;
 pub use json::{
-    restore_json_reply, restore_json_write, shield_json_strings, shield_json_strings_with,
-    JsonError,
+    restore_json_reply, restore_json_write, restore_readable, shield_json_strings,
+    shield_json_strings_with, JsonError,
 };
 #[cfg(feature = "ner")]
 pub use ner::{Ner, NerError};

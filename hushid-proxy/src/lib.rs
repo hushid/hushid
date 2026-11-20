@@ -971,7 +971,7 @@ fn mcp_tool(
         save_session(vault_dir, session, &vault).map_err(|_| "vault")?;
         out
     } else if name == "restore" {
-        vault.restore_reply(text).map_err(|_| "restore")?
+        hushid::restore_readable(&vault, text).map_err(|_| "restore")?
     } else {
         return Err("tool");
     };

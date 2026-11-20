@@ -8,7 +8,7 @@ HUSHID_VAULT_DIR=DIR cargo run -p hushid-proxy --bin hushid-mcp
 
 Each request is one frame. The header carries `Content-Length`. The name is accepted in any case, and space around the colon is ignored. The body is capped at 1 MiB before it is allocated. A clean end of stdin before any byte exits 0.
 
-The tools are `shield` and `restore`. `shield` uses `shield_text`. A JSON object or array passed to it is shielded as JSON, so a recognized number becomes a quoted token. `restore` copies back tokens this vault issued. `h1_secret` stays the mark, and the secret is not copied back. A token minted with `Forget` stays in the text. An `h1_` token this vault did not mint is an error.
+The tools are `shield` and `restore`. `shield` uses `shield_text`. A JSON object or array passed to it is shielded as JSON, so a recognized number becomes a quoted token. `restore` copies back tokens this vault issued. When that text is a JSON object or array, a number token becomes digits again. `h1_secret` stays the mark, and the secret is not copied back. A token minted with `Forget` stays in the text. An `h1_` token this vault did not mint is an error.
 
 | What happened | Process |
 |---|---|

@@ -66,7 +66,7 @@ cargo run -p hushid-proxy -- --upstream URL --vault-dir DIR
 
 ## MCP
 
-From a clone of this repository, `hushid-mcp` reads MCP frames on stdin and writes frames on stdout. `shield` uses `shield_text`, so a JSON object or array gets a quoted token for a recognized number. `restore` copies back tokens this vault issued, leaves `h1_secret` as the mark, and keeps a token minted with `Forget`. `HUSHID_VAULT_DIR` is required. `HUSHID_GLOSSARY` is optional.
+From a clone of this repository, `hushid-mcp` reads MCP frames on stdin and writes frames on stdout. `shield` uses `shield_text`, so a JSON object or array gets a quoted token for a recognized number. `restore` copies back tokens this vault issued. A JSON object or array comes back with a number as digits. It leaves `h1_secret` as the mark and keeps a token minted with `Forget`. `HUSHID_VAULT_DIR` is required. `HUSHID_GLOSSARY` is optional.
 
 ```text
 HUSHID_VAULT_DIR=DIR cargo run -p hushid-proxy --bin hushid-mcp

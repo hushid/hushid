@@ -260,6 +260,44 @@ fn mcp_shield_quotes_a_json_number() {
 }
 
 #[test]
+fn mcp_restore_writes_a_json_number_as_digits() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-json-restore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let shielded = mcp_message(
+        &dir,
+        &Glossary::empty(),
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"{\"visa\":4111111111111111}"}}}"#,
+    )
+    .unwrap();
+    let token = shielded
+        .split("h1_card_")
+        .nth(1)
+        .unwrap()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .next()
+        .unwrap();
+    let token = format!("h1_card_{token}");
+    let document = format!(r#"{{"visa":"{token}"}}"#);
+    let escaped = document.replace('"', "\\\"");
+    let restored = mcp_message(
+        &dir,
+        &Glossary::empty(),
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"restore","arguments":{{"session":"demo","text":"{escaped}"}}}}}}"#
+        ),
+    );
+    let restored = restored.unwrap();
+    assert!(
+        restored.contains(r#"{\"visa\":4111111111111111}"#),
+        "{restored}"
+    );
+    assert!(!restored.contains(&token), "{restored}");
+    assert!(!restored.contains("isError"), "{restored}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn mcp_restore_keeps_a_forgotten_token_beside_a_stored_one() {
     let dir = std::env::temp_dir().join(format!("hushid-mcp-forgotten-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
