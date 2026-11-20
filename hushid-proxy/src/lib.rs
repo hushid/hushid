@@ -20,6 +20,9 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -149,10 +152,135 @@ pub fn save_session(dir: &Path, session: &str, vault: &Vault) -> Result<(), Prox
 }
 
 pub struct Proxy {
-    listener: TcpListener,
+    local: SocketAddr,
     upstream: String,
     vault_dir: PathBuf,
     glossary: Glossary,
+    incoming: Incoming,
+}
+
+enum Incoming {
+    Direct(TcpListener),
+    Shared {
+        rx: Receiver<std::io::Result<TcpStream>>,
+        stop: Arc<AtomicBool>,
+        joins: Vec<thread::JoinHandle<()>>,
+        addrs: Vec<SocketAddr>,
+    },
+}
+
+fn localhost_port(listen: &str) -> Option<u16> {
+    let (host, port) = listen.rsplit_once(':')?;
+    if !host.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
+    port.parse().ok()
+}
+
+fn bind_listeners(listen: &str) -> std::io::Result<Vec<TcpListener>> {
+    #[cfg(windows)]
+    if let Some(listeners) = bind_localhost(listen)? {
+        return Ok(listeners);
+    }
+    Ok(vec![TcpListener::bind(listen)?])
+}
+
+/// Windows resolves `localhost` to `[::1]` first and `TcpListener::bind`
+/// keeps only that address. A client of `127.0.0.1` then waits until the
+/// connect times out. Listen on both loopbacks, on one port.
+#[cfg(windows)]
+fn bind_localhost(listen: &str) -> std::io::Result<Option<Vec<TcpListener>>> {
+    let Some(port) = localhost_port(listen) else {
+        return Ok(None);
+    };
+    if port == 0 {
+        let v4 = TcpListener::bind("127.0.0.1:0")?;
+        let chosen = v4.local_addr()?.port();
+        let mut listeners = vec![v4];
+        if let Ok(v6) = TcpListener::bind(format!("[::1]:{chosen}")) {
+            listeners.push(v6);
+        }
+        return Ok(Some(listeners));
+    }
+    let mut listeners = Vec::new();
+    let mut last_err = None;
+    for addr in [format!("127.0.0.1:{port}"), format!("[::1]:{port}")] {
+        match TcpListener::bind(addr) {
+            Ok(listener) => listeners.push(listener),
+            Err(err) => last_err = Some(err),
+        }
+    }
+    if listeners.is_empty() {
+        return Err(last_err.unwrap_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "localhost")
+        }));
+    }
+    Ok(Some(listeners))
+}
+
+fn share_listeners(listeners: Vec<TcpListener>) -> std::io::Result<(SocketAddr, Incoming)> {
+    if listeners.len() == 1 {
+        let listener = listeners
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("listen"))?;
+        let local = listener.local_addr()?;
+        return Ok((local, Incoming::Direct(listener)));
+    }
+    let local = listeners[0].local_addr()?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel();
+    let mut joins = Vec::new();
+    let mut addrs = Vec::new();
+    for listener in listeners {
+        addrs.push(listener.local_addr()?);
+        let tx = tx.clone();
+        let stop = Arc::clone(&stop);
+        joins.push(thread::spawn(move || loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if stop.load(Ordering::Relaxed) || tx.send(Ok(stream)).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    let _ = tx.send(Err(err));
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+    Ok((
+        local,
+        Incoming::Shared {
+            rx,
+            stop,
+            joins,
+            addrs,
+        },
+    ))
+}
+
+impl Drop for Proxy {
+    fn drop(&mut self) {
+        let Incoming::Shared {
+            stop, joins, addrs, ..
+        } = &mut self.incoming
+        else {
+            return;
+        };
+        stop.store(true, Ordering::Relaxed);
+        for addr in addrs.iter() {
+            let _ = TcpStream::connect_timeout(addr, Duration::from_millis(200));
+        }
+        for join in joins.drain(..) {
+            let _ = join.join();
+        }
+    }
 }
 
 impl Proxy {
@@ -162,9 +290,11 @@ impl Proxy {
         vault_dir: &Path,
         glossary: Glossary,
     ) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(listen)?;
+        let listeners = bind_listeners(listen)?;
+        let (local, incoming) = share_listeners(listeners)?;
         Ok(Self {
-            listener,
+            local,
+            incoming,
             upstream: upstream.to_string(),
             vault_dir: vault_dir.to_path_buf(),
             glossary,
@@ -172,11 +302,20 @@ impl Proxy {
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.listener.local_addr()
+        Ok(self.local)
     }
 
     pub fn serve_one(&self) -> Result<(), ProxyError> {
-        let (mut stream, _) = self.listener.accept().map_err(|_| ProxyError::Client)?;
+        let mut stream = match &self.incoming {
+            Incoming::Direct(listener) => listener.accept().map(|(stream, _)| stream),
+            Incoming::Shared { rx, .. } => rx.recv().unwrap_or_else(|_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "listen",
+                ))
+            }),
+        }
+        .map_err(|_| ProxyError::Client)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .map_err(|_| ProxyError::Client)?;
