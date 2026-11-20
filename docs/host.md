@@ -2,7 +2,7 @@
 
 `shield_text` returns the rewritten text and an `AuditRecord`. The record counts each kind. It does not contain the original values, so a log can say how many emails were replaced without writing the addresses.
 
-`shield_json_strings` walks string values in a JSON document, including a string that is itself JSON. It uses `Operator::Token` and stores a reversible value. `shield_json_strings_with` accepts an operator. `Operator::Forget` writes `h1_<kind>_` and leaves the vault empty, including a recognized phone, card, or SIN written as a JSON number. A second call mints another token. Two copies in one call share one token. `restore_json_write` of that token fails. The chat proxy stays on `shield_json_strings`. A key that names an API-key assignment is replaced with `h1_secret` and is not stored. A number or a key that no detector recognizes stays as it is. `restore_json_write` fails when an `h1_` token is still unresolved. `restore_json_reply` is what the chat proxy uses for a model reply: issued tokens come back, and `h1_secret` stays the mark. The MCP `restore` tool uses `restore_reply` the same way.
+`shield_json_strings` walks string values in a JSON document, including a string that is itself JSON. It uses `Operator::Token` and stores a reversible value. A JSON number becomes a quoted token, and a later shield of that number reuses it. `Operator::Digits` and `Operator::Surrogate` keep that one number token too. A token stored for the same digits as a string is not reused. `shield_text` and `Session::shield_message` use that JSON shield when the whole message is a JSON object or array. Prose stays on the text shield. `shield_json_strings_with` accepts an operator. `Operator::Forget` writes `h1_<kind>_` and does not store the original, including a recognized phone, card, or SIN written as a JSON number. A second call mints another token. Two copies in one call share one token. `restore_json_write` of that token fails. A reply keeps it. The chat proxy stays on `shield_json_strings`. A key that names an API-key assignment is replaced with `h1_secret` and is not stored. A number or a key that no detector recognizes stays as it is. `restore_json_write` fails when an `h1_` token is still unresolved. `restore_json_reply` is what the chat proxy uses for a model reply: issued tokens come back, `h1_secret` stays the mark, and a forgotten token stays in the text. A token this vault did not mint still fails. The MCP `restore` tool uses `restore_reply` the same way. The MCP `shield` tool uses `shield_text`.
 
 `judge` decides what a finished tool call may do with those tokens.
 
@@ -11,7 +11,7 @@
 | A local read | Runs. The arguments stay as they are. |
 | A display | Runs after `restore_display`. |
 | A local write, such as `write_file` | Runs with the original bytes. The token is not what the tool should write. |
-| A local write that still contains `h1_secret` or an unknown `h1_` token | Rejected. |
+| A local write that still contains `h1_secret`, a forgotten token, or an `h1_` token this vault did not mint | Rejected. |
 | A shell, or a call that leaves the machine | Refused when the arguments contain `h1_`, including a hex spelling of that prefix. |
 | A tool name this crate does not list | Treated as leaving the machine. |
 | An MCP call | Treated as leaving the machine. |

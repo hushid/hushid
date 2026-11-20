@@ -1,5 +1,7 @@
 use hushid::Glossary;
+use hushid::Operator;
 use hushid::Vault;
+use hushid::{shield_json_strings, shield_json_strings_with};
 use hushid_proxy::{mcp_message, restore_chat, shield_chat, Proxy};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -237,6 +239,70 @@ fn mcp_shield_and_restore() {
     )
     .unwrap();
     assert!(restore.contains("ada@example.com"), "{restore}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_shield_quotes_a_json_number() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-json-number-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let call = mcp_message(
+        &dir,
+        &Glossary::empty(),
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shield","arguments":{"session":"demo","text":"{\"visa\":4111111111111111}"}}}"#,
+    )
+    .unwrap();
+    assert!(call.contains("\\\"h1_card_"), "{call}");
+    assert!(!call.contains("4111111111111111"), "{call}");
+    assert!(!call.contains("isError"), "{call}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_restore_keeps_a_forgotten_token_beside_a_stored_one() {
+    let dir = std::env::temp_dir().join(format!("hushid-mcp-forgotten-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut vault = Vault::new();
+    let (stored, _) =
+        shield_json_strings(&mut vault, &Glossary::empty(), r#"{"a":"ada@example.com"}"#).unwrap();
+    let (forgotten, _) = shield_json_strings_with(
+        &mut vault,
+        &Glossary::empty(),
+        r#"{"a":"marie@example.com"}"#,
+        Operator::Forget,
+    )
+    .unwrap();
+    let stored_token = stored
+        .split("h1_email_")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let stored_token = format!("h1_email_{stored_token}");
+    let forgotten_token = forgotten
+        .split("h1_email_")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let forgotten_token = format!("h1_email_{forgotten_token}");
+    vault.save(&dir.join("demo.vault")).unwrap();
+    let restored = mcp_message(
+        &dir,
+        &Glossary::empty(),
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"restore","arguments":{{"session":"demo","text":"see {stored_token} and {forgotten_token}"}}}}}}"#
+        ),
+    )
+    .unwrap();
+    assert!(!restored.contains("isError"), "{restored}");
+    assert!(restored.contains("ada@example.com"), "{restored}");
+    assert!(restored.contains(&forgotten_token), "{restored}");
+    assert!(!restored.contains("marie@example.com"), "{restored}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

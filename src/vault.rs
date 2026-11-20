@@ -33,6 +33,8 @@ pub struct Vault {
     issued: Vec<String>,
     /// Stand-in text to the original surface. Restore walks this before `h1_`.
     digits: BTreeMap<String, String>,
+    /// Tokens minted with `Operator::Forget`. The original bytes are absent.
+    forgotten: Vec<String>,
 }
 
 impl fmt::Debug for Vault {
@@ -105,6 +107,7 @@ impl Vault {
             entries: BTreeMap::new(),
             issued: Vec::new(),
             digits: BTreeMap::new(),
+            forgotten: Vec::new(),
         }
     }
 
@@ -219,10 +222,55 @@ impl Vault {
     ///
     /// [`Self::issue`] still mints a new token when these bytes repeat
     /// inside one shield. A later shield uses the earliest of those tokens.
+    /// A JSON-number token is not included. Restoring that token writes
+    /// the digits, and restoring a string token writes a JSON string.
     pub fn first_token_for_surface(&self, bytes: &[u8]) -> Option<&str> {
         self.stored_surfaces()
             .find(|(_, surface)| *surface == bytes)
             .map(|(token, _)| token)
+    }
+
+    /// The earliest JSON-number token for these bytes and this kind.
+    ///
+    /// A token stored for the same bytes as a string is not returned.
+    pub(crate) fn first_json_number_token(&self, kind: Kind, surface: &[u8]) -> Option<String> {
+        for token in &self.issued {
+            let Some(entry) = self.entries.get(token) else {
+                continue;
+            };
+            if !entry.json_number || entry.surface.as_slice() != surface {
+                continue;
+            }
+            let Some(parsed) = parse_token_at(token, 0) else {
+                continue;
+            };
+            if parsed.kind == kind && parsed.check_ok && parsed.end == token.len() {
+                return Some(token.clone());
+            }
+        }
+        None
+    }
+
+    /// Remember a token minted with `Operator::Forget`.
+    ///
+    /// The original bytes are not stored. [`Self::len`] and [`Self::is_empty`]
+    /// count stored surfaces only. A reply can keep this token. A local
+    /// write of it still fails.
+    pub(crate) fn note_forgotten(&mut self, token: &str) {
+        let Some(parsed) = parse_token_at(token, 0) else {
+            return;
+        };
+        if parsed.end != token.len() || !parsed.check_ok || parsed.canonical != token {
+            return;
+        }
+        if self.entries.contains_key(token) || self.forgot(token) {
+            return;
+        }
+        self.forgotten.push(token.to_string());
+    }
+
+    pub(crate) fn forgot(&self, canonical: &str) -> bool {
+        self.forgotten.iter().any(|token| token == canonical)
     }
 
     /// Tokens whose stored bytes are the original surface.
@@ -261,7 +309,8 @@ impl Vault {
     /// Restore issued tokens for a reply the caller will read.
     ///
     /// `h1_secret` stays the mark. The secret was not stored, so it is
-    /// not copied back. An unknown `h1_` token is still an error.
+    /// not copied back. A token minted with `Operator::Forget` stays in
+    /// the text. A token this vault did not mint is still an error.
     pub fn restore_reply(&self, text: &str) -> Result<String, RestoreError> {
         walk(text, self, true, true)
     }
@@ -307,6 +356,10 @@ impl Vault {
             }
             body.push('\n');
         }
+        for token in &self.forgotten {
+            body.push_str(token);
+            body.push_str(" f\n");
+        }
         body
     }
 
@@ -325,13 +378,31 @@ impl Vault {
         let mut entries = BTreeMap::new();
         let mut issued = Vec::new();
         let mut digits = BTreeMap::new();
+        let mut forgotten = Vec::new();
         for line in lines {
             if line.is_empty() {
                 continue;
             }
             let mut parts = line.split(' ');
             let token = parts.next().ok_or(VaultError::Corrupt)?;
-            let hex = parts.next().ok_or(VaultError::Corrupt)?;
+            let second = parts.next().ok_or(VaultError::Corrupt)?;
+            if second == "f" {
+                // A forgotten token has no surface. The flag records the
+                // token so a reply can keep it after the file is loaded.
+                if parts.next().is_some() {
+                    return Err(VaultError::Corrupt);
+                }
+                let parsed = parse_token_at(token, 0).ok_or(VaultError::Corrupt)?;
+                if parsed.end != token.len() || !parsed.check_ok || parsed.canonical != token {
+                    return Err(VaultError::Corrupt);
+                }
+                if entries.contains_key(token) || forgotten.iter().any(|have| have == token) {
+                    return Err(VaultError::Corrupt);
+                }
+                forgotten.push(token.to_string());
+                continue;
+            }
+            let hex = second;
             let mut json_number = false;
             let mut stand_in = None;
             while let Some(flag) = parts.next() {
@@ -359,7 +430,7 @@ impl Vault {
             let surface = hex_decode(hex).ok_or(VaultError::Corrupt)?;
             // A repeated token is corrupt before its stand-in is recorded.
             // Recording it first would keep the earlier stand-in and this surface.
-            if entries.contains_key(token) {
+            if entries.contains_key(token) || forgotten.iter().any(|have| have == token) {
                 return Err(VaultError::Corrupt);
             }
             if let Some(stand_in) = &stand_in {
@@ -382,6 +453,7 @@ impl Vault {
             entries,
             issued,
             digits,
+            forgotten,
         })
     }
 }
@@ -484,6 +556,11 @@ fn walk(
                     let surface = std::str::from_utf8(&entry.surface)
                         .map_err(|_| RestoreError::NotUtf8 { at })?;
                     out.push_str(surface);
+                    index = parsed.end;
+                    continue;
+                }
+                if keep_secret_mark && vault.forgot(&parsed.canonical) {
+                    out.push_str(&text[at..parsed.end]);
                     index = parsed.end;
                     continue;
                 }
@@ -658,5 +735,23 @@ mod tests {
         let loaded = Vault::load(&path);
         let _ = fs::remove_file(&path);
         assert!(matches!(loaded, Err(VaultError::Corrupt)), "{loaded:?}");
+    }
+
+    #[test]
+    fn a_forgotten_token_round_trips_without_a_surface() {
+        let mut vault = Vault::new();
+        let token = crate::token::random_token(Kind::Email).unwrap();
+        vault.note_forgotten(&token);
+        assert!(vault.is_empty());
+        assert!(vault.get(&token).is_none());
+        let loaded = Vault::decode(&vault.encode()).unwrap();
+        assert!(loaded.forgot(&token));
+        assert!(loaded.is_empty());
+        assert_eq!(loaded.restore_reply(&token).unwrap(), token);
+        assert!(loaded.restore_write(&token).is_err());
+        let extra = format!("{HEADER}\n{token} f extra\n");
+        assert!(matches!(Vault::decode(&extra), Err(VaultError::Corrupt)));
+        let again = format!("{HEADER}\n{token} f\n{token} f\n");
+        assert!(matches!(Vault::decode(&again), Err(VaultError::Corrupt)));
     }
 }

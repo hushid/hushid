@@ -58,7 +58,9 @@ pub enum Operator {
 ///
 /// A repeat inside this call gets its own token. A surface that is
 /// already in `vault` keeps that token. Secret-shaped spans become
-/// [`SECRET_MARK`] and are not stored.
+/// [`SECRET_MARK`] and are not stored. When `text` is a JSON object or
+/// array, the JSON shield runs instead, so a recognized number becomes
+/// a quoted token.
 ///
 /// ```
 /// use hushid::{shield_text, Glossary, Vault};
@@ -78,12 +80,18 @@ pub fn shield_text(
 }
 
 /// [`shield_text`] with an explicit operator.
+///
+/// When `text` is a JSON object or array, this uses the JSON shield.
+/// A recognized number becomes a quoted token.
 pub fn shield_text_with(
     vault: &mut Vault,
     glossary: &Glossary,
     text: &str,
     operator: Operator,
 ) -> Result<(String, AuditRecord), TokenError> {
+    if let Some(shielded) = crate::json::shield_if_document(vault, glossary, text, operator) {
+        return shielded;
+    }
     let mut forgotten = BTreeMap::new();
     shield_in_context(
         vault,
@@ -174,7 +182,7 @@ pub(crate) fn shield_in_context(
                     Operator::Digits if digit_kind(kind) => mint_digits(vault, kind, surface)?,
                     Operator::Surrogate => mint_surrogate(vault, kind, surface)?,
                     Operator::Mask => mask_for(kind, surface),
-                    Operator::Forget => mint_forgotten(op.forgotten, kind, surface)?,
+                    Operator::Forget => mint_forgotten(vault, op.forgotten, kind, surface)?,
                     Operator::Token | Operator::Digits => {
                         reuse_or_issue(vault, &stored, kind, surface)?
                     }
@@ -223,6 +231,7 @@ fn mint_surrogate(vault: &mut Vault, kind: Kind, surface: &str) -> Result<String
 }
 
 pub(crate) fn mint_forgotten(
+    vault: &mut Vault,
     seen: &mut BTreeMap<Vec<u8>, String>,
     kind: Kind,
     surface: &str,
@@ -232,6 +241,7 @@ pub(crate) fn mint_forgotten(
         return Ok(token.clone());
     }
     let token = random_token(kind)?;
+    vault.note_forgotten(&token);
     seen.insert(bytes.to_vec(), token.clone());
     Ok(token)
 }

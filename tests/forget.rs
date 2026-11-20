@@ -1,6 +1,7 @@
 use hushid::{
-    restore_json_write, shield_json_strings, shield_json_strings_with, shield_text,
-    shield_text_with, Glossary, JsonError, Operator, RestoreError, Session, Vault,
+    judge, restore_json_reply, restore_json_write, shield_json_strings, shield_json_strings_with,
+    shield_text, shield_text_with, Glossary, JsonError, Judgment, Operator, RestoreError, Session,
+    Vault,
 };
 
 fn email_tokens(text: &str) -> Vec<&str> {
@@ -257,6 +258,73 @@ fn session_forget_keeps_the_projection_and_stores_nothing() {
         session.replay()[second].projection
     );
     assert!(session.vault().is_empty());
+}
+
+#[test]
+fn a_reply_keeps_a_forgotten_token_and_restores_the_stored_one() {
+    let mut vault = Vault::new();
+    let (stored, _) =
+        shield_json_strings(&mut vault, &Glossary::empty(), r#"{"a":"ada@example.com"}"#).unwrap();
+    let stored_token = email_tokens(&stored)[0].to_string();
+    let (forgotten, _) = shield_json_strings_with(
+        &mut vault,
+        &Glossary::empty(),
+        r#"{"a":"marie@example.com"}"#,
+        Operator::Forget,
+    )
+    .unwrap();
+    let forgotten_token = email_tokens(&forgotten)[0].to_string();
+    assert_ne!(stored_token, forgotten_token);
+    assert_eq!(vault.len(), 1);
+    assert!(vault.get(&forgotten_token).is_none());
+    assert!(!vault.holds_surface(b"marie@example.com"));
+
+    let reply = format!(r#"{{"text":"see {stored_token} and {forgotten_token}"}}"#);
+    let restored = restore_json_reply(&vault, &reply).unwrap();
+    assert!(restored.contains("ada@example.com"), "{restored}");
+    assert!(restored.contains(&forgotten_token), "{restored}");
+    assert!(!restored.contains("marie@example.com"), "{restored}");
+    assert!(matches!(
+        restore_json_write(&vault, &reply),
+        Err(JsonError::Restore(RestoreError::Unresolved { .. }))
+    ));
+    assert!(matches!(
+        vault.restore_write(&forgotten_token),
+        Err(RestoreError::Unresolved { .. })
+    ));
+    assert!(matches!(
+        judge(&vault, "write_file", &forgotten_token, false),
+        Judgment::WriteRejected { .. }
+    ));
+
+    let plain = format!("see {stored_token} and {forgotten_token} h1_secret");
+    let restored = vault.restore_reply(&plain).unwrap();
+    assert!(restored.contains("ada@example.com"), "{restored}");
+    assert!(restored.contains(&forgotten_token), "{restored}");
+    assert!(restored.contains("h1_secret"), "{restored}");
+    assert!(vault.restore_reply("h1_email_AAAAAAAAR").is_err());
+    assert!(restore_json_reply(&vault, r#"{"text":"h1_email_AAAAAAAAR"}"#).is_err());
+
+    let path = std::env::temp_dir().join(format!(
+        "hushid-forgotten-reply-{}.vault",
+        std::process::id()
+    ));
+    vault.save(&path).unwrap();
+    let loaded = Vault::load(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(loaded.len(), 1);
+    let restored = loaded.restore_reply(&plain).unwrap();
+    assert!(restored.contains("ada@example.com"), "{restored}");
+    assert!(restored.contains(&forgotten_token), "{restored}");
+    let (again, _) = shield_json_strings_with(
+        &mut vault,
+        &Glossary::empty(),
+        r#"{"a":"marie@example.com"}"#,
+        Operator::Forget,
+    )
+    .unwrap();
+    assert_ne!(forgotten, again);
+    assert_eq!(vault.len(), 1);
 }
 
 fn card_tokens(text: &str) -> Vec<&str> {
