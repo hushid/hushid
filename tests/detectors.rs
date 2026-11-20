@@ -2597,11 +2597,10 @@ fn hyphen_mark_in_an_api_key_name_still_masks_the_value() {
         let raw = format!(r#"{{"api{mark}key":"{secret}"}}"#);
         let (vault, out, audit) = shield(&raw);
         assert_eq!(audit.secret, 1, "{raw} -> {out}");
-        assert_eq!(
-            out,
-            format!(r#"{{"api{mark}key":"h1_secret"}}"#),
-            "{raw} -> {out}"
-        );
+        let mut expected = String::from("{\"api");
+        expected.push(mark);
+        expected.push_str("key\":\"h1_secret\"}");
+        assert_eq!(out, expected, "{raw} -> {out}");
         assert!(!vault.holds_surface(secret.as_bytes()), "{raw}");
 
         let documents = [
@@ -2705,11 +2704,10 @@ fn whitespace_inside_an_api_key_name_still_masks_the_value() {
         let raw = format!(r#"{{"api{gap}key":"{secret}"}}"#);
         let (vault, out, audit) = shield(&raw);
         assert_eq!(audit.secret, 1, "{raw:?} -> {out}");
-        assert_eq!(
-            out,
-            format!(r#"{{"api{gap}key":"h1_secret"}}"#),
-            "{raw:?} -> {out}"
-        );
+        let mut expected = String::from("{\"api");
+        expected.push_str(gap);
+        expected.push_str("key\":\"h1_secret\"}");
+        assert_eq!(out, expected, "{raw:?} -> {out}");
         assert!(!vault.holds_surface(secret.as_bytes()), "{raw:?}");
 
         let documents = [
