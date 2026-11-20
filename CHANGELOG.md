@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.7](https://github.com/hushid/hushid/compare/hushid-v0.1.6...hushid-v0.1.7) (2026-11-20)
+
+
+### Bug Fixes
+
+* keep a Notepad glossary name and a Windows session file ([#272](https://github.com/hushid/hushid/issues/272)) ([d959bfb](https://github.com/hushid/hushid/commit/d959bfbab939e05950909c6ab78a117d6b7575a1))
+* let JSON shielding forget an identifier ([#270](https://github.com/hushid/hushid/issues/270)) ([f5b6311](https://github.com/hushid/hushid/commit/f5b63115dc59992045411700393e13c61b625805)), closes [#269](https://github.com/hushid/hushid/issues/269)
+* listen on both loopbacks for localhost ([#273](https://github.com/hushid/hushid/issues/273)) ([cd719cc](https://github.com/hushid/hushid/commit/cd719cc8ea343e7ec7055a563bd2acb8aa2caf66))
+
 ## [0.1.6](https://github.com/hushid/hushid/compare/hushid-v0.1.5...hushid-v0.1.6) (2026-11-19)
 
 
