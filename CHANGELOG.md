@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/hushid/hushid/compare/hushid-v0.1.7...hushid-v0.1.8) (2026-11-20)
+
+
+### Bug Fixes
+
+* keep a JSON number token and a forgotten reply token ([#277](https://github.com/hushid/hushid/issues/277)) ([bac12d4](https://github.com/hushid/hushid/commit/bac12d475261fe3a27e54987ea6d23889f8ca7dd))
+* restore a JSON number from the MCP tool as digits ([#279](https://github.com/hushid/hushid/issues/279)) ([d7ede67](https://github.com/hushid/hushid/commit/d7ede6718ab58c71c27507bc49afa365ccfecf9f))
+
 ## [0.1.7](https://github.com/hushid/hushid/compare/hushid-v0.1.6...hushid-v0.1.7) (2026-11-20)
 
 
