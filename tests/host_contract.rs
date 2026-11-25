@@ -87,19 +87,141 @@ fn session_save_vault_writes_the_session_vault() {
 }
 
 #[test]
-fn json_strings_are_shielded_and_numbers_stay() {
+fn json_strings_and_a_card_number_are_shielded() {
     let input = r#"{"email":"a@b.co","n":4111111111111111,"note":"call 415-555-0134"}"#;
     let mut vault = Vault::new();
     let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
     assert!(out.contains("\"email\""), "{out}");
-    assert!(out.contains("4111111111111111"), "{out}");
+    assert!(!out.contains("4111111111111111"), "{out}");
     assert!(!out.contains("a@b.co"), "{out}");
     assert!(!out.contains("415-555-0134"), "{out}");
     assert_eq!(audit.email, 1);
     assert_eq!(audit.phone, 1);
-    assert_eq!(audit.card, 0);
+    assert_eq!(audit.card, 1);
     let restored = restore_json_write(&vault, &out).unwrap();
     assert_eq!(restored, input);
+}
+
+#[test]
+fn a_json_card_number_is_shielded_beside_another_number_and_in_an_array() {
+    let visa = "4111111111111111";
+    let mastercard = "5555555555554444";
+    let documents = [
+        format!(r#"{{"a":{visa},"b":1}}"#),
+        format!("[{visa}]"),
+        format!(r#"{{"cards":[{visa}]}}"#),
+        format!(r#"{{"a":{visa},"b":{mastercard}}}"#),
+        format!(r#"{{"a":1,"b":{visa}}}"#),
+        format!("[\n  {visa}\n]"),
+        format!("\n{{\"a\":{visa},\"b\":1}}\n"),
+    ];
+    for input in &documents {
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), input).unwrap();
+        assert!(!out.contains(visa), "{input} -> {out}");
+        assert!(out.contains("\"h1_card_"), "{input} -> {out}");
+        if input.contains(mastercard) {
+            assert!(!out.contains(mastercard), "{input} -> {out}");
+            assert_eq!(audit.card, 2, "{input} -> {out}");
+            assert_eq!(vault.len(), 2, "{out}");
+        } else {
+            assert_eq!(audit.card, 1, "{input} -> {out}");
+            assert_eq!(vault.len(), 1, "{out}");
+        }
+        if input.contains(r#""b":1"#) {
+            assert!(out.contains(r#""b":1"#), "{input} -> {out}");
+        }
+        if input.contains(r#""a":1"#) {
+            assert!(out.contains(r#""a":1"#), "{input} -> {out}");
+        }
+        assert_eq!(restore_json_write(&vault, &out).unwrap(), *input);
+
+        let mut session = Session::new(Glossary::empty());
+        let index = session.shield_message(input).unwrap();
+        let projection = &session.replay()[index].projection;
+        assert!(!projection.contains(visa), "{input} -> {projection}");
+        assert_eq!(
+            restore_json_write(session.vault(), projection).unwrap(),
+            *input
+        );
+    }
+
+    let both = format!(r#"{{"a":{visa},"b":1}}"#);
+    let mut vault = Vault::new();
+    let (first, _) = shield_json_strings(&mut vault, &Glossary::empty(), &both).unwrap();
+    let (second, _) = shield_json_strings(&mut vault, &Glossary::empty(), &both).unwrap();
+    assert_eq!(card_tokens(&first), card_tokens(&second));
+    assert_eq!(vault.len(), 1);
+
+    let mut digits = Vault::new();
+    let (out, _) =
+        shield_json_strings_with(&mut digits, &Glossary::empty(), &both, Operator::Digits).unwrap();
+    assert!(out.contains("\"h1_card_"), "{out}");
+    assert!(!out.contains(visa), "{out}");
+    assert_eq!(digits.len(), 1, "{out}");
+    assert_eq!(restore_json_write(&digits, &out).unwrap(), both);
+
+    let mut forgotten = Vault::new();
+    let (out, _) =
+        shield_json_strings_with(&mut forgotten, &Glossary::empty(), &both, Operator::Forget)
+            .unwrap();
+    assert!(out.contains("\"h1_card_"), "{out}");
+    assert!(forgotten.is_empty());
+    assert!(restore_json_write(&forgotten, &out).is_err());
+
+    let pair = format!(r#"{{"a":{visa},"b":{visa}}}"#);
+    let mut once = Vault::new();
+    let (out, audit) = shield_json_strings(&mut once, &Glossary::empty(), &pair).unwrap();
+    assert_eq!(audit.card, 2, "{out}");
+    assert_eq!(once.len(), 1, "{out}");
+    let tokens = card_tokens(&out);
+    assert_eq!(tokens.len(), 2, "{out}");
+    assert_eq!(tokens[0], tokens[1]);
+
+    let failed = r#"{"a":4111111111111112,"b":1}"#;
+    let (out, audit) = shield_json_strings(&mut Vault::new(), &Glossary::empty(), failed).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, failed);
+
+    let short = r#"{"a":411111111117,"b":1}"#;
+    let (out, audit) = shield_json_strings(&mut Vault::new(), &Glossary::empty(), short).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, short);
+    let long = r#"{"a":41111111111111111115,"b":1}"#;
+    let (out, audit) = shield_json_strings(&mut Vault::new(), &Glossary::empty(), long).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, long);
+    for raw in ["4111111111119", "4111111111111111110"] {
+        let input = format!(r#"{{"a":{raw},"b":1}}"#);
+        let mut vault = Vault::new();
+        let (out, audit) = shield_json_strings(&mut vault, &Glossary::empty(), &input).unwrap();
+        assert_eq!(audit.card, 1, "{input} -> {out}");
+        assert!(!out.contains(raw), "{input} -> {out}");
+        assert!(out.contains(r#""b":1"#), "{out}");
+        assert_eq!(restore_json_write(&vault, &out).unwrap(), input);
+    }
+    let negative = r#"{"a":-4111111111111111}"#;
+    let (out, audit) =
+        shield_json_strings(&mut Vault::new(), &Glossary::empty(), negative).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, negative);
+
+    let fraction = r#"{"a":4111111111111111.0}"#;
+    let (out, audit) =
+        shield_json_strings(&mut Vault::new(), &Glossary::empty(), fraction).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, fraction);
+
+    let prose = visa;
+    let (out, audit) = shield_text(&mut Vault::new(), &Glossary::empty(), prose).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, prose);
+
+    let as_string = format!(r#"{{"n":"{visa}"}}"#);
+    let (out, audit) =
+        shield_json_strings(&mut Vault::new(), &Glossary::empty(), &as_string).unwrap();
+    assert_eq!(audit.card, 0, "{out}");
+    assert_eq!(out, as_string);
 }
 
 #[test]
