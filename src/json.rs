@@ -1,8 +1,8 @@
 use crate::audit::AuditRecord;
-use crate::detect::{assignment_secret_prefix, find_hits, Hit};
+use crate::detect::{assignment_secret_prefix, find_hits, luhn_ok, Hit};
 use crate::glossary::Glossary;
 use crate::shield::{mask_for, mint_forgotten, shield_in_context, Operator, ShieldOp};
-use crate::token::{find_h1, parse_token_at, secret_mark_at, TokenError, SECRET_MARK};
+use crate::token::{find_h1, parse_token_at, secret_mark_at, Kind, TokenError, SECRET_MARK};
 use crate::vault::{RestoreError, Vault};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -42,8 +42,11 @@ impl std::error::Error for JsonError {}
 /// again. A cue beside a string or a key counts the same way it does in plain
 /// text, including a value inside that nested document. A key that names an
 /// API-key assignment masks that value with the shared secret mark, and the
-/// value is not stored. Keys and numbers that no detector recognizes stay as
-/// they are.
+/// value is not stored. A JSON number of 13 to 19 digits that passes the
+/// card check is a card on its own, including beside another number and
+/// inside an array. The same digits in prose, or in a JSON string, still
+/// need a cue or separators. Keys and numbers that no detector recognizes
+/// stay as they are.
 pub fn shield_json_strings(
     vault: &mut Vault,
     glossary: &Glossary,
@@ -231,14 +234,30 @@ fn shield_document(
             continue;
         }
         if let Some(end) = parse_number(input, index) {
+            let raw = &input[index..end];
             if let Some(hit) = covering_hit(&hits, index, end) {
-                let raw = &input[index..end];
                 let token = token_for_hit(vault, state, hit, raw.as_bytes())?;
                 out.push('"');
                 out.push_str(&token);
                 out.push('"');
+            } else if json_card_number(raw) {
+                // A JSON number is its own value. A 13 to 19 digit run
+                // that passes the check is a card here even when no cue
+                // word is nearby, and when the document holds another
+                // number or the value sits in an array. The same run in
+                // prose, or in a JSON string, still needs a cue. Leaving
+                // this out sends the digits.
+                let hit = Hit::Reversible {
+                    kind: Kind::Card,
+                    start: index,
+                    end,
+                };
+                let token = token_for_hit(vault, state, &hit, raw.as_bytes())?;
+                out.push('"');
+                out.push_str(&token);
+                out.push('"');
             } else {
-                out.push_str(&input[index..end]);
+                out.push_str(raw);
             }
             index = end;
             continue;
@@ -449,6 +468,13 @@ fn shift_hit(hit: Hit, origin: usize) -> Hit {
             end: end - origin,
         },
     }
+}
+
+fn json_card_number(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    (13..=19).contains(&bytes.len())
+        && bytes.iter().all(|byte| byte.is_ascii_digit())
+        && luhn_ok(bytes)
 }
 
 fn covering_hit(hits: &[Hit], start: usize, end: usize) -> Option<&Hit> {
