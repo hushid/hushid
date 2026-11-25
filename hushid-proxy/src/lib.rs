@@ -6,9 +6,10 @@
 //! port uses 80 or 443. A query string stays on the chat path, and a
 //! fragment is dropped. A restored body keeps the upstream status and the
 //! upstream content type. An event stream stays `text/event-stream`.
-//! Content values inside streamed `delta` objects are joined first, so a
-//! token split across those values is restored. The status reason is
-//! kept, so a rate limit stays `429 Too Many Requests`. A reply
+//! Content values and `function` argument fragments inside streamed
+//! `delta` objects are joined first, so a token split across those
+//! values is restored. The status reason is kept, so a rate limit
+//! stays `429 Too Many Requests`. A reply
 //! that quotes `h1_secret` keeps that mark and still restores other tokens.
 //! An unknown `h1_` token is a 502 and is not forwarded. A request with no `Content-Length`
 //! is read until the connection closes, the same as a response, up to 1 MiB.
@@ -93,7 +94,8 @@ fn event_stream(content_type: &str) -> bool {
         .eq_ignore_ascii_case("text/event-stream")
 }
 
-/// Join `delta.content` strings so a token cut across events is one token.
+/// Join streamed `delta` content and `function` argument fragments so a
+/// token cut across events is one token.
 ///
 /// [`restore_chat`] rejects a partial `h1_` inside one string. A trailing
 /// `h` or `h1` is joined only when the next value finishes a token.
@@ -199,9 +201,10 @@ fn streamed_delta_contents(body: &str) -> Vec<DeltaContent> {
                 if bytes.get(after) == Some(&b':') {
                     let value_at = skip_ascii_ws(body, after + 1);
                     if bytes.get(value_at) == Some(&b'{') {
-                        if let Some(slot) = content_in_object(body, value_at) {
-                            index = slot.raw_end;
-                            slots.push(slot);
+                        let found = strings_in_delta(body, value_at);
+                        if let Some(last) = found.last() {
+                            index = last.raw_end;
+                            slots.extend(found);
                             continue;
                         }
                     }
@@ -216,16 +219,20 @@ fn streamed_delta_contents(body: &str) -> Vec<DeltaContent> {
     slots
 }
 
-fn content_in_object(body: &str, open: usize) -> Option<DeltaContent> {
+fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
     let bytes = body.as_bytes();
     let mut index = open;
     let mut depth = 0i32;
     let mut in_string = false;
+    let mut found = Vec::new();
     while index < bytes.len() {
         let byte = bytes[index];
         if in_string {
             if byte == b'\\' {
-                index = index.saturating_add(2);
+                let Some(next) = skip_json_escape(bytes, index) else {
+                    return found;
+                };
+                index = next;
                 continue;
             }
             if byte == b'"' {
@@ -235,19 +242,34 @@ fn content_in_object(body: &str, open: usize) -> Option<DeltaContent> {
             continue;
         }
         if byte == b'"' {
-            let key = br#""content""#;
-            if depth == 1 && bytes[index..].starts_with(key) {
+            let content: &[u8] = br#""content""#;
+            let arguments: &[u8] = br#""arguments""#;
+            let key = if depth == 1 && bytes[index..].starts_with(content) {
+                Some(content)
+            } else if depth > 1 && bytes[index..].starts_with(arguments) {
+                Some(arguments)
+            } else {
+                None
+            };
+            if let Some(key) = key {
                 let after = skip_ascii_ws(body, index + key.len());
                 if bytes.get(after) == Some(&b':') {
                     let value_at = skip_ascii_ws(body, after + 1);
                     if bytes.get(value_at) == Some(&b'"') {
-                        let raw_end = quoted_string_end(body, value_at)?;
-                        let decoded = decode_json_string(&body[value_at + 1..raw_end - 1]).ok()?;
-                        return Some(DeltaContent {
+                        let Some(raw_end) = quoted_string_end(body, value_at) else {
+                            return found;
+                        };
+                        let Ok(decoded) = decode_json_string(&body[value_at + 1..raw_end - 1])
+                        else {
+                            return found;
+                        };
+                        found.push(DeltaContent {
                             raw_start: value_at,
                             raw_end,
                             decoded,
                         });
+                        index = raw_end;
+                        continue;
                     }
                 }
             }
@@ -260,12 +282,12 @@ fn content_in_object(body: &str, open: usize) -> Option<DeltaContent> {
         } else if byte == b'}' || byte == b']' {
             depth -= 1;
             if depth == 0 {
-                return None;
+                break;
             }
         }
         index += 1;
     }
-    None
+    found
 }
 
 fn quoted_string_end(text: &str, open: usize) -> Option<usize> {
@@ -2256,6 +2278,74 @@ mod coverage_edges {
         assert!(!response.contains("h1_email_"), "{response}");
         assert!(response.contains("data: [DONE]"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_token_split_across_streamed_tool_arguments_is_restored() {
+        let dir =
+            std::env::temp_dir().join(format!("hushid-proxy-sse-args-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let request = read_http(&mut stream).unwrap();
+            let text = String::from_utf8_lossy(&request.body);
+            let marker = "\"content\":\"";
+            let start = text.find(marker).unwrap() + marker.len();
+            let end = start + text[start..].find('"').unwrap();
+            let content = &text[start..end];
+            let at = content.find("h1_").unwrap();
+            let cut = at + "h1_".len();
+            let left = &content[..cut];
+            let right = &content[cut..];
+            let sse = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"function\":{{\"arguments\":\"{left}\"}}}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"function\":{{\"arguments\":\"{right}\"}}}}]}}}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let raw = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}",
+                sse.len()
+            );
+            let _ = stream.write_all(raw.as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            br#"{"model":"local","messages":[{"role":"user","content":"ada@example.com"}]}"#,
+        ));
+        assert!(
+            response.contains("Content-Type: text/event-stream\r\n"),
+            "{response}"
+        );
+        assert_eq!(response.matches("ada@example.com").count(), 1, "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
+        assert!(response.contains("data: [DONE]"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn streamed_argument_pieces_that_are_not_a_token_stay_apart() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"reach\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1_score\"}}]}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let vault = Vault::new();
+        let joined = reassemble_streamed_deltas(body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert!(restored.contains("reach"), "{restored}");
+        assert!(restored.contains("1_score"), "{restored}");
+        assert!(!restored.contains("h1_"), "{restored}");
     }
 
     #[test]
