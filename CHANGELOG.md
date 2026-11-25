@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.9](https://github.com/hushid/hushid/compare/hushid-v0.1.8...hushid-v0.1.9) (2026-11-25)
+
+
+### Bug Fixes
+
+* report the crate version from MCP initialize ([#284](https://github.com/hushid/hushid/issues/284)) ([59a82f0](https://github.com/hushid/hushid/commit/59a82f0d045ea52b16182a0ec900f6e5978b1a0e))
+* restore a token split across streamed chat deltas ([#285](https://github.com/hushid/hushid/issues/285)) ([59d2532](https://github.com/hushid/hushid/commit/59d2532b8d869b5bf1a6955ea26ae3580f9f6804))
+* restore a token split across streamed tool arguments ([#286](https://github.com/hushid/hushid/issues/286)) ([333318c](https://github.com/hushid/hushid/commit/333318ca4eba54f5297317a8e6b4d34336bdba9f))
+* shield a JSON card number beside another number ([#281](https://github.com/hushid/hushid/issues/281)) ([a918881](https://github.com/hushid/hushid/commit/a9188814478a8817d32632e6081af6948ab11330))
+
 ## [0.1.8](https://github.com/hushid/hushid/compare/hushid-v0.1.7...hushid-v0.1.8) (2026-11-20)
 
 
