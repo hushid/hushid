@@ -1,6 +1,6 @@
 # Replacements
 
-`shield_text` uses `Operator::Token`. The other operators are `shield_text_with`. When the whole text is a JSON object or array, both use the JSON shield. A recognized number becomes a quoted token. Prose stays on the text shield. `shield_json_strings` uses `Operator::Token`. `shield_json_strings_with` takes the same operators. A JSON number stays a quoted token for `Token`, `Digits`, and `Surrogate`, so restore can write it back as a number. A later shield of that number reuses the token. A token stored for the same digits as a string is not reused. `Forget` and `Mask` do not store that number.
+`shield_text` uses `Operator::Token`. The other operators are `shield_text_with`. When the whole text is a JSON object or array, both use the JSON shield. A recognized number becomes a quoted token. A JSON number of 13 to 19 digits that passes the card check is recognized without a nearby word, including in an array and beside another number. The same digits in a JSON string still need that word or separators. Prose stays on the text shield. `shield_json_strings` uses `Operator::Token`. `shield_json_strings_with` takes the same operators. A JSON number stays a quoted token for `Token`, `Digits`, and `Surrogate`, so restore can write it back as a number. A later shield of that number reuses the token. A token stored for the same digits as a string is not reused. `Forget` and `Mask` do not store that number.
 
 | Operator | What you see | Restore |
 |---|---|---|
