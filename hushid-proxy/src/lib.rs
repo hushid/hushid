@@ -922,7 +922,10 @@ pub fn mcp_message(vault_dir: &Path, glossary: &Glossary, message: &str) -> Opti
         return None;
     }
     let result = if method == "initialize" {
-        r#"{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"hushid","version":"0.1.0"}}"#.to_string()
+        format!(
+            r#"{{"protocolVersion":"2024-11-05","capabilities":{{"tools":{{}}}},"serverInfo":{{"name":"hushid","version":"{}"}}}}"#,
+            env!("CARGO_PKG_VERSION")
+        )
     } else if method == "tools/list" {
         r#"{"tools":[{"name":"shield","description":"Replace recognized identifiers.","inputSchema":{"type":"object"}},{"name":"restore","description":"Copy original bytes back for tokens this vault issued.","inputSchema":{"type":"object"}}]}"#.to_string()
     } else if method == "tools/call" {

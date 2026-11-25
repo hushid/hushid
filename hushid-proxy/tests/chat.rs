@@ -214,6 +214,10 @@ fn mcp_shield_and_restore() {
     )
     .unwrap();
     assert!(init.contains("2024-11-05"), "{init}");
+    assert!(
+        init.contains(&format!(r#""version":"{}""#, env!("CARGO_PKG_VERSION"))),
+        "{init}"
+    );
     let call = mcp_message(
         &dir,
         &glossary,
