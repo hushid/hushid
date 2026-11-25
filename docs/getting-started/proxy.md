@@ -20,6 +20,6 @@ The only path is `POST /v1/chat/completions`. The body is read up to 1 MiB. A re
 | The upstream dial or write fails | HTTP 502 `{"error":"upstream"}` |
 | The reply quotes `h1_secret` | HTTP 200. That mark stays, other tokens are restored, and the secret is not copied back. |
 | The reply quotes a token minted with `Forget` | HTTP 200. That token stays, and a stored token in the same reply is restored. |
-| The upstream names a content type | That type is kept. An event stream stays `text/event-stream`. A missing or unsafe type is `application/json`. |
+| The upstream names a content type | That type is kept. An event stream stays `text/event-stream`. A token split across streamed `delta` content values is restored. A missing or unsafe type is `application/json`. |
 | The upstream status is `429 Too Many Requests` | The same status line is returned. A token in that body is restored. |
 | The reply contains an `h1_` token this vault did not mint | HTTP 502 `{"error":"restore"}`. The unrestored body is not forwarded. |

@@ -5,8 +5,10 @@
 //! the vault file. The upstream may be `http` or `https`. A URL with no
 //! port uses 80 or 443. A query string stays on the chat path, and a
 //! fragment is dropped. A restored body keeps the upstream status and the
-//! upstream content type. An event stream stays `text/event-stream`. The
-//! status reason is kept, so a rate limit stays `429 Too Many Requests`. A reply
+//! upstream content type. An event stream stays `text/event-stream`.
+//! Content values inside streamed `delta` objects are joined first, so a
+//! token split across those values is restored. The status reason is
+//! kept, so a rate limit stays `429 Too Many Requests`. A reply
 //! that quotes `h1_secret` keeps that mark and still restores other tokens.
 //! An unknown `h1_` token is a 502 and is not forwarded. A request with no `Content-Length`
 //! is read until the connection closes, the same as a response, up to 1 MiB.
@@ -14,7 +16,7 @@
 //! response. A body shorter than a declared
 //! `Content-Length` is refused for both directions. A redirect is not followed.
 
-use hushid::{Glossary, JsonError, Vault};
+use hushid::{Glossary, HeldStream, JsonError, Vault, SECRET_MARK};
 use std::fmt;
 use std::fs;
 use std::io::{Read, Write};
@@ -80,6 +82,254 @@ pub fn shield_chat(
 
 pub fn restore_chat(body: &str, vault: &Vault) -> Result<String, JsonError> {
     hushid::restore_json_reply(vault, body)
+}
+
+fn event_stream(content_type: &str) -> bool {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .eq_ignore_ascii_case("text/event-stream")
+}
+
+/// Join `delta.content` strings so a token cut across events is one token.
+///
+/// [`restore_chat`] rejects a partial `h1_` inside one string. A trailing
+/// `h` or `h1` is joined only when the next value finishes a token.
+fn reassemble_streamed_deltas(body: &str, vault: &Vault) -> String {
+    let slots = streamed_delta_contents(body);
+    if slots.len() < 2 {
+        return body.to_string();
+    }
+    let mut pending = String::new();
+    let mut emitted: Vec<String> = Vec::with_capacity(slots.len());
+    for (index, slot) in slots.iter().enumerate() {
+        let chunk = if pending.is_empty() {
+            slot.decoded.clone()
+        } else if join_completes_token(&pending, &slot.decoded, vault) {
+            let combined = format!("{pending}{}", slot.decoded);
+            pending.clear();
+            combined
+        } else {
+            if let Some(prev) = emitted.last_mut() {
+                prev.push_str(&pending);
+            }
+            pending.clear();
+            slot.decoded.clone()
+        };
+        let mut held = HeldStream::new();
+        let mut piece = held.push_restore(&chunk, vault);
+        let hold = held.finish();
+        if index + 1 == slots.len() {
+            piece.push_str(&vault.restore_display(&hold));
+        } else {
+            pending = hold;
+        }
+        emitted.push(piece);
+    }
+    if slots
+        .iter()
+        .zip(emitted.iter())
+        .all(|(slot, piece)| slot.decoded == *piece)
+    {
+        return body.to_string();
+    }
+    let mut out = body.to_string();
+    for (slot, piece) in slots.iter().zip(emitted).rev() {
+        out.replace_range(slot.raw_start..slot.raw_end, &encode_json_string(&piece));
+    }
+    out
+}
+
+/// A held `h` or `h1` is only part of the next value when that join
+/// finishes `h1_secret` or a typed token. Other suffixes stay put.
+fn join_completes_token(hold: &str, next: &str, vault: &Vault) -> bool {
+    if hold.is_empty() || next.is_empty() {
+        return false;
+    }
+    let joined = format!("{hold}{next}");
+    if hold.len() < SECRET_MARK.len()
+        && SECRET_MARK.as_bytes()[..hold.len()].eq_ignore_ascii_case(hold.as_bytes())
+        && joined.len() >= SECRET_MARK.len()
+        && joined.as_bytes()[..SECRET_MARK.len()].eq_ignore_ascii_case(SECRET_MARK.as_bytes())
+    {
+        return true;
+    }
+    let restored = vault.restore_display(&joined);
+    if restored == joined {
+        return false;
+    }
+    let same = joined
+        .bytes()
+        .zip(restored.bytes())
+        .take_while(|(left, right)| left == right)
+        .count();
+    same < hold.len()
+}
+
+struct DeltaContent {
+    raw_start: usize,
+    raw_end: usize,
+    decoded: String,
+}
+
+fn streamed_delta_contents(body: &str) -> Vec<DeltaContent> {
+    let bytes = body.as_bytes();
+    let mut slots = Vec::new();
+    let mut index = 0;
+    let mut in_string = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            let key = br#""delta""#;
+            if bytes[index..].starts_with(key) {
+                let after = skip_ascii_ws(body, index + key.len());
+                if bytes.get(after) == Some(&b':') {
+                    let value_at = skip_ascii_ws(body, after + 1);
+                    if bytes.get(value_at) == Some(&b'{') {
+                        if let Some(slot) = content_in_object(body, value_at) {
+                            index = slot.raw_end;
+                            slots.push(slot);
+                            continue;
+                        }
+                    }
+                }
+            }
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+    slots
+}
+
+fn content_in_object(body: &str, open: usize) -> Option<DeltaContent> {
+    let bytes = body.as_bytes();
+    let mut index = open;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            let key = br#""content""#;
+            if depth == 1 && bytes[index..].starts_with(key) {
+                let after = skip_ascii_ws(body, index + key.len());
+                if bytes.get(after) == Some(&b':') {
+                    let value_at = skip_ascii_ws(body, after + 1);
+                    if bytes.get(value_at) == Some(&b'"') {
+                        let raw_end = quoted_string_end(body, value_at)?;
+                        let decoded = decode_json_string(&body[value_at + 1..raw_end - 1]).ok()?;
+                        return Some(DeltaContent {
+                            raw_start: value_at,
+                            raw_end,
+                            decoded,
+                        });
+                    }
+                }
+            }
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'{' || byte == b'[' {
+            depth += 1;
+        } else if byte == b'}' || byte == b']' {
+            depth -= 1;
+            if depth == 0 {
+                return None;
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn quoted_string_end(text: &str, open: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.get(open) != Some(&b'"') {
+        return None;
+    }
+    let mut index = open + 1;
+    while index < bytes.len() {
+        if !text.is_char_boundary(index) {
+            return None;
+        }
+        match bytes[index] {
+            b'\\' => index = skip_json_escape(bytes, index)?,
+            b'"' => return Some(index + 1),
+            byte if byte < 0x20 => return None,
+            _ => {
+                let ch = text[index..].chars().next()?;
+                index += ch.len_utf8();
+            }
+        }
+    }
+    None
+}
+
+fn skip_json_escape(bytes: &[u8], slash: usize) -> Option<usize> {
+    let next = slash + 1;
+    let kind = *bytes.get(next)?;
+    match kind {
+        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => Some(next + 1),
+        b'u' => {
+            let end = next + 5;
+            if end > bytes.len() || !bytes[next + 1..end].iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            Some(end)
+        }
+        _ => None,
+    }
+}
+
+fn skip_ascii_ws(text: &str, mut index: usize) -> usize {
+    let bytes = text.as_bytes();
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    index
+}
+
+fn encode_json_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
 }
 
 pub fn session_path(dir: &Path, session: &str) -> Option<PathBuf> {
@@ -386,10 +636,17 @@ impl Proxy {
             Err(_) => return http_response(502, br#"{"error":"upstream"}"#),
         };
         let restored = match std::str::from_utf8(&upstream.body) {
-            Ok(text) => match restore_chat(text, &vault) {
-                Ok(restored) => restored,
-                Err(_) => return http_response(502, br#"{"error":"restore"}"#),
-            },
+            Ok(text) => {
+                let text = if event_stream(&upstream.content_type) {
+                    reassemble_streamed_deltas(text, &vault)
+                } else {
+                    text.to_string()
+                };
+                match restore_chat(&text, &vault) {
+                    Ok(restored) => restored,
+                    Err(_) => return http_response(502, br#"{"error":"restore"}"#),
+                }
+            }
             Err(_) => {
                 if upstream
                     .body
@@ -1648,9 +1905,10 @@ mod coverage_edges {
     use super::{
         completions_url, decode_chunked, decode_json_string, exchange, forward, http_response,
         json_object_field, json_raw_field, mcp_message, read_http, read_more, read_until_close,
-        spawn_upstream, tls_dns_name, HttpRequest, Proxy, ProxyError, MAX_BODY,
+        reassemble_streamed_deltas, restore_chat, spawn_upstream, tls_dns_name, HttpRequest, Proxy,
+        ProxyError, MAX_BODY,
     };
-    use hushid::{Glossary, JsonError, VaultError};
+    use hushid::{Glossary, JsonError, Vault, VaultError};
     use std::io::{self, Cursor, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -1945,6 +2203,99 @@ mod coverage_edges {
         assert!(!response.contains("h1_email_"), "{response}");
         assert!(response.contains("data: [DONE]"), "{response}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_token_split_across_stream_deltas_is_restored() {
+        let dir =
+            std::env::temp_dir().join(format!("hushid-proxy-sse-split-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let request = read_http(&mut stream).unwrap();
+            let text = String::from_utf8_lossy(&request.body);
+            let marker = "\"content\":\"";
+            let start = text.find(marker).unwrap() + marker.len();
+            let end = start + text[start..].find('"').unwrap();
+            let content = &text[start..end];
+            let at = content.find("h1_").unwrap();
+            let cut = at + "h1_".len();
+            let left = &content[..cut];
+            let right = &content[cut..];
+            let sse = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{left}\"}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"{right}\"}}}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let raw = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}",
+                sse.len()
+            );
+            let _ = stream.write_all(raw.as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            br#"{"model":"local","messages":[{"role":"user","content":"ada@example.com"}]}"#,
+        ));
+        assert!(
+            response.contains("Content-Type: text/event-stream\r\n"),
+            "{response}"
+        );
+        assert_eq!(response.matches("ada@example.com").count(), 1, "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
+        assert!(response.contains("data: [DONE]"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_split_token_this_vault_did_not_mint_stays_an_error() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"h1_\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"email_AAAAAAAAA\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let vault = Vault::new();
+        let joined = reassemble_streamed_deltas(body, &vault);
+        assert!(restore_chat(&joined, &vault).is_err(), "{joined}");
+        assert!(joined.contains("data: [DONE]"), "{joined}");
+    }
+
+    #[test]
+    fn a_bad_escape_before_a_non_ascii_byte_does_not_panic() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"\\\u{00e9}\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"tail\"}}]}\n\n"
+        );
+        let vault = Vault::new();
+        let joined = reassemble_streamed_deltas(body, &vault);
+        let _ = restore_chat(&joined, &vault);
+        assert!(joined.contains("tail"), "{joined}");
+    }
+
+    #[test]
+    fn a_trailing_h_is_not_glued_onto_the_next_delta() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"reach\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"1_score\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let vault = Vault::new();
+        let joined = reassemble_streamed_deltas(body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert!(restored.contains("reach"), "{restored}");
+        assert!(restored.contains("1_score"), "{restored}");
+        assert!(!restored.contains("h1_"), "{restored}");
     }
 
     #[test]
