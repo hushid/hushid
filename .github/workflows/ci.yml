@@ -1,11 +1,16 @@
 name: CI
 
 # Tests run on the pull request. A squash onto main is the same tree,
-# so this workflow does not run on push.
+# so the push only records that this commit already passed. The README
+# badge follows that main run. A release pull opened by GITHUB_TOKEN
+# never starts, and that empty run is what a pull_request badge paints
+# red.
 on:
   pull_request:
     branches: [main]
   merge_group:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +23,7 @@ concurrency:
 jobs:
   ci:
     name: CI
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -108,6 +114,7 @@ jobs:
 
   fuzz:
     name: Fuzz
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -152,3 +159,19 @@ jobs:
       - name: Fuzz JSON restore
         if: ${{ !startsWith(github.head_ref, 'release-please') }}
         run: cargo fuzz run json_restore --target x86_64-unknown-linux-gnu -- -max_total_time=10
+
+  # Records the main badge. It does not compile or test.
+  # The job name is not CI, so a pull request still has one required CI check.
+  ci-main:
+    name: Recorded
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
+        with:
+          egress-policy: audit
+
+      - name: Already tested on the pull request
+        run: echo "This commit was tested before it merged."

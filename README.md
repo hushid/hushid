@@ -4,9 +4,9 @@
 
 # Hushid
 
-[![CI](https://github.com/hushid/hushid/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/hushid/hushid/actions/workflows/ci.yml)
-[![Security](https://github.com/hushid/hushid/actions/workflows/security.yml/badge.svg?event=pull_request)](https://github.com/hushid/hushid/actions/workflows/security.yml)
-[![Coverage](https://github.com/hushid/hushid/actions/workflows/coverage.yml/badge.svg?event=pull_request)](https://github.com/hushid/hushid/actions/workflows/coverage.yml)
+[![CI](https://github.com/hushid/hushid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hushid/hushid/actions/workflows/ci.yml)
+[![Security](https://github.com/hushid/hushid/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/hushid/hushid/actions/workflows/security.yml)
+[![Coverage](https://github.com/hushid/hushid/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/hushid/hushid/actions/workflows/coverage.yml)
 [![Release](https://img.shields.io/github/v/release/hushid/hushid?logo=github&sort=semver)](https://github.com/hushid/hushid/releases/latest)
 [![crates.io](https://img.shields.io/crates/v/hushid)](https://crates.io/crates/hushid)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
