@@ -8,7 +8,8 @@
 //! upstream content type. An event stream stays `text/event-stream`.
 //! Content values and `function` argument fragments inside streamed
 //! `delta` objects are joined first, so a token split across those
-//! values is restored. The status reason is kept, so a rate limit
+//! values is restored, including a split across more than two events.
+//! The status reason is kept, so a rate limit
 //! stays `429 Too Many Requests`. A reply
 //! that quotes `h1_secret` keeps that mark and still restores other tokens.
 //! An unknown `h1_` token is a 502 and is not forwarded. A request with no `Content-Length`
@@ -98,37 +99,57 @@ fn event_stream(content_type: &str) -> bool {
 /// token cut across events is one token.
 ///
 /// [`restore_chat`] rejects a partial `h1_` inside one string. A trailing
-/// `h` or `h1` is joined only when the next value finishes a token.
+/// `h` or `h1` stays with the next values while those values are still the
+/// start of a token. The held pieces return to their own events when a
+/// later value does not continue that token.
 fn reassemble_streamed_deltas(body: &str, vault: &Vault) -> String {
     let slots = streamed_delta_contents(body);
     if slots.len() < 2 {
         return body.to_string();
     }
     let mut pending = String::new();
+    let mut pending_parts: Vec<String> = Vec::new();
     let mut emitted: Vec<String> = Vec::with_capacity(slots.len());
     for (index, slot) in slots.iter().enumerate() {
+        let next = &slot.decoded;
         let chunk = if pending.is_empty() {
-            slot.decoded.clone()
-        } else if join_completes_token(&pending, &slot.decoded, vault) {
-            let combined = format!("{pending}{}", slot.decoded);
+            next.clone()
+        } else if join_completes_token(&pending, next, vault) {
+            let combined = format!("{pending}{next}");
             pending.clear();
+            pending_parts.clear();
             combined
-        } else {
-            if let Some(prev) = emitted.last_mut() {
-                prev.push_str(&pending);
+        } else if join_extends_prefix(&pending, next) {
+            pending.push_str(next);
+            pending_parts.push(next.clone());
+            emitted.push(String::new());
+            if index + 1 == slots.len() {
+                restore_pending_parts(&mut emitted, &pending_parts);
+                pending.clear();
+                pending_parts.clear();
             }
+            continue;
+        } else {
+            restore_pending_parts(&mut emitted, &pending_parts);
             pending.clear();
-            slot.decoded.clone()
+            pending_parts.clear();
+            next.clone()
         };
         let mut held = HeldStream::new();
         let mut piece = held.push_restore(&chunk, vault);
         let hold = held.finish();
-        if index + 1 == slots.len() {
+        if index + 1 == slots.len() || hold.is_empty() {
             piece.push_str(&vault.restore_display(&hold));
+            pending.clear();
+            pending_parts.clear();
         } else {
-            pending = hold;
+            pending.clone_from(&hold);
+            pending_parts = vec![hold];
         }
         emitted.push(piece);
+    }
+    if !pending_parts.is_empty() {
+        restore_pending_parts(&mut emitted, &pending_parts);
     }
     if slots
         .iter()
@@ -168,6 +189,33 @@ fn join_completes_token(hold: &str, next: &str, vault: &Vault) -> bool {
         .take_while(|(left, right)| left == right)
         .count();
     same < hold.len()
+}
+
+/// A held prefix stays open when the next value is empty or makes a longer
+/// prefix that is still not a finished token. A finished token is
+/// [`join_completes_token`], not this.
+fn join_extends_prefix(hold: &str, next: &str) -> bool {
+    if hold.is_empty() {
+        return false;
+    }
+    if next.is_empty() {
+        return true;
+    }
+    let joined = format!("{hold}{next}");
+    let mut stream = HeldStream::new();
+    let stable = stream.push(&joined);
+    let still = stream.finish();
+    stable.is_empty() && still.len() > hold.len()
+}
+
+fn restore_pending_parts(emitted: &mut [String], parts: &[String]) {
+    if parts.is_empty() {
+        return;
+    }
+    let start = emitted.len() - parts.len();
+    for (offset, part) in parts.iter().enumerate() {
+        emitted[start + offset].push_str(part);
+    }
 }
 
 struct DeltaContent {
@@ -2334,6 +2382,120 @@ mod coverage_edges {
     }
 
     #[test]
+    fn a_token_split_across_three_stream_deltas_is_restored() {
+        let dir =
+            std::env::temp_dir().join(format!("hushid-proxy-sse-split3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let request = read_http(&mut stream).unwrap();
+            let text = String::from_utf8_lossy(&request.body);
+            let marker = "\"content\":\"";
+            let start = text.find(marker).unwrap() + marker.len();
+            let end = start + text[start..].find('"').unwrap();
+            let content = &text[start..end];
+            let at = content.find("h1_").unwrap();
+            let kind = "h1_email_";
+            assert!(content[at..].starts_with(kind), "{content}");
+            let mid = at + kind.len();
+            let left = &content[..at + "h1_".len()];
+            let middle = &content[at + "h1_".len()..mid];
+            let right = &content[mid..];
+            let sse = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{left}\"}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"{middle}\"}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"{right}\"}}}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let raw = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}",
+                sse.len()
+            );
+            let _ = stream.write_all(raw.as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            br#"{"model":"local","messages":[{"role":"user","content":"ada@example.com"}]}"#,
+        ));
+        assert!(
+            response.contains("Content-Type: text/event-stream\r\n"),
+            "{response}"
+        );
+        assert!(!response.contains("{\"error\":\"restore\"}"), "{response}");
+        assert_eq!(response.matches("ada@example.com").count(), 1, "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
+        assert!(response.contains("data: [DONE]"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_token_split_across_three_streamed_tool_arguments_is_restored() {
+        let dir =
+            std::env::temp_dir().join(format!("hushid-proxy-sse-args3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let request = read_http(&mut stream).unwrap();
+            let text = String::from_utf8_lossy(&request.body);
+            let marker = "\"content\":\"";
+            let start = text.find(marker).unwrap() + marker.len();
+            let end = start + text[start..].find('"').unwrap();
+            let content = &text[start..end];
+            let at = content.find("h1_").unwrap();
+            let kind = "h1_email_";
+            assert!(content[at..].starts_with(kind), "{content}");
+            let mid = at + kind.len();
+            let left = &content[..at + "h1_".len()];
+            let middle = &content[at + "h1_".len()..mid];
+            let right = &content[mid..];
+            let sse = format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"function\":{{\"arguments\":\"{left}\"}}}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"function\":{{\"arguments\":\"{middle}\"}}}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"function\":{{\"arguments\":\"{right}\"}}}}]}}}}]}}\n\ndata: [DONE]\n\n"
+            );
+            let raw = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}",
+                sse.len()
+            );
+            let _ = stream.write_all(raw.as_bytes());
+        });
+        let proxy = Proxy::bind(
+            "127.0.0.1:0",
+            &format!("http://127.0.0.1:{port}"),
+            &dir,
+            Glossary::empty(),
+        )
+        .unwrap();
+        let response = proxy.handle(&request(
+            "POST",
+            "/v1/chat/completions",
+            &[("X-Hushid-Session", "demo")],
+            br#"{"model":"local","messages":[{"role":"user","content":"ada@example.com"}]}"#,
+        ));
+        assert!(
+            response.contains("Content-Type: text/event-stream\r\n"),
+            "{response}"
+        );
+        assert!(!response.contains("{\"error\":\"restore\"}"), "{response}");
+        assert_eq!(response.matches("ada@example.com").count(), 1, "{response}");
+        assert!(!response.contains("h1_email_"), "{response}");
+        assert!(response.contains("data: [DONE]"), "{response}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn streamed_argument_pieces_that_are_not_a_token_stay_apart() {
         let body = concat!(
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"reach\"}}]}}]}\n\n",
@@ -2386,6 +2548,74 @@ mod coverage_edges {
         assert!(restored.contains("reach"), "{restored}");
         assert!(restored.contains("1_score"), "{restored}");
         assert!(!restored.contains("h1_"), "{restored}");
+    }
+
+    #[test]
+    fn a_token_split_into_four_stream_deltas_is_restored() {
+        let mut vault = Vault::new();
+        let (token, _) =
+            hushid::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        let kind = "h1_email_";
+        assert!(token.starts_with(kind), "{token}");
+        let parts = [
+            &token[..1],
+            &token[1..3],
+            &token[3..kind.len()],
+            &token[kind.len()..],
+        ];
+        let mut body = String::new();
+        for (index, part) in parts.iter().enumerate() {
+            let text = if index == 0 {
+                format!("Note {part}")
+            } else {
+                (*part).to_string()
+            };
+            body.push_str(&format!(
+                "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{text}\"}}}}]}}\n\n"
+            ));
+        }
+        body.push_str("data: [DONE]\n\n");
+        let joined = reassemble_streamed_deltas(&body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert!(restored.contains("Note "), "{restored}");
+        assert_eq!(restored.matches("ada@example.com").count(), 1, "{restored}");
+        assert!(!restored.contains("h1_email_"), "{restored}");
+        assert!(restored.contains("data: [DONE]"), "{restored}");
+    }
+
+    #[test]
+    fn an_empty_stream_delta_between_token_pieces_is_restored() {
+        let mut vault = Vault::new();
+        let (token, _) =
+            hushid::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        let kind = "h1_email_";
+        assert!(token.starts_with(kind), "{token}");
+        let left = &token[.."h1_".len()];
+        let middle = &token["h1_".len()..kind.len()];
+        let right = &token[kind.len()..];
+        let body = format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{left}\"}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"\"}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"{middle}\"}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"content\":\"{right}\"}}}}]}}\n\ndata: [DONE]\n\n"
+        );
+        let joined = reassemble_streamed_deltas(&body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert_eq!(restored.matches("ada@example.com").count(), 1, "{restored}");
+        assert!(!restored.contains("h1_email_"), "{restored}");
+    }
+
+    #[test]
+    fn three_stream_pieces_that_are_not_a_token_stay_apart() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"h1_\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"email_\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"nope\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let vault = Vault::new();
+        let joined = reassemble_streamed_deltas(body, &vault);
+        assert!(joined.contains("\"content\":\"h1_\""), "{joined}");
+        assert!(joined.contains("\"content\":\"email_\""), "{joined}");
+        assert!(joined.contains("\"content\":\"nope\""), "{joined}");
+        assert!(joined.contains("data: [DONE]"), "{joined}");
     }
 
     #[test]
