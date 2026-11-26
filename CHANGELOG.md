@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.10](https://github.com/hushid/hushid/compare/hushid-v0.1.9...hushid-v0.1.10) (2026-11-26)
+
+
+### Bug Fixes
+
+* point the README status badges at main ([#292](https://github.com/hushid/hushid/issues/292)) ([545200a](https://github.com/hushid/hushid/commit/545200a674713f056386f33a537206a10b1c5863))
+* restore a streamed token when tool calls interleave ([#290](https://github.com/hushid/hushid/issues/290)) ([00d31e2](https://github.com/hushid/hushid/commit/00d31e2761dcece2d14dafbd12d84dac458b1bc3))
+* restore a token split across interleaved choices ([#291](https://github.com/hushid/hushid/issues/291)) ([4cac08e](https://github.com/hushid/hushid/commit/4cac08e0b43bc63b68d72817b7126d88117fa5a8))
+* restore a token split across three stream events ([#288](https://github.com/hushid/hushid/issues/288)) ([07752bd](https://github.com/hushid/hushid/commit/07752bd89bbd74b4eb2db0f26b50e6014b6b60be)), closes [#287](https://github.com/hushid/hushid/issues/287)
+
 ## [0.1.9](https://github.com/hushid/hushid/compare/hushid-v0.1.8...hushid-v0.1.9) (2026-11-25)
 
 
