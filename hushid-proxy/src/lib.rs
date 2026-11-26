@@ -298,6 +298,8 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
     let mut in_string = false;
     let mut found = Vec::new();
     let mut tool_indexes: Vec<(i32, u64)> = Vec::new();
+    // Arguments seen before `"index"` in the same tool call.
+    let mut untagged: Vec<(usize, i32)> = Vec::new();
     while index < bytes.len() {
         let byte = bytes[index];
         if in_string {
@@ -354,6 +356,9 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
                         } else {
                             arguments_lane(&tool_indexes, depth)
                         };
+                        if lane == "arguments" {
+                            untagged.push((found.len(), depth));
+                        }
                         found.push(DeltaContent {
                             raw_start: value_at,
                             raw_end,
@@ -372,7 +377,24 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
         if byte == b'{' || byte == b'[' {
             depth += 1;
         } else if byte == b'}' || byte == b']' {
+            let closing = depth;
             depth -= 1;
+            let index_here = tool_indexes
+                .iter()
+                .rev()
+                .find(|(at, _)| *at == closing)
+                .map(|(_, value)| *value);
+            let mut kept = Vec::new();
+            for (slot, key_depth) in untagged.drain(..) {
+                if key_depth > closing {
+                    if let Some(value) = index_here {
+                        found[slot].lane = format!("arguments:{value}");
+                    }
+                } else {
+                    kept.push((slot, key_depth));
+                }
+            }
+            untagged = kept;
             tool_indexes.retain(|(at, _)| *at <= depth);
             if depth == 0 {
                 break;
@@ -2631,6 +2653,25 @@ mod coverage_edges {
         format!(
             "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":{index},\"function\":{{\"arguments\":{encoded}}}}}]}}}}]}}\n\n"
         )
+    }
+
+    #[test]
+    fn a_tool_index_after_arguments_still_joins_the_token() {
+        let mut vault = Vault::new();
+        let (token, _) =
+            hushid::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        assert!(token.starts_with("h1_email_"), "{token}");
+        let cut = "h1_".len();
+        let left = encode_json_string(&token[..cut]);
+        let right = encode_json_string(&token[cut..]);
+        let body = format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"function\":{{\"arguments\":{left}}},\"index\":0}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"function\":{{\"arguments\":\"{{\\\"to\\\":\\\"bob\\\"}}\"}},\"index\":1}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"function\":{{\"arguments\":{right}}},\"index\":0}}]}}}}]}}\n\ndata: [DONE]\n\n"
+        );
+        let joined = reassemble_streamed_deltas(&body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert_eq!(restored.matches("ada@example.com").count(), 1, "{restored}");
+        assert!(restored.contains("bob"), "{restored}");
+        assert!(!restored.contains("h1_email_"), "{restored}");
     }
 
     #[test]
