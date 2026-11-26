@@ -99,19 +99,52 @@ fn event_stream(content_type: &str) -> bool {
 /// token cut across events is one token.
 ///
 /// [`restore_chat`] rejects a partial `h1_` inside one string. A trailing
-/// `h` or `h1` stays with the next values while those values are still the
-/// start of a token. The held pieces return to their own events when a
-/// later value does not continue that token.
+/// `h` or `h1` stays with the next values in the same stream while those
+/// values are still the start of a token. Content is one stream. Each
+/// `tool_calls` index is another. The held pieces return to their own
+/// events when a later value in that stream does not continue the token.
 fn reassemble_streamed_deltas(body: &str, vault: &Vault) -> String {
     let slots = streamed_delta_contents(body);
     if slots.len() < 2 {
         return body.to_string();
     }
+    let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+    for (index, slot) in slots.iter().enumerate() {
+        if let Some((_, indexes)) = groups.iter_mut().find(|(lane, _)| lane == &slot.lane) {
+            indexes.push(index);
+        } else {
+            groups.push((slot.lane.clone(), vec![index]));
+        }
+    }
+    let mut pieces: Vec<String> = slots.iter().map(|slot| slot.decoded.clone()).collect();
+    for (_, indexes) in &groups {
+        if indexes.len() < 2 {
+            continue;
+        }
+        for (slot_index, piece) in indexes.iter().zip(join_lane(&slots, indexes, vault)) {
+            pieces[*slot_index] = piece;
+        }
+    }
+    if slots
+        .iter()
+        .zip(pieces.iter())
+        .all(|(slot, piece)| slot.decoded == *piece)
+    {
+        return body.to_string();
+    }
+    let mut out = body.to_string();
+    for (slot, piece) in slots.iter().zip(pieces).rev() {
+        out.replace_range(slot.raw_start..slot.raw_end, &encode_json_string(&piece));
+    }
+    out
+}
+
+fn join_lane(slots: &[DeltaContent], indexes: &[usize], vault: &Vault) -> Vec<String> {
     let mut pending = String::new();
     let mut pending_parts: Vec<String> = Vec::new();
-    let mut emitted: Vec<String> = Vec::with_capacity(slots.len());
-    for (index, slot) in slots.iter().enumerate() {
-        let next = &slot.decoded;
+    let mut emitted: Vec<String> = Vec::with_capacity(indexes.len());
+    for (position, slot_index) in indexes.iter().enumerate() {
+        let next = &slots[*slot_index].decoded;
         let chunk = if pending.is_empty() {
             next.clone()
         } else if join_completes_token(&pending, next, vault) {
@@ -123,7 +156,7 @@ fn reassemble_streamed_deltas(body: &str, vault: &Vault) -> String {
             pending.push_str(next);
             pending_parts.push(next.clone());
             emitted.push(String::new());
-            if index + 1 == slots.len() {
+            if position + 1 == indexes.len() {
                 restore_pending_parts(&mut emitted, &pending_parts);
                 pending.clear();
                 pending_parts.clear();
@@ -138,7 +171,7 @@ fn reassemble_streamed_deltas(body: &str, vault: &Vault) -> String {
         let mut held = HeldStream::new();
         let mut piece = held.push_restore(&chunk, vault);
         let hold = held.finish();
-        if index + 1 == slots.len() || hold.is_empty() {
+        if position + 1 == indexes.len() || hold.is_empty() {
             piece.push_str(&vault.restore_display(&hold));
             pending.clear();
             pending_parts.clear();
@@ -151,18 +184,7 @@ fn reassemble_streamed_deltas(body: &str, vault: &Vault) -> String {
     if !pending_parts.is_empty() {
         restore_pending_parts(&mut emitted, &pending_parts);
     }
-    if slots
-        .iter()
-        .zip(emitted.iter())
-        .all(|(slot, piece)| slot.decoded == *piece)
-    {
-        return body.to_string();
-    }
-    let mut out = body.to_string();
-    for (slot, piece) in slots.iter().zip(emitted).rev() {
-        out.replace_range(slot.raw_start..slot.raw_end, &encode_json_string(&piece));
-    }
-    out
+    emitted
 }
 
 /// A held `h` or `h1` is only part of the next value when that join
@@ -222,6 +244,8 @@ struct DeltaContent {
     raw_start: usize,
     raw_end: usize,
     decoded: String,
+    /// `content`, or `arguments:<tool index>` when the tool call names one.
+    lane: String,
 }
 
 fn streamed_delta_contents(body: &str) -> Vec<DeltaContent> {
@@ -273,6 +297,9 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
     let mut depth = 0i32;
     let mut in_string = false;
     let mut found = Vec::new();
+    let mut tool_indexes: Vec<(i32, u64)> = Vec::new();
+    // Arguments seen before `"index"` in the same tool call.
+    let mut untagged: Vec<(usize, i32)> = Vec::new();
     while index < bytes.len() {
         let byte = bytes[index];
         if in_string {
@@ -290,6 +317,19 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
             continue;
         }
         if byte == b'"' {
+            let index_key: &[u8] = br#""index""#;
+            if depth > 1 && bytes[index..].starts_with(index_key) {
+                let after = skip_ascii_ws(body, index + index_key.len());
+                if bytes.get(after) == Some(&b':') {
+                    let value_at = skip_ascii_ws(body, after + 1);
+                    if let Some((value, end)) = json_uint(body, value_at) {
+                        tool_indexes.retain(|(at, _)| *at < depth);
+                        tool_indexes.push((depth, value));
+                        index = end;
+                        continue;
+                    }
+                }
+            }
             let content: &[u8] = br#""content""#;
             let arguments: &[u8] = br#""arguments""#;
             let key = if depth == 1 && bytes[index..].starts_with(content) {
@@ -311,10 +351,19 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
                         else {
                             return found;
                         };
+                        let lane = if key == content {
+                            "content".to_string()
+                        } else {
+                            arguments_lane(&tool_indexes, depth)
+                        };
+                        if lane == "arguments" {
+                            untagged.push((found.len(), depth));
+                        }
                         found.push(DeltaContent {
                             raw_start: value_at,
                             raw_end,
                             decoded,
+                            lane,
                         });
                         index = raw_end;
                         continue;
@@ -328,7 +377,25 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
         if byte == b'{' || byte == b'[' {
             depth += 1;
         } else if byte == b'}' || byte == b']' {
+            let closing = depth;
             depth -= 1;
+            let index_here = tool_indexes
+                .iter()
+                .rev()
+                .find(|(at, _)| *at == closing)
+                .map(|(_, value)| *value);
+            let mut kept = Vec::new();
+            for (slot, key_depth) in untagged.drain(..) {
+                if key_depth > closing {
+                    if let Some(value) = index_here {
+                        found[slot].lane = format!("arguments:{value}");
+                    }
+                } else {
+                    kept.push((slot, key_depth));
+                }
+            }
+            untagged = kept;
+            tool_indexes.retain(|(at, _)| *at <= depth);
             if depth == 0 {
                 break;
             }
@@ -336,6 +403,32 @@ fn strings_in_delta(body: &str, open: usize) -> Vec<DeltaContent> {
         index += 1;
     }
     found
+}
+
+fn arguments_lane(tool_indexes: &[(i32, u64)], depth: i32) -> String {
+    match tool_indexes.iter().rev().find(|(at, _)| *at < depth) {
+        Some((_, index)) => format!("arguments:{index}"),
+        None => "arguments".to_string(),
+    }
+}
+
+fn json_uint(text: &str, start: usize) -> Option<(u64, usize)> {
+    let bytes = text.as_bytes();
+    if !bytes.get(start).is_some_and(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut end = start;
+    let mut value: u64 = 0;
+    while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+        if end - start > 6 {
+            return None;
+        }
+        value = value
+            .saturating_mul(10)
+            .saturating_add(u64::from(bytes[end] - b'0'));
+        end += 1;
+    }
+    Some((value, end))
 }
 
 fn quoted_string_end(text: &str, open: usize) -> Option<usize> {
@@ -1973,10 +2066,10 @@ mod tls_tests {
 #[cfg(test)]
 mod coverage_edges {
     use super::{
-        completions_url, decode_chunked, decode_json_string, exchange, forward, http_response,
-        json_object_field, json_raw_field, mcp_message, read_http, read_more, read_until_close,
-        reassemble_streamed_deltas, restore_chat, spawn_upstream, tls_dns_name, HttpRequest, Proxy,
-        ProxyError, MAX_BODY,
+        completions_url, decode_chunked, decode_json_string, encode_json_string, exchange, forward,
+        http_response, json_object_field, json_raw_field, mcp_message, read_http, read_more,
+        read_until_close, reassemble_streamed_deltas, restore_chat, spawn_upstream, tls_dns_name,
+        HttpRequest, Proxy, ProxyError, MAX_BODY,
     };
     use hushid::{Glossary, JsonError, Vault, VaultError};
     use std::io::{self, Cursor, Read, Write};
@@ -2548,6 +2641,73 @@ mod coverage_edges {
         assert!(restored.contains("reach"), "{restored}");
         assert!(restored.contains("1_score"), "{restored}");
         assert!(!restored.contains("h1_"), "{restored}");
+    }
+
+    fn sse_content(text: &str) -> String {
+        let encoded = encode_json_string(text);
+        format!("data: {{\"choices\":[{{\"delta\":{{\"content\":{encoded}}}}}]}}\n\n")
+    }
+
+    fn sse_arguments(index: u64, text: &str) -> String {
+        let encoded = encode_json_string(text);
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":{index},\"function\":{{\"arguments\":{encoded}}}}}]}}}}]}}\n\n"
+        )
+    }
+
+    #[test]
+    fn a_tool_index_after_arguments_still_joins_the_token() {
+        let mut vault = Vault::new();
+        let (token, _) =
+            hushid::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        assert!(token.starts_with("h1_email_"), "{token}");
+        let cut = "h1_".len();
+        let left = encode_json_string(&token[..cut]);
+        let right = encode_json_string(&token[cut..]);
+        let body = format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"function\":{{\"arguments\":{left}}},\"index\":0}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"function\":{{\"arguments\":\"{{\\\"to\\\":\\\"bob\\\"}}\"}},\"index\":1}}]}}}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"function\":{{\"arguments\":{right}}},\"index\":0}}]}}}}]}}\n\ndata: [DONE]\n\n"
+        );
+        let joined = reassemble_streamed_deltas(&body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert_eq!(restored.matches("ada@example.com").count(), 1, "{restored}");
+        assert!(restored.contains("bob"), "{restored}");
+        assert!(!restored.contains("h1_email_"), "{restored}");
+    }
+
+    #[test]
+    fn a_token_split_across_interleaved_tool_calls_is_restored() {
+        let mut vault = Vault::new();
+        let (token, _) =
+            hushid::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        assert!(token.starts_with("h1_email_"), "{token}");
+        let cut = "h1_".len();
+        let mut body = sse_arguments(0, &token[..cut]);
+        body.push_str(&sse_arguments(1, r#"{"to":"bob"}"#));
+        body.push_str(&sse_arguments(0, &token[cut..]));
+        body.push_str("data: [DONE]\n\n");
+        let joined = reassemble_streamed_deltas(&body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert_eq!(restored.matches("ada@example.com").count(), 1, "{restored}");
+        assert!(restored.contains("bob"), "{restored}");
+        assert!(!restored.contains("h1_email_"), "{restored}");
+    }
+
+    #[test]
+    fn a_content_token_stays_whole_when_arguments_sit_between_the_pieces() {
+        let mut vault = Vault::new();
+        let (token, _) =
+            hushid::shield_text(&mut vault, &Glossary::empty(), "ada@example.com").unwrap();
+        assert!(token.starts_with("h1_email_"), "{token}");
+        let cut = "h1_".len();
+        let mut body = sse_content(&token[..cut]);
+        body.push_str(&sse_arguments(0, "plain"));
+        body.push_str(&sse_content(&token[cut..]));
+        body.push_str("data: [DONE]\n\n");
+        let joined = reassemble_streamed_deltas(&body, &vault);
+        let restored = restore_chat(&joined, &vault).expect(&joined);
+        assert_eq!(restored.matches("ada@example.com").count(), 1, "{restored}");
+        assert!(restored.contains("plain"), "{restored}");
+        assert!(!restored.contains("h1_email_"), "{restored}");
     }
 
     #[test]
